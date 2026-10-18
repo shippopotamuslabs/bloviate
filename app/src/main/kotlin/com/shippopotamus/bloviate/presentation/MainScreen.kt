@@ -48,6 +48,7 @@ fun MainRoute(
         onStartBubble = onStartBubble,
         onStopBubble = onStopBubble,
         onRequestMicPermission = onRequestMicPermission,
+        onRetryModelDownload = viewModel::onRetryModelDownload,
         modifier = modifier,
     )
 }
@@ -68,6 +69,7 @@ fun MainScreen(
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
     onRequestMicPermission: () -> Unit,
+    onRetryModelDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -100,9 +102,55 @@ fun MainScreen(
                 uiState = uiState,
                 onRequestMicPermission = onRequestMicPermission,
             )
+            ModelStatusCard(
+                uiState = uiState,
+                onRetryModelDownload = onRetryModelDownload,
+            )
         }
     }
 }
+
+@Composable
+private fun ModelStatusCard(
+    uiState: MainUiState,
+    onRetryModelDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.model_card_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(text = modelStatusLabel(uiState.modelStatus))
+            Button(
+                onClick = onRetryModelDownload,
+                enabled = uiState.modelStatus is ModelUiStatus.Absent ||
+                    uiState.modelStatus is ModelUiStatus.Failed,
+            ) {
+                Text(text = stringResource(R.string.model_retry))
+            }
+            Text(
+                text = stringResource(R.string.model_hint),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun modelStatusLabel(status: ModelUiStatus): String =
+    when (status) {
+        ModelUiStatus.Absent -> stringResource(R.string.model_status_absent)
+        is ModelUiStatus.Downloading ->
+            stringResource(R.string.model_status_downloading_format, status.percent)
+        ModelUiStatus.Ready -> stringResource(R.string.model_status_ready)
+        is ModelUiStatus.Failed ->
+            stringResource(R.string.model_status_failed_format, status.reason)
+    }
 
 @Composable
 private fun MicPermissionCard(
@@ -269,6 +317,7 @@ private fun MainScreenEmptyPreview() {
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
+            onRetryModelDownload = {},
         )
     }
 }
@@ -291,12 +340,14 @@ private fun MainScreenPopulatedPreview() {
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
                 micPermissionGranted = true,
+                modelStatus = ModelUiStatus.Ready,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
+            onRetryModelDownload = {},
         )
     }
 }

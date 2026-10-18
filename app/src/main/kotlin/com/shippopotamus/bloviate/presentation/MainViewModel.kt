@@ -3,11 +3,14 @@ package com.shippopotamus.bloviate.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
+import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,12 +19,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
  * Status-screen ViewModel. Depends on use cases only; maps the domain
- * [FieldFocusState] into the presentation-only [MainUiState] so no domain
- * types reach composables.
+ * [FieldFocusState] and [ModelState] into the presentation-only [MainUiState]
+ * so no domain types reach composables.
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -31,12 +35,14 @@ class MainViewModel @Inject constructor(
     observeBubbleServiceRunning: ObserveBubbleServiceRunningUseCase,
     private val isMicPermissionGranted: IsMicPermissionGrantedUseCase,
     private val refreshMicPermission: RefreshMicPermissionUseCase,
+    observeModelState: ObserveModelStateUseCase,
+    private val ensureModel: EnsureModelUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())
 
-    val uiState: StateFlow<MainUiState> = combine(
+    private val baseUiState: StateFlow<MainUiState> = combine(
         observeFieldFocus(),
         watcherEnabled,
         overlayPermissionGranted,
@@ -61,6 +67,24 @@ class MainViewModel @Inject constructor(
             micPermissionGranted = isMicPermissionGranted(),
         ),
     )
+
+    val uiState: StateFlow<MainUiState> = combine(
+        baseUiState,
+        observeModelState(),
+    ) { baseState, modelState ->
+        baseState.copy(modelStatus = mapModelStatus(modelState))
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
+        initialValue = baseUiState.value.copy(modelStatus = mapModelStatus(observeModelState().value)),
+    )
+
+    /** Model card retry: re-runs the store's ensure (download + verify) in the background. */
+    fun onRetryModelDownload() {
+        viewModelScope.launch {
+            ensureModel()
+        }
+    }
 
     /** Re-reads the system settings; called when the screen resumes after a settings detour. */
     fun onResumed() {
@@ -101,7 +125,19 @@ class MainViewModel @Inject constructor(
         )
     }
 
+    private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
+        when (modelState) {
+            ModelState.Absent -> ModelUiStatus.Absent
+            is ModelState.Downloading ->
+                ModelUiStatus.Downloading(
+                    percent = (modelState.progressFraction * PERCENT_MAX).toInt().coerceIn(0, PERCENT_MAX),
+                )
+            ModelState.Ready -> ModelUiStatus.Ready
+            is ModelState.Failed -> ModelUiStatus.Failed(reason = modelState.reason)
+        }
+
     private companion object {
         const val STATE_SHARING_TIMEOUT_MS = 5_000L
+        const val PERCENT_MAX = 100
     }
 }
