@@ -3,7 +3,11 @@ package com.shippopotamus.bloviate.presentation
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
+import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
+import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
@@ -23,6 +27,8 @@ class MainViewModelTest {
 
     private val fakeFieldFocusPort = FakeFieldFocusPort()
     private val fakeWatcherAccessPort = FakeWatcherAccessPort()
+    private val fakeBubbleOverlayAccessPort = FakeBubbleOverlayAccessPort()
+    private val fakeBubbleServiceStatePort = FakeBubbleServiceStatePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -30,6 +36,8 @@ class MainViewModelTest {
         viewModel = MainViewModel(
             observeFieldFocus = ObserveFieldFocusUseCase(fakeFieldFocusPort),
             isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
+            isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
+            observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
         )
     }
 
@@ -85,6 +93,33 @@ class MainViewModelTest {
                 viewModel.onResumed()
 
                 assertTrue(awaitItem().watcherEnabled)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `overlay permission state is reflected and re-read on resume`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().overlayPermissionGranted)
+
+                fakeBubbleOverlayAccessPort.canDraw = true
+                viewModel.onResumed()
+
+                assertTrue(awaitItem().overlayPermissionGranted)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `bubble service running state flows into ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().bubbleServiceRunning)
+
+                fakeBubbleServiceStatePort.publishServiceRunning(true)
+
+                assertTrue(awaitItem().bubbleServiceRunning)
                 cancelAndIgnoreRemainingEvents()
             }
         }

@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -8,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
+import androidx.core.content.ContextCompat
+import com.shippopotamus.bloviate.service.BubbleOverlayService
 import com.shippopotamus.whisper.WhisperEngine
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -32,6 +35,9 @@ class MainActivity : ComponentActivity() {
                 MainRoute(
                     viewModel = viewModel,
                     onOpenAccessibilitySettings = ::openAccessibilitySettings,
+                    onOpenOverlaySettings = ::openOverlaySettings,
+                    onStartBubble = ::startBubbleService,
+                    onStopBubble = ::stopBubbleService,
                 )
             }
         }
@@ -44,5 +50,25 @@ class MainActivity : ComponentActivity() {
 
     private fun openAccessibilitySettings() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
+
+    private fun openOverlaySettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName"),
+            ),
+        )
+    }
+
+    private fun startBubbleService() {
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, BubbleOverlayService::class.java),
+        )
+    }
+
+    private fun stopBubbleService() {
+        stopService(Intent(this, BubbleOverlayService::class.java))
     }
 }
