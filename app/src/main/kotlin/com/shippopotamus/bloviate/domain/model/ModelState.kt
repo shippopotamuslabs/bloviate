@@ -17,6 +17,11 @@ sealed interface ModelState {
     /** The model file is present (and verified before any load). */
     data object Ready : ModelState
 
-    /** The last ensure/download attempt failed; details are in the data-layer log. */
-    data object Failed : ModelState
+    /**
+     * The last ensure/download attempt failed. [reason] is a short
+     * human-readable cause (exception kind + message, an HTTP status, or the
+     * integrity/free-space outcome) — the model card shows it verbatim so a
+     * failure on device is diagnosable without logcat.
+     */
+    data class Failed(val reason: String) : ModelState
 }

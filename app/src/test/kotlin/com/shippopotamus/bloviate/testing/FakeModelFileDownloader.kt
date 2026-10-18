@@ -6,13 +6,18 @@ import java.io.IOException
 
 /**
  * Hand-written fake of [ModelFileDownloader]; writes [bytesToWrite] to the
- * target (or throws [failure]) and records every call.
+ * target (or throws [failure]) and records every call. The first
+ * [scriptedFailureCount] calls throw instead of writing, to script
+ * transport-failure-then-success sequences for retry tests; a non-null
+ * [failure] always wins and is thrown on every call.
  */
 class FakeModelFileDownloader : ModelFileDownloader {
 
     var bytesToWrite: ByteArray = ByteArray(0)
 
     var failure: IOException? = null
+
+    var scriptedFailureCount: Int = 0
 
     var callCount: Int = 0
         private set
@@ -24,6 +29,9 @@ class FakeModelFileDownloader : ModelFileDownloader {
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
     ) {
         callCount++
+        if (callCount <= scriptedFailureCount) {
+            throw failure ?: IOException("scripted transport failure")
+        }
         failure?.let { throw it }
         target.parentFile?.mkdirs()
         target.writeBytes(bytesToWrite)
