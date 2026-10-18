@@ -7,7 +7,25 @@ enum class FocusClassification {
     PASSWORD,
 }
 
-/** Presentation-only mapping of the transcription model's lifecycle state. */
+/** Presentation-only mapping of the user's selected dictation engine. */
+enum class DictationEngineUi {
+    WHISPER,
+    PARAKEET,
+}
+
+/**
+ * The fallback in effect on the status screen: the user [selected] one
+ * engine, but its model is not Ready yet, so dictation is currently
+ * running on the [effective] engine (ENC-54 default flip). Null in the UI
+ * state whenever the selected engine is the one in use — or when neither
+ * model is Ready and there is no fallback to report.
+ */
+data class EngineFallbackUi(
+    val selected: DictationEngineUi,
+    val effective: DictationEngineUi,
+)
+
+/** Presentation-only mapping of a transcription model's lifecycle state. */
 sealed interface ModelUiStatus {
 
     /** No model file on the device yet. */
@@ -26,8 +44,8 @@ sealed interface ModelUiStatus {
 /**
  * Home/status screen state: watcher enablement, the live field-focus
  * classification, bubble overlay permission + service state, microphone
- * permission, and the model lifecycle. Carries no domain types and never any
- * field content.
+ * permission, and both engines' model lifecycles + the engine selection.
+ * Carries no domain types and never any field content.
  */
 data class MainUiState(
     val watcherEnabled: Boolean = false,
@@ -36,5 +54,8 @@ data class MainUiState(
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
     val micPermissionGranted: Boolean = false,
-    val modelStatus: ModelUiStatus = ModelUiStatus.Absent,
+    val whisperModelStatus: ModelUiStatus = ModelUiStatus.Absent,
+    val parakeetModelStatus: ModelUiStatus = ModelUiStatus.Absent,
+    val selectedEngine: DictationEngineUi = DictationEngineUi.PARAKEET,
+    val engineFallback: EngineFallbackUi? = null,
 )

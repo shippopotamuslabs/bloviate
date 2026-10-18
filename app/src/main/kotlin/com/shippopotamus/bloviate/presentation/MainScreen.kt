@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -51,7 +53,9 @@ fun MainRoute(
         onStartBubble = onStartBubble,
         onStopBubble = onStopBubble,
         onRequestMicPermission = onRequestMicPermission,
-        onRetryModelDownload = viewModel::onRetryModelDownload,
+        onWhisperDownloadClick = viewModel::onWhisperDownloadClick,
+        onParakeetDownloadClick = viewModel::onParakeetDownloadClick,
+        onSelectEngine = viewModel::onSelectEngine,
         modifier = modifier,
     )
 }
@@ -75,7 +79,9 @@ fun MainScreen(
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
     onRequestMicPermission: () -> Unit,
-    onRetryModelDownload: () -> Unit,
+    onWhisperDownloadClick: () -> Unit,
+    onParakeetDownloadClick: () -> Unit,
+    onSelectEngine: (DictationEngineUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -109,9 +115,11 @@ fun MainScreen(
                 uiState = uiState,
                 onRequestMicPermission = onRequestMicPermission,
             )
-            ModelStatusCard(
+            EnginesCard(
                 uiState = uiState,
-                onRetryModelDownload = onRetryModelDownload,
+                onWhisperDownloadClick = onWhisperDownloadClick,
+                onParakeetDownloadClick = onParakeetDownloadClick,
+                onSelectEngine = onSelectEngine,
             )
             // Exact build identity, readable in-app (ENC-69): one-off test
             // builds all report version 1.0, so the commit SHA is the only
@@ -125,36 +133,136 @@ fun MainScreen(
     }
 }
 
+/**
+ * Per-engine model rows + the engine toggle (ENC-54): each engine shows its
+ * own download state and download/retry button; the "Dictation engine"
+ * choice reflects the persisted preference and is enabled only for engines
+ * whose model is Ready. While the selected engine's model is not Ready
+ * but the other engine's is, dictation falls back to the ready engine —
+ * the note under the toggle says so rather than letting the toggle imply
+ * the selected engine is the one transcribing.
+ */
 @Composable
-private fun ModelStatusCard(
+private fun EnginesCard(
     uiState: MainUiState,
-    onRetryModelDownload: () -> Unit,
+    onWhisperDownloadClick: () -> Unit,
+    onParakeetDownloadClick: () -> Unit,
+    onSelectEngine: (DictationEngineUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = stringResource(R.string.model_card_title),
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(text = modelStatusLabel(uiState.modelStatus))
-            Button(
-                onClick = onRetryModelDownload,
-                enabled = uiState.modelStatus is ModelUiStatus.Absent ||
-                    uiState.modelStatus is ModelUiStatus.Failed,
-            ) {
-                Text(text = stringResource(R.string.model_retry))
+            EngineRow(
+                name = stringResource(R.string.engine_whisper_name),
+                detail = stringResource(R.string.engine_whisper_detail),
+                status = uiState.whisperModelStatus,
+                onDownloadClick = onWhisperDownloadClick,
+            )
+            EngineRow(
+                name = stringResource(R.string.engine_parakeet_name),
+                detail = stringResource(R.string.engine_parakeet_detail),
+                status = uiState.parakeetModelStatus,
+                onDownloadClick = onParakeetDownloadClick,
+            )
+            Text(
+                text = stringResource(R.string.engine_selector_title),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                EngineChoiceButton(
+                    label = stringResource(R.string.engine_whisper_short),
+                    selected = uiState.selectedEngine == DictationEngineUi.WHISPER,
+                    enabled = uiState.whisperModelStatus is ModelUiStatus.Ready,
+                    onClick = { onSelectEngine(DictationEngineUi.WHISPER) },
+                )
+                EngineChoiceButton(
+                    label = stringResource(R.string.engine_parakeet_short),
+                    selected = uiState.selectedEngine == DictationEngineUi.PARAKEET,
+                    enabled = uiState.parakeetModelStatus is ModelUiStatus.Ready,
+                    onClick = { onSelectEngine(DictationEngineUi.PARAKEET) },
+                )
+            }
+            uiState.engineFallback?.let { fallback ->
+                Text(
+                    text = stringResource(
+                        R.string.engine_fallback_note,
+                        engineShortName(fallback.selected),
+                        engineShortName(fallback.effective),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Text(
                 text = stringResource(R.string.model_hint),
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text(
+                text = stringResource(R.string.engine_attribution),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
+
+@Composable
+private fun EngineRow(
+    name: String,
+    detail: String,
+    status: ModelUiStatus,
+    onDownloadClick: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = name, style = MaterialTheme.typography.titleSmall)
+        Text(text = modelStatusLabel(status))
+        Button(
+            onClick = onDownloadClick,
+            enabled = status is ModelUiStatus.Absent || status is ModelUiStatus.Failed,
+        ) {
+            Text(text = stringResource(R.string.model_download))
+        }
+        Text(
+            text = detail,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun EngineChoiceButton(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    // The selected engine stays clickable (it is a no-op re-selection); an
+    // unselected engine is clickable only when its model is Ready.
+    val clickable = enabled || selected
+    if (selected) {
+        Button(onClick = onClick, enabled = clickable) {
+            Text(text = label)
+        }
+    } else {
+        OutlinedButton(onClick = onClick, enabled = clickable) {
+            Text(text = label)
+        }
+    }
+}
+
+@Composable
+private fun engineShortName(engine: DictationEngineUi): String =
+    stringResource(
+        when (engine) {
+            DictationEngineUi.WHISPER -> R.string.engine_whisper_short
+            DictationEngineUi.PARAKEET -> R.string.engine_parakeet_short
+        },
+    )
 
 @Composable
 private fun modelStatusLabel(status: ModelUiStatus): String =
@@ -332,7 +440,9 @@ private fun MainScreenEmptyPreview() {
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
-            onRetryModelDownload = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
         )
     }
 }
@@ -355,14 +465,18 @@ private fun MainScreenPopulatedPreview() {
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
                 micPermissionGranted = true,
-                modelStatus = ModelUiStatus.Ready,
+                whisperModelStatus = ModelUiStatus.Ready,
+                parakeetModelStatus = ModelUiStatus.Ready,
+                selectedEngine = DictationEngineUi.PARAKEET,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
-            onRetryModelDownload = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
         )
     }
 }

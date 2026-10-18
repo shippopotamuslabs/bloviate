@@ -3,6 +3,9 @@ package com.shippopotamus.bloviate.service
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
+import com.shippopotamus.bloviate.testing.FakeModelStorePort
+import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
 import com.shippopotamus.bloviate.testing.FakeRecordingSessionPort
 import com.shippopotamus.bloviate.testing.FakeTextPostProcessor
 import com.shippopotamus.bloviate.testing.FakeTranscriptSinkPort
@@ -28,6 +31,9 @@ class BubbleRecordingControllerTest {
     private val fakeEngine = FakeTranscriptionEngine()
     private val fakePostProcessor = FakeTextPostProcessor()
     private val fakeSink = FakeTranscriptSinkPort()
+    private val fakeEnginePreference = FakeEnginePreferencePort()
+    private val fakeWhisperStore = FakeModelStorePort()
+    private val fakeParakeetStore = FakeParakeetModelStorePort()
 
     private fun createController(scope: CoroutineScope): BubbleRecordingController =
         BubbleRecordingController(
@@ -35,6 +41,9 @@ class BubbleRecordingControllerTest {
             transcriptionEngine = fakeEngine,
             textPostProcessor = fakePostProcessor,
             transcriptSink = fakeSink,
+            enginePreference = fakeEnginePreference,
+            whisperStore = fakeWhisperStore,
+            parakeetStore = fakeParakeetStore,
             scope = scope,
             workDispatcher = UnconfinedTestDispatcher(),
             doneDisplayMs = DONE_DISPLAY_MS,

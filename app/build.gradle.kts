@@ -98,6 +98,11 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
+    // sherpa-onnx (Parakeet engine, ENC-54): not published to Maven Central
+    // under an official coordinate, so the official release AAR is vendored.
+    // Version, source URL, SHA-256, and licenses: app/libs/README.md.
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
+
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.kotlinx.coroutines.test)

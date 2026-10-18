@@ -4,9 +4,13 @@ import android.os.SystemClock
 import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
+import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
@@ -66,6 +70,9 @@ class BubbleRecordingController(
     private val transcriptionEngine: TranscriptionEngine,
     private val textPostProcessor: TextPostProcessor,
     private val transcriptSink: TranscriptSinkPort,
+    private val enginePreference: EnginePreferencePort,
+    private val whisperStore: ModelStorePort,
+    private val parakeetStore: ParakeetModelStorePort,
     private val scope: CoroutineScope,
     private val workDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val doneDisplayMs: Long = DONE_DISPLAY_MS,
@@ -327,7 +334,14 @@ class BubbleRecordingController(
      * retry tap — unless this run already is the retry — and shows Error.
      *
      * Stop→insert latency (the Phase 2 exit metric) is logged from
-     * [stoppedAtMs], captured the moment `session.stop()` returned.
+     * [stoppedAtMs], captured the moment `session.stop()` returned. A/B
+     * telemetry (ENC-54): every transcription also logs the engine that ran
+     * — the **effective** engine, resolved at send time through
+     * `EffectiveEngineResolver` (the preference, or the fallback while the
+     * preferred model is not Ready), which is the engine the bound
+     * `TranscriptionEngine` delegates to — the audio length, the engine
+     * time, and a short output preview, so Whisper vs Parakeet can be
+     * compared from logcat alone.
      */
     private suspend fun transcribeAndFinish(
         samples: FloatArray,
@@ -335,10 +349,27 @@ class BubbleRecordingController(
         isRetry: Boolean = false,
     ) {
         try {
-            val cleaned = withContext(workDispatcher) {
-                textPostProcessor.process(transcriptionEngine.transcribe(samples))
+            val engineName = (
+                EffectiveEngineResolver.resolve(
+                    preference = enginePreference.selectedEngine.value,
+                    whisperState = whisperStore.state.value,
+                    parakeetState = parakeetStore.state.value,
+                ) ?: enginePreference.selectedEngine.value
+                ).name
+            val rawTranscript = withContext(workDispatcher) {
+                val transcribeStartMs = nowMs()
+                val raw = transcriptionEngine.transcribe(samples)
+                Log.d(
+                    TAG,
+                    "transcription engine=$engineName" +
+                        " audioMs=${samples.size * MS_PER_SECOND / SAMPLE_RATE_HZ}" +
+                        " transcribeMs=${nowMs() - transcribeStartMs}" +
+                        " text=${raw.take(TRANSCRIPT_PREVIEW_CHARS)}",
+                )
+                raw
             }
             val transcribedAtMs = nowMs()
+            val cleaned = textPostProcessor.process(rawTranscript)
             if (cleaned.isBlank()) {
                 Log.d(TAG, "Transcript was empty after cleanup; nothing to insert")
                 retainedSamples = null
@@ -349,7 +380,7 @@ class BubbleRecordingController(
             val insertedAtMs = nowMs()
             Log.d(
                 TAG,
-                "stop->insert latencyMs=${insertedAtMs - stoppedAtMs} " +
+                "stop->insert latencyMs=${insertedAtMs - stoppedAtMs} engine=$engineName " +
                     "(transcribeMs=${transcribedAtMs - stoppedAtMs}, insertMs=${insertedAtMs - transcribedAtMs})",
             )
             when (result) {
@@ -421,6 +452,13 @@ class BubbleRecordingController(
 
     private companion object {
         const val TAG: String = "BubbleOverlay"
+
+        /** Capture rate of the session layer; converts sample counts to audio milliseconds. */
+        const val SAMPLE_RATE_HZ: Long = 16_000L
+        const val MS_PER_SECOND: Long = 1_000L
+
+        /** A/B telemetry: how much of each raw transcript the debug log previews. */
+        const val TRANSCRIPT_PREVIEW_CHARS: Int = 40
         const val DONE_DISPLAY_MS: Long = 1_200L
         const val ERROR_DISPLAY_MS: Long = 1_500L
     }

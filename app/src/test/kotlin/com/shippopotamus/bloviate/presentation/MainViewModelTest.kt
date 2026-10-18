@@ -3,19 +3,26 @@ package com.shippopotamus.bloviate.presentation
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
+import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
+import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
+import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -39,6 +46,8 @@ class MainViewModelTest {
     private val fakeBubbleServiceStatePort = FakeBubbleServiceStatePort()
     private val fakeMicPermissionPort = FakeMicPermissionPort()
     private val fakeModelStorePort = FakeModelStorePort()
+    private val fakeParakeetModelStorePort = FakeParakeetModelStorePort()
+    private val fakeEnginePreferencePort = FakeEnginePreferencePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -52,6 +61,10 @@ class MainViewModelTest {
             refreshMicPermission = RefreshMicPermissionUseCase(fakeMicPermissionPort),
             observeModelState = ObserveModelStateUseCase(fakeModelStorePort),
             ensureModel = EnsureModelUseCase(fakeModelStorePort),
+            observeParakeetModelState = ObserveParakeetModelStateUseCase(fakeParakeetModelStorePort),
+            ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
+            observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
+            selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
         )
     }
 
@@ -171,7 +184,7 @@ class MainViewModelTest {
     fun `model starts absent in ui state`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
-                assertEquals(ModelUiStatus.Absent, awaitItem().modelStatus)
+                assertEquals(ModelUiStatus.Absent, awaitItem().whisperModelStatus)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -184,7 +197,7 @@ class MainViewModelTest {
 
                 fakeModelStorePort.setState(ModelState.Downloading(progressFraction = 0.42f))
 
-                assertEquals(ModelUiStatus.Downloading(percent = 42), awaitItem().modelStatus)
+                assertEquals(ModelUiStatus.Downloading(percent = 42), awaitItem().whisperModelStatus)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -197,7 +210,7 @@ class MainViewModelTest {
 
                 fakeModelStorePort.setReady()
 
-                assertEquals(ModelUiStatus.Ready, awaitItem().modelStatus)
+                assertEquals(ModelUiStatus.Ready, awaitItem().whisperModelStatus)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -212,21 +225,134 @@ class MainViewModelTest {
 
                 assertEquals(
                     ModelUiStatus.Failed("IOException: network down"),
-                    awaitItem().modelStatus,
+                    awaitItem().whisperModelStatus,
                 )
                 cancelAndIgnoreRemainingEvents()
             }
         }
 
     @Test
-    fun `retry model download runs ensure on the store`() =
+    fun `whisper download click runs ensure on the whisper store`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             assertEquals(0, fakeModelStorePort.ensureModelCallCount)
 
-            viewModel.onRetryModelDownload()
+            viewModel.onWhisperDownloadClick()
             advanceUntilIdle()
 
             assertEquals(1, fakeModelStorePort.ensureModelCallCount)
+        }
+
+    @Test
+    fun `parakeet model state maps into its own ui status`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeParakeetModelStorePort.setState(ModelState.Downloading(progressFraction = 0.5f))
+
+                val updated = awaitItem()
+                assertEquals(ModelUiStatus.Downloading(percent = 50), updated.parakeetModelStatus)
+                assertEquals(ModelUiStatus.Absent, updated.whisperModelStatus)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `parakeet download click runs ensure on the parakeet store`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            assertEquals(0, fakeParakeetModelStorePort.ensureModelCallCount)
+
+            viewModel.onParakeetDownloadClick()
+            advanceUntilIdle()
+
+            assertEquals(1, fakeParakeetModelStorePort.ensureModelCallCount)
+        }
+
+    @Test
+    fun `engine selection defaults to parakeet and follows the preference`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertEquals(DictationEngineUi.PARAKEET, awaitItem().selectedEngine)
+
+                fakeEnginePreferencePort.setSelected(DictationEngine.WHISPER)
+
+                assertEquals(DictationEngineUi.WHISPER, awaitItem().selectedEngine)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note shows while the selected parakeet model is missing and whisper is ready`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertNull(awaitItem().engineFallback)
+
+                fakeModelStorePort.setReady()
+
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.PARAKEET,
+                        effective = DictationEngineUi.WHISPER,
+                    ),
+                    awaitItem().engineFallback,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note clears when the selected engine's model becomes ready`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeModelStorePort.setReady()
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.PARAKEET,
+                        effective = DictationEngineUi.WHISPER,
+                    ),
+                    awaitItem().engineFallback,
+                )
+
+                fakeParakeetModelStorePort.setReady()
+
+                assertNull(awaitItem().engineFallback)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note shows whisper selected with parakeet effective`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeEnginePreferencePort.setSelected(DictationEngine.WHISPER)
+                // Neither model is ready yet: no fallback to report.
+                assertNull(awaitItem().engineFallback)
+
+                fakeParakeetModelStorePort.setReady()
+
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.WHISPER,
+                        effective = DictationEngineUi.PARAKEET,
+                    ),
+                    awaitItem().engineFallback,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `selecting an engine persists it through the use case`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.onSelectEngine(DictationEngineUi.PARAKEET)
+            advanceUntilIdle()
+
+            assertEquals(DictationEngine.PARAKEET, fakeEnginePreferencePort.selectedEngine.value)
+            assertEquals(1, fakeEnginePreferencePort.selectCallCount)
         }
 
     private companion object {
