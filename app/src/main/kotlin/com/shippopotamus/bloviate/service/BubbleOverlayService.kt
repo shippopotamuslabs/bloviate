@@ -45,6 +45,7 @@ import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleVisibilityUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveBubblePositionUseCase
 import com.shippopotamus.bloviate.presentation.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -124,6 +125,17 @@ class BubbleOverlayService : Service() {
     private var recordingController: BubbleRecordingController? = null
     private val barStateSnapshot = mutableStateOf<RecordingBarState>(RecordingBarState.Idle)
 
+    // Bar-form window placement (ENC-65): the recording bar is far wider
+    // than the bubble and the window is anchored top-left, so the morph
+    // repositions the window to keep the whole bar on-screen. These fields
+    // remember the bubble's own anchor while the bar is up; the bar's
+    // placement is never persisted as the bubble's position.
+    private var previousBarState: RecordingBarState = RecordingBarState.Idle
+    private var barFormAnchorXPx: Int? = null
+    private var barFormAnchorWidthPx: Int = 0
+    private var barFormAnchorHeightPx: Int = 0
+    private var barFormMoved: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
@@ -159,7 +171,10 @@ class BubbleOverlayService : Service() {
         )
         recordingController = controller
         serviceScope.launch {
-            controller.barState.collect { state -> barStateSnapshot.value = state }
+            controller.barState.collect { state ->
+                barStateSnapshot.value = state
+                onBarStateChanged(state)
+            }
         }
         serviceScope.launch {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
@@ -283,7 +298,7 @@ class BubbleOverlayService : Service() {
             layoutParams = params,
             onTapGesture = controller::onBubbleTap,
             onDismissRequested = ::onBubbleDismissRequested,
-            onDragEnded = { position -> serviceScope.launch { saveBubblePosition(position) } },
+            onDragEnded = ::handleDragEnded,
             inDismissZone = inDismissZone,
         )
         view.setContent {
@@ -297,12 +312,19 @@ class BubbleOverlayService : Service() {
                     onTap = dragController::onTap,
                     onCancelRecording = controller::onCancelTap,
                     onSendRecording = controller::onSendTap,
+                    onTransientStateElapsed = controller::onTransientStateElapsed,
                     onDragStart = dragController::onDragStart,
                     onDrag = dragController::onDrag,
                     onDragEnd = dragController::onDragEnd,
                     onDragCancel = dragController::onDragCancel,
                 )
             }
+        }
+        // Bar-form placement rides the window's own layout: whenever the
+        // view's width changes (the bar morph settling, elapsed-time
+        // growth), the placement check keeps the whole bar on-screen.
+        view.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) applyBarPlacement()
         }
         windowManager.addView(view, params)
         lifecycleOwner = owner
@@ -318,6 +340,11 @@ class BubbleOverlayService : Service() {
         // any in-flight transcription — critically when a password field
         // takes focus, nothing may be transcribed for it.
         recordingController?.onHostHidden()
+        // The window is gone; any bar-form placement bookkeeping dies with
+        // it. The next show starts from the persisted bubble position.
+        barFormAnchorXPx = null
+        barFormMoved = false
+        previousBarState = RecordingBarState.Idle
         val view = bubbleView ?: return
         windowManager.removeViewImmediate(view)
         bubbleView = null
@@ -327,6 +354,121 @@ class BubbleOverlayService : Service() {
         inDismissZone.value = false
         Log.d(TAG, "Bubble hidden")
     }
+
+    /**
+     * Drag-end routing: a normal bubble drag persists its end position.
+     * A drag that ends while the recording bar is up must NOT persist the
+     * position the drag controller computed — it normalized against the
+     * bar's width, and the bar's placement is not the bubble's position.
+     * Instead the drag is remembered and the bubble's anchor is re-derived
+     * (and persisted) when the bar closes, in [exitBarForm].
+     */
+    private fun handleDragEnded(position: BubblePosition) {
+        if (barFormAnchorXPx != null) {
+            barFormMoved = true
+        } else {
+            serviceScope.launch { saveBubblePosition(position) }
+        }
+    }
+
+    /** Tracks bar-state transitions for window placement (see [enterBarForm] / [exitBarForm]). */
+    private fun onBarStateChanged(newState: RecordingBarState) {
+        val previous = previousBarState
+        previousBarState = newState
+        when {
+            previous == RecordingBarState.Idle && newState is RecordingBarState.Recording ->
+                enterBarForm()
+            newState == RecordingBarState.Idle && previous != RecordingBarState.Idle ->
+                exitBarForm()
+        }
+    }
+
+    /**
+     * The bubble is morphing into the recording bar: capture the bubble's
+     * own anchor (position + size) before the bar lays out, then place the
+     * window so the bar grows toward the screen interior (ENC-65).
+     */
+    private fun enterBarForm() {
+        val view = bubbleView ?: return
+        val params = layoutParams ?: return
+        barFormAnchorXPx = params.x
+        barFormAnchorWidthPx = view.width
+        barFormAnchorHeightPx = view.height
+        barFormMoved = false
+        applyBarPlacement()
+    }
+
+    /**
+     * The bar is closing back to the mic bubble: the window returns to the
+     * bubble's own anchor. If the bar was dragged, the bubble takes the
+     * bar's final left edge (clamped to the bubble's own travel range) as
+     * its new anchor, and that — computed with the bubble's size, never
+     * the bar's — is what gets persisted.
+     */
+    private fun exitBarForm() {
+        val anchorXPx = barFormAnchorXPx
+        barFormAnchorXPx = null
+        val moved = barFormMoved
+        barFormMoved = false
+        val view = bubbleView ?: return
+        val params = layoutParams ?: return
+        if (anchorXPx == null) return
+        if (moved) {
+            val bounds = currentBounds()
+            val landed = BubblePositionMath.clamp(
+                topLeft = BubblePixelPosition(xPx = params.x, yPx = params.y),
+                bubbleWidthPx = barFormAnchorWidthPx,
+                bubbleHeightPx = barFormAnchorHeightPx,
+                bounds = bounds,
+            )
+            params.x = landed.xPx
+            params.y = landed.yPx
+            val anchorWidthPx = barFormAnchorWidthPx
+            val anchorHeightPx = barFormAnchorHeightPx
+            serviceScope.launch {
+                saveBubblePosition(
+                    BubblePositionMath.toNormalized(
+                        topLeft = landed,
+                        bubbleWidthPx = anchorWidthPx,
+                        bubbleHeightPx = anchorHeightPx,
+                        bounds = bounds,
+                    ),
+                )
+            }
+        } else {
+            params.x = anchorXPx
+        }
+        windowManager.updateViewLayout(view, params)
+    }
+
+    /**
+     * (Re)place the window so the current bar form sits fully on-screen:
+     * [BubblePositionMath.barWindowX] from the bubble's anchor — or, once
+     * the user has dragged the bar, from its dragged position, so a width
+     * change re-clamps instead of snapping the bar back to the anchor.
+     * Runs when the bar form is entered and whenever the window's width
+     * changes while the bar is up.
+     */
+    private fun applyBarPlacement() {
+        val anchorXPx = barFormAnchorXPx ?: return
+        val view = bubbleView ?: return
+        val params = layoutParams ?: return
+        if (view.width <= 0) return
+        val baseXPx = if (barFormMoved) params.x else anchorXPx
+        val targetXPx = BubblePositionMath.barWindowX(
+            bubbleXPx = baseXPx,
+            barWidthPx = view.width,
+            bounds = currentBounds(),
+            edgeMarginPx = barEdgeMarginPx(),
+        )
+        if (targetXPx != params.x) {
+            params.x = targetXPx
+            windowManager.updateViewLayout(view, params)
+        }
+    }
+
+    private fun barEdgeMarginPx(): Int =
+        (BAR_EDGE_MARGIN_DP * resources.displayMetrics.density).roundToInt()
 
     private fun onBubbleDismissRequested() {
         val command = observeBubbleVisibility.onBubbleDismissed() ?: return
@@ -422,6 +564,9 @@ class BubbleOverlayService : Service() {
 
     private companion object {
         const val TAG: String = "BubbleOverlay"
+
+        /** Clearance kept between the recording bar and the screen's right edge. */
+        const val BAR_EDGE_MARGIN_DP: Float = 8f
         const val CHANNEL_ID: String = "bubble_overlay"
         const val NOTIFICATION_ID: Int = 1001
         const val REQUEST_CODE_OPEN_APP: Int = 0
