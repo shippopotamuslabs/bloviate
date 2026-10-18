@@ -1,0 +1,272 @@
+package com.shippopotamus.bloviate.data
+
+import android.util.Log
+import com.shippopotamus.bloviate.domain.evaluator.AmplitudeCalculator
+import com.shippopotamus.bloviate.domain.evaluator.SilenceTrimmer
+import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.domain.port.AudioCapturePort
+import com.shippopotamus.bloviate.domain.port.MicPermissionPort
+import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * [RecordingSessionPort] over [AudioCapturePort]. Buffers the whole utterance
+ * (dictation is transcribed in one pass — never chunked), enforces the
+ * ~3 minute hard cap as a stop (not a cancel), and applies
+ * [SilenceTrimmer] when a recording finishes.
+ *
+ * Elapsed time is derived from the captured sample count, not the wall
+ * clock, so it always matches the audio that will be transcribed. Mutable
+ * session fields are guarded by [stateLock]; finishing is idempotent and
+ * funnels through [finishRecording] exactly once per recording, whether the
+ * trigger was [stop], [cancel], the cap, or the capture flow ending.
+ *
+ * Availability: the published state is [RecordingSessionState.Unavailable]
+ * unless the model is [ModelState.Ready] and the mic permission is granted.
+ */
+@Singleton
+class RecordingSessionManager @Inject constructor(
+    private val audioCapture: AudioCapturePort,
+    private val modelStore: ModelStorePort,
+    private val micPermission: MicPermissionPort,
+    private val sessionScope: CoroutineScope,
+) : RecordingSessionPort {
+
+    private val stateLock = Any()
+    private var inputsAvailable: Boolean = false
+    private var recording: Boolean = false
+    private var discardOnFinish: Boolean = false
+    private var chunks: MutableList<FloatArray> = mutableListOf()
+    private var totalSamples: Int = 0
+    private var latestElapsedMs: Long = 0L
+    private var latestAmplitude: Float = 0f
+    private var lastPublishedElapsedMs: Long = -1L
+    private var captureJob: Job? = null
+    private var completion: CompletableDeferred<FloatArray>? = null
+    private var pendingResult: FloatArray? = null
+
+    private val mutableState =
+        MutableStateFlow<RecordingSessionState>(RecordingSessionState.Unavailable)
+    override val state: StateFlow<RecordingSessionState> = mutableState.asStateFlow()
+
+    private val mutableAutoStopped = MutableSharedFlow<FloatArray>(extraBufferCapacity = 1)
+    override val autoStoppedRecordings: SharedFlow<FloatArray> = mutableAutoStopped.asSharedFlow()
+
+    init {
+        sessionScope.launch {
+            combine(modelStore.state, micPermission.isGranted) { modelState, micGranted ->
+                modelState is ModelState.Ready && micGranted
+            }.collect { available -> onAvailabilityChanged(available) }
+        }
+    }
+
+    override fun start() {
+        micPermission.refresh()
+        synchronized(stateLock) {
+            if (recording) {
+                Log.d(TAG, "start() ignored: already recording")
+                return
+            }
+            if (!inputsAvailable) {
+                Log.w(TAG, "start() ignored: session unavailable (model not ready or mic not granted)")
+                publishIdleOrUnavailableLocked()
+                return
+            }
+            recording = true
+            discardOnFinish = false
+            chunks = mutableListOf()
+            totalSamples = 0
+            latestElapsedMs = 0L
+            latestAmplitude = 0f
+            lastPublishedElapsedMs = -1L
+            pendingResult = null
+            completion = CompletableDeferred()
+            publishRecordingLocked()
+            captureJob = sessionScope.launch { collectCapture() }
+        }
+        Log.d(TAG, "Recording started")
+    }
+
+    override suspend fun stop(): FloatArray {
+        var pending: FloatArray? = null
+        var activeCompletion: CompletableDeferred<FloatArray>? = null
+        var jobToCancel: Job? = null
+        synchronized(stateLock) {
+            if (!recording && pendingResult != null) {
+                pending = pendingResult
+                pendingResult = null
+                completion = null
+            } else if (recording) {
+                activeCompletion = completion
+                jobToCancel = captureJob
+            }
+        }
+        pending?.let {
+            Log.d(TAG, "stop() returning the recording finished by the hard cap")
+            return it
+        }
+        val deferred = activeCompletion
+            ?: throw IllegalStateException("stop() called with no active recording")
+        jobToCancel?.cancel()
+        jobToCancel?.join()
+        // If the capture job was cancelled before its body ever ran, its
+        // finally never fires; finish here instead (idempotent).
+        finishRecording(capped = false)
+        val samples = deferred.await()
+        synchronized(stateLock) {
+            if (completion === deferred) {
+                completion = null
+                pendingResult = null
+            }
+        }
+        return samples
+    }
+
+    override fun cancel() {
+        val jobToCancel: Job?
+        synchronized(stateLock) {
+            if (!recording) return
+            discardOnFinish = true
+            jobToCancel = captureJob
+        }
+        jobToCancel?.cancel()
+        // Covers a capture job cancelled before its body ran (see stop()).
+        finishRecording(capped = false)
+    }
+
+    private fun onAvailabilityChanged(available: Boolean) {
+        synchronized(stateLock) {
+            inputsAvailable = available
+            if (!recording) {
+                publishIdleOrUnavailableLocked()
+            }
+        }
+    }
+
+    private suspend fun collectCapture() {
+        try {
+            audioCapture.chunks().collect { chunk ->
+                val hitCap = synchronized(stateLock) { appendChunkLocked(chunk) }
+                if (hitCap) {
+                    Log.d(TAG, "Hard cap reached (${MAX_RECORDING_SECONDS}s); finishing as a stop")
+                    finishRecording(capped = true)
+                    currentCoroutineContext().cancel()
+                }
+            }
+        } finally {
+            finishRecording(capped = false)
+        }
+    }
+
+    /** Appends [chunk] and refreshes the published recording state. Caller holds [stateLock]. */
+    private fun appendChunkLocked(chunk: FloatArray): Boolean {
+        chunks += chunk
+        totalSamples += chunk.size
+        latestAmplitude = AmplitudeCalculator.rms(chunk)
+        latestElapsedMs = totalSamples.toLong() * MS_PER_SECOND / SilenceTrimmer.SAMPLE_RATE_HZ
+        if (lastPublishedElapsedMs < 0 ||
+            latestElapsedMs - lastPublishedElapsedMs >= AMPLITUDE_PUBLISH_INTERVAL_MS
+        ) {
+            lastPublishedElapsedMs = latestElapsedMs
+            publishRecordingLocked()
+        }
+        return totalSamples >= MAX_RECORDING_SAMPLES
+    }
+
+    /**
+     * Finalizes the active recording exactly once: trims and completes the
+     * pending [stop] (and emits on [autoStoppedRecordings] when [capped]), or
+     * discards everything after a [cancel]. Safe to call from any thread and
+     * any number of times.
+     */
+    private fun finishRecording(capped: Boolean) {
+        val completionToResolve: CompletableDeferred<FloatArray>?
+        val trimmed: FloatArray
+        val discarded: Boolean
+        synchronized(stateLock) {
+            if (!recording) return
+            recording = false
+            captureJob = null
+            discarded = discardOnFinish
+            discardOnFinish = false
+            val buffered = assembleLocked()
+            chunks = mutableListOf()
+            totalSamples = 0
+            trimmed = if (discarded) FloatArray(0) else SilenceTrimmer.trim(buffered)
+            if (!discarded) {
+                pendingResult = trimmed
+            }
+            completionToResolve = completion
+            publishIdleOrUnavailableLocked()
+        }
+        if (discarded) {
+            completionToResolve?.cancel()
+            Log.d(TAG, "Recording cancelled; buffered audio discarded")
+            return
+        }
+        completionToResolve?.complete(trimmed)
+        if (capped) {
+            if (!mutableAutoStopped.tryEmit(trimmed)) {
+                Log.w(TAG, "Capped recording had no collector; samples remain available via stop()")
+            }
+            Log.d(TAG, "Recording auto-stopped at the hard cap; ${trimmed.size} samples after trim")
+        } else {
+            Log.d(TAG, "Recording finished; ${trimmed.size} samples after trim")
+        }
+    }
+
+    /** Concatenates buffered chunks, truncated at the hard cap. Caller holds [stateLock]. */
+    private fun assembleLocked(): FloatArray {
+        val targetSize = minOf(totalSamples, MAX_RECORDING_SAMPLES)
+        val assembled = FloatArray(targetSize)
+        var offset = 0
+        for (chunk in chunks) {
+            val copyCount = minOf(chunk.size, targetSize - offset)
+            if (copyCount <= 0) break
+            chunk.copyInto(assembled, destinationOffset = offset, startIndex = 0, endIndex = copyCount)
+            offset += copyCount
+        }
+        return assembled
+    }
+
+    private fun publishRecordingLocked() {
+        mutableState.update {
+            RecordingSessionState.Recording(elapsedMs = latestElapsedMs, amplitude = latestAmplitude)
+        }
+    }
+
+    private fun publishIdleOrUnavailableLocked() {
+        mutableState.update {
+            if (inputsAvailable) RecordingSessionState.Idle else RecordingSessionState.Unavailable
+        }
+    }
+
+    private companion object {
+        const val TAG: String = "RecordingSession"
+
+        /** Hard cap on one dictation (~3 minutes), per `contracts/TRANSCRIPTION_RULES.md` §2. */
+        const val MAX_RECORDING_SECONDS: Int = 180
+        const val MAX_RECORDING_SAMPLES: Int = MAX_RECORDING_SECONDS * SilenceTrimmer.SAMPLE_RATE_HZ
+
+        /** Minimum audio time between published recording-state updates (~12 Hz). */
+        const val AMPLITUDE_PUBLISH_INTERVAL_MS: Long = 80L
+        const val MS_PER_SECOND: Long = 1_000L
+    }
+}

@@ -26,4 +26,9 @@
     <string name="bubble_notification_text">The dictation bubble appears over editable text fields.</string>
     <string name="bubble_notification_stop">Stop</string>
     <string name="bubble_content_description">Bloviate dictation bubble</string>
+    <string name="mic_card_title">Microphone</string>
+    <string name="mic_status_granted">Microphone permission: granted</string>
+    <string name="mic_status_missing">Microphone permission: not granted</string>
+    <string name="mic_request">Grant microphone permission</string>
+    <string name="mic_hint">Dictation needs the microphone. Grant it here; the bubble service then runs with the microphone foreground-service type and recording becomes available once the model has downloaded (watch logcat tags “ModelStore”, “TranscriptionEngine”, “RecordingSession”).</string>
 </resources>

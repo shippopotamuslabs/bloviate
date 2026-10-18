@@ -52,6 +52,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests {
+            // Data-layer classes log to logcat (a deliberate on-device
+            // validation surface); on the JVM those android.jar stubs must
+            // no-op instead of throwing "not mocked".
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

@@ -18,4 +18,5 @@ data class MainUiState(
     val focusPackageName: String? = null,
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
+    val micPermissionGranted: Boolean = false,
 )
