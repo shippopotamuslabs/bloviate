@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Bloviate</string>
+    <string name="field_watcher_label">Bloviate field watcher</string>
+    <string name="field_watcher_description">Shows the Bloviate dictation bubble when a text field is focused and hides it on password fields. Bloviate only detects that a field is focused — it never reads the text you type.</string>
+    <string name="watcher_card_title">Field watcher</string>
+    <string name="watcher_status_enabled">Accessibility watcher: enabled</string>
+    <string name="watcher_status_disabled">Accessibility watcher: not enabled</string>
+    <string name="watcher_open_settings">Open accessibility settings</string>
+    <string name="watcher_hint">Tap a text field in any app, then come back — or watch logcat tag “FieldWatcher” while other apps are in the foreground.</string>
+    <string name="focus_label_none">Focused field: none</string>
+    <string name="focus_label_editable">Focused field: editable</string>
+    <string name="focus_label_password">Focused field: password (bubble hidden)</string>
+    <string name="focus_package_format">App: %1$s</string>
 </resources>
