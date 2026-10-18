@@ -8,10 +8,12 @@ import com.shippopotamus.bloviate.data.ModelFileDownloader
 import com.shippopotamus.bloviate.data.OnDeviceWhisperTranscriptionEngine
 import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.domain.evaluator.BaselineTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import dagger.Binds
 import dagger.Module
@@ -41,6 +43,9 @@ abstract class VoiceModule {
 
     @Binds
     abstract fun bindRecordingSessionPort(session: RecordingSessionManager): RecordingSessionPort
+
+    @Binds
+    abstract fun bindTextPostProcessor(processor: BaselineTextPostProcessor): TextPostProcessor
 
     companion object {
 

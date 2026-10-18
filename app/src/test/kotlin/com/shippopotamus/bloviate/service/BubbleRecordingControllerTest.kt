@@ -1,8 +1,10 @@
 package com.shippopotamus.bloviate.service
 
+import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.testing.FakeRecordingSessionPort
+import com.shippopotamus.bloviate.testing.FakeTextPostProcessor
 import com.shippopotamus.bloviate.testing.FakeTranscriptSinkPort
 import com.shippopotamus.bloviate.testing.FakeTranscriptionEngine
 import kotlinx.coroutines.CompletableDeferred
@@ -22,12 +24,14 @@ class BubbleRecordingControllerTest {
 
     private val fakeSession = FakeRecordingSessionPort()
     private val fakeEngine = FakeTranscriptionEngine()
+    private val fakePostProcessor = FakeTextPostProcessor()
     private val fakeSink = FakeTranscriptSinkPort()
 
     private fun createController(scope: CoroutineScope): BubbleRecordingController =
         BubbleRecordingController(
             session = fakeSession,
             transcriptionEngine = fakeEngine,
+            textPostProcessor = fakePostProcessor,
             transcriptSink = fakeSink,
             scope = scope,
             workDispatcher = UnconfinedTestDispatcher(),
@@ -312,6 +316,167 @@ class BubbleRecordingControllerTest {
             controller.barState.value,
         )
         assertEquals(0, fakeSession.cancelCallCount)
+    }
+
+    @Test
+    fun `send delivers the post-processed text, not the raw transcript`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "um hello world"
+        fakePostProcessor.transform = { "Hello world" }
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("um hello world"), fakePostProcessor.inputs)
+        assertEquals(listOf("Hello world"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+    }
+
+    @Test
+    fun `send whose transcript cleans to blank delivers nothing and shows done`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "um uh"
+        fakePostProcessor.transform = { "" }
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertTrue(fakeSink.transcripts.isEmpty())
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+    }
+
+    @Test
+    fun `send the sink refuses shows error, not done`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult =
+            InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD)
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+    }
+
+    @Test
+    fun `send the sink fails shows error, not done`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult = InsertionResult.Failed("clipboard gone")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+    }
+
+    @Test
+    fun `a failed insertion keeps the samples and a tap retries the send`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.resultQueue.addLast(InsertionResult.Failed("paste exploded"))
+        fakeSink.resultQueue.addLast(
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE),
+        )
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+        assertEquals(1, fakeEngine.transcribeCallCount)
+
+        controller.onBubbleTap()
+        runCurrent()
+
+        assertEquals(2, fakeEngine.transcribeCallCount)
+        assertEquals(2, fakeSink.transcripts.size)
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+    }
+
+    @Test
+    fun `a failed transcription keeps the samples and a tap retries the send`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.failure = IllegalStateException("engine cold")
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        fakeEngine.failure = null
+        controller.onBubbleTap()
+        runCurrent()
+
+        assertEquals(2, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+    }
+
+    @Test
+    fun `the retry is spent after one attempt`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult = InsertionResult.Failed("always fails")
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        controller.onBubbleTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+        assertEquals(2, fakeEngine.transcribeCallCount)
+
+        // Second failure spent the retry: another tap in the error window
+        // must not run the pipeline a third time.
+        controller.onBubbleTap()
+        runCurrent()
+        assertEquals(2, fakeEngine.transcribeCallCount)
+    }
+
+    @Test
+    fun `the retained retry expires when the error window elapses`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult = InsertionResult.Failed("paste exploded")
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        advanceTimeBy(ERROR_DISPLAY_MS)
+        runCurrent()
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+
+        // A tap now is a fresh recording, not a retry of the dead one.
+        fakeSession.setState(RecordingSessionState.Idle)
+        controller.onBubbleTap()
+        runCurrent()
+        assertEquals(2, fakeSession.startCallCount)
+        assertEquals(1, fakeEngine.transcribeCallCount)
+    }
+
+    @Test
+    fun `host hidden during the error window drops the retained retry`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult = InsertionResult.Failed("paste exploded")
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        controller.onHostHidden()
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+
+        // A tap now starts a new recording; the retained samples are gone.
+        fakeSession.setState(RecordingSessionState.Idle)
+        controller.onBubbleTap()
+        runCurrent()
+        assertEquals(2, fakeSession.startCallCount)
+        assertEquals(1, fakeEngine.transcribeCallCount)
     }
 
     @Test

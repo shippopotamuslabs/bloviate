@@ -38,6 +38,7 @@ import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubblePositionUseCase
@@ -104,6 +105,9 @@ class BubbleOverlayService : Service() {
     lateinit var transcriptSink: TranscriptSinkPort
 
     @Inject
+    lateinit var textPostProcessor: TextPostProcessor
+
+    @Inject
     lateinit var modelStore: ModelStorePort
 
     @Inject
@@ -166,6 +170,7 @@ class BubbleOverlayService : Service() {
         val controller = BubbleRecordingController(
             session = recordingSession,
             transcriptionEngine = transcriptionEngine,
+            textPostProcessor = textPostProcessor,
             transcriptSink = transcriptSink,
             scope = serviceScope,
         )
