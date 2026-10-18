@@ -165,10 +165,10 @@ Android offers exactly one API that can tell whether an editable field in *anoth
 ### 5.2 BubbleOverlayService (Foreground Service + WindowManager)
 
 - `TYPE_APPLICATION_OVERLAY` window with `FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_NO_LIMITS`. **`FLAG_NOT_FOCUSABLE` is non-negotiable:** if the overlay takes focus, the text field loses its caret, `findFocus(FOCUS_INPUT)` returns null, and the bubble hides itself.
-- Foreground service type `microphone` (Android 14+ requirement for mic capture from a service).
+- Foreground service type `microphone` (Android 14+ requirement for mic capture from a service). Until `RECORD_AUDIO` is granted the service starts as `specialUse`; it (re)starts as `microphone` once the permission is granted — Android 14+ refuses a microphone-type start without the grant.
 - Keeps the transcription engine loaded/warm while enabled (see `TRANSCRIPTION_RULES.md`).
-- Bubble states: **Idle** (mic pill), **Listening** (pulse + live RMS + elapsed), **Transcribing** (spinner), **Done** (brief check), **Error** (shake/red flash).
-- Gestures: tap = start, tap again = stop + insert; press-and-hold = push-to-talk, release = stop + insert; drag = reposition (position persisted); drag to bottom = dismiss for this field session.
+- Bubble states: **Idle** (mic bubble), **Listening** (the recording bar: [X] [live waveform] [✓] + elapsed — no pulsing ring; the waveform is the amplitude affordance), **Transcribing** (spinner in the waveform slot), **Done** (brief check), **Error** (red flash).
+- Gestures (**tap-only — there is deliberately NO hold-to-talk / push-to-talk**): tap bubble = start recording and morph into the recording bar; ✓ on the bar = stop + transcribe + insert; X on the bar = cancel (discard, insert nothing); drag = reposition (position persisted); drag to bottom = dismiss for this field session (during recording: cancel + dismiss).
 - Default anchor: just above the keyboard, screen-bottom offset; user-draggable (keyboard heights vary too much to compute reliably). Must survive rotation and fold/unfold without leaking windows or landing off-screen.
 
 ### 5.3 Text Insertion — Paste First
