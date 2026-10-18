@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.apter.robolectric.junit5)
 }
 
 kotlin {
@@ -85,6 +86,10 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // Robolectric for framework-bound logic (clipboard/insertion) per
+    // contracts/UNIT_TESTING.md §2; pins mirror Enclave's catalog.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.apter.junit5.robolectric.extension)
 
     // whisper-android, consumed via composite build (see settings.gradle.kts): the
     // core module carries the WhisperEngine API; the optional Hilt module provides

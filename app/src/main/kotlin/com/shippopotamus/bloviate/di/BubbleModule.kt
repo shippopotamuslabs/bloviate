@@ -11,8 +11,11 @@ import com.shippopotamus.bloviate.data.DataStoreBubblePositionStore
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubblePositionPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
+import com.shippopotamus.bloviate.domain.port.TextInsertionPort
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
-import com.shippopotamus.bloviate.service.LoggingTranscriptSink
+import com.shippopotamus.bloviate.service.FieldWatcherBridge
+import com.shippopotamus.bloviate.service.InsertionTranscriptSink
+import com.shippopotamus.bloviate.service.WatcherTextInsertion
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -36,9 +39,17 @@ abstract class BubbleModule {
     abstract fun bindBubbleOverlayAccessPort(access: AndroidBubbleOverlayAccess): BubbleOverlayAccessPort
 
     @Binds
-    abstract fun bindTranscriptSinkPort(sink: LoggingTranscriptSink): TranscriptSinkPort
+    abstract fun bindTranscriptSinkPort(sink: InsertionTranscriptSink): TranscriptSinkPort
 
     companion object {
+
+        /** Paste-first insertion (ENC-62); parameterized, so provided rather than bound. */
+        @Provides
+        @Singleton
+        fun provideTextInsertionPort(
+            bridge: FieldWatcherBridge,
+            @ApplicationContext context: Context,
+        ): TextInsertionPort = WatcherTextInsertion(bridge = bridge, context = context)
 
         @Provides
         @Singleton
