@@ -25,6 +25,9 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -46,11 +49,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import kotlin.math.hypot
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 private val BUBBLE_SIZE: Dp = 56.dp
 private val BUBBLE_ICON_SIZE: Dp = 28.dp
@@ -108,8 +114,20 @@ private val WAVEFORM_WIDTH: Dp =
  * hosting ComposeView would starve. High-level events go to the overlay
  * service's drag controller / recording controller, which own the window
  * and the session. Waveform levels are read through the [waveformLevels]
- * lambda inside the Canvas draw block — amplitude updates never recompose
- * this tree (`CODE_STYLE_RULES.md` §4.5).
+ * lambda inside the Canvas draw block (`CODE_STYLE_RULES.md` §4.5) — the
+ * level list itself never enters snapshot state.
+ *
+ * What paces the waveform redraw is a **frame clock inside the Recording
+ * branch** (ENC-69 round 2), not recomposition: [RecordingBarState.Recording.frame]
+ * bumps do recompose this content, but [RecordingBar] is skippable and
+ * every one of its parameters compares equal across a frame bump —
+ * `elapsedMs` only moves per recorder chunk, and the levels lambda and
+ * callbacks are bound references, equal by construction — so the runtime
+ * skipped it and its Canvas redrew only when the elapsed ticked (~1 Hz,
+ * in lockstep with the timer; device-confirmed). Instead, [RecordingBar]
+ * runs a `withFrameMillis` loop while it is composed and the Canvas reads
+ * the tick in its draw block: every display frame invalidates the draw
+ * phase and re-reads the fresh levels, whatever recomposition does.
  *
  * Done/Error auto-return: an effect keyed on the bar state reports the
  * display window's elapse through [onTransientStateElapsed] (ENC-65). The
@@ -243,6 +261,17 @@ private fun RecordingBar(
     onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Frame-clock redraw for the waveform (ENC-69 round 2): this loop runs
+    // only while the Recording branch is composed, and the waveform Canvas
+    // reads the tick inside its draw block, so the wave redraws at display
+    // rate from the live levels — draw-phase only, no recomposition, and
+    // the gesture handlers below never see it.
+    val drawTick = remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (currentCoroutineContext().isActive) {
+            withFrameMillis { drawTick.value += 1 }
+        }
+    }
     val recordingDescription = stringResource(R.string.bubble_recording_description)
     val cancelDescription = stringResource(R.string.bubble_cancel_description)
     val sendDescription = stringResource(R.string.bubble_send_description)
@@ -303,6 +332,7 @@ private fun RecordingBar(
             }
             WaveformCanvas(
                 levels = waveformLevels,
+                drawTick = { drawTick.value },
                 barColor = contentColor,
                 modifier = Modifier
                     .width(WAVEFORM_WIDTH)
@@ -426,15 +456,24 @@ private fun ErrorBubble(modifier: Modifier = Modifier) {
  * The waveform, scaled down from Enclave's `LiveVoiceOverlay` Canvas:
  * center-anchored rounded bars whose heights track the recorded levels.
  * Levels arrive as a deferred read and are only touched inside the draw
- * block, so a new amplitude never recomposes the bar.
+ * block, so a new amplitude never recomposes the bar. [drawTick] is read
+ * in the draw block for the same reason in reverse: its change *does*
+ * invalidate the draw phase (every display frame, via the caller's
+ * frame-clock loop), so the fresh levels are drawn even when the bar's
+ * composables are skipped as unchanged (ENC-69 round 2).
  */
 @Composable
 private fun WaveformCanvas(
     levels: () -> List<Float>,
     barColor: Color,
     modifier: Modifier = Modifier,
+    drawTick: () -> Int = { 0 },
 ) {
     Canvas(modifier = modifier) {
+        // Subscribes this draw scope to the frame tick: each frame redraws
+        // and re-reads the levels below. The value itself is not drawn.
+        drawTick()
+        CadenceCounters.canvasDraw() // ENC-69 cadence counters (L4)
         val barWidthPx = WAVEFORM_BAR_WIDTH.toPx()
         val spacingPx = WAVEFORM_BAR_SPACING.toPx()
         val minHeightPx = WAVEFORM_MIN_BAR_HEIGHT.toPx()

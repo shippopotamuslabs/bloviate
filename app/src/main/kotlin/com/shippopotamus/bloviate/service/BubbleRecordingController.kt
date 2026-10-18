@@ -2,6 +2,7 @@ package com.shippopotamus.bloviate.service
 
 import android.os.SystemClock
 import android.util.Log
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
@@ -15,7 +16,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -84,6 +87,25 @@ class BubbleRecordingController(
     private var resetJob: Job? = null
 
     /**
+     * ENC-69 cadence instrumentation: whether the session stream is inside
+     * a recording (drives [CadenceCounters.begin]/totals) and the job that
+     * logs the per-second cadence summary while it runs.
+     */
+    private var cadenceRecordingSeen: Boolean = false
+    private var cadenceJob: Job? = null
+
+    /**
+     * Redraw tick for the current recording, published as
+     * [RecordingBarState.Recording.frame]. Bumped when the elapsed time
+     * advances or the waveform window materially changes, so the published
+     * bar state actually differs at the waveform's cadence — an
+     * elapsed-only state stays equal between recorder chunks (~1 s) and
+     * StateFlow conflation starves the overlay's redraw (ENC-69). Reset
+     * whenever a recording is (re)entered from Idle.
+     */
+    private var recordingFrame: Long = 0L
+
+    /**
      * The stopped samples of a failed send, kept for the one retry tap
      * (§5.3). Null when there is nothing to retry.
      */
@@ -115,7 +137,9 @@ class BubbleRecordingController(
         when (val sessionState = session.state.value) {
             is RecordingSessionState.Recording -> {
                 // The bar fell behind the session (e.g. window re-shown mid-recording): resync.
-                mutableBarState.update { RecordingBarState.Recording(sessionState.elapsedMs) }
+                mutableBarState.update {
+                    RecordingBarState.Recording(sessionState.elapsedMs, recordingFrame)
+                }
             }
             RecordingSessionState.Idle -> {
                 waveform.clear()
@@ -208,21 +232,52 @@ class BubbleRecordingController(
         autoStopCollectJob?.cancel()
         pipelineJob?.cancel()
         cancelResetJob()
+        stopCadenceSummary()
     }
 
     private suspend fun collectSessionState() {
         session.state.collect { state ->
             when (state) {
                 is RecordingSessionState.Recording -> {
-                    waveform.record(state.amplitude)
+                    CadenceCounters.sessionReceipt() // ENC-69 cadence counters (L2r)
+                    if (!cadenceRecordingSeen) {
+                        cadenceRecordingSeen = true
+                        CadenceCounters.begin(nowMs())
+                        startCadenceSummary()
+                    }
+                    val windowChanged = waveform.record(state.amplitude)
                     val bar = mutableBarState.value
-                    if (bar == RecordingBarState.Idle || bar is RecordingBarState.Recording) {
-                        mutableBarState.update { RecordingBarState.Recording(state.elapsedMs) }
+                    if (bar == RecordingBarState.Idle) {
+                        // (Re)entering the bar: start the redraw tick.
+                        recordingFrame = 1L
+                        mutableBarState.update {
+                            RecordingBarState.Recording(state.elapsedMs, recordingFrame)
+                        }
+                        CadenceCounters.barPublish() // ENC-69 cadence counters (L2p)
+                    } else if (bar is RecordingBarState.Recording &&
+                        (state.elapsedMs != bar.elapsedMs || windowChanged)
+                    ) {
+                        // Publish only on a real change: a new elapsed tick,
+                        // or a waveform frame the Canvas has not drawn yet.
+                        // Republishing an equal state would be conflated by
+                        // the StateFlow anyway — and in settled silence
+                        // neither input changes, so the bar rests (ENC-69).
+                        recordingFrame += 1
+                        mutableBarState.update {
+                            RecordingBarState.Recording(state.elapsedMs, recordingFrame)
+                        }
+                        CadenceCounters.barPublish() // ENC-69 cadence counters (L2p)
                     }
                 }
                 RecordingSessionState.Idle,
                 RecordingSessionState.Unavailable,
                 -> {
+                    if (cadenceRecordingSeen) {
+                        cadenceRecordingSeen = false
+                        stopCadenceSummary()
+                        Log.d(TAG, CadenceCounters.totalsLine())
+                        CadenceCounters.end()
+                    }
                     // The session ended without the bar's buttons (external
                     // cancel, capture failure): fall back to the mic bubble.
                     if (mutableBarState.value is RecordingBarState.Recording) {
@@ -232,6 +287,26 @@ class BubbleRecordingController(
                 }
             }
         }
+    }
+
+    /**
+     * ENC-69 cadence instrumentation: once a second while the session
+     * records, log the per-layer counts (see [CadenceCounters]). Pure
+     * observation — the job publishes nothing and touches no state.
+     */
+    private fun startCadenceSummary() {
+        if (cadenceJob != null) return
+        cadenceJob = scope.launch {
+            while (currentCoroutineContext().isActive) {
+                delay(CadenceCounters.SUMMARY_INTERVAL_MS)
+                CadenceCounters.summaryLineIfDue(nowMs())?.let { line -> Log.d(TAG, line) }
+            }
+        }
+    }
+
+    private fun stopCadenceSummary() {
+        cadenceJob?.cancel()
+        cadenceJob = null
     }
 
     private suspend fun collectAutoStopped() {

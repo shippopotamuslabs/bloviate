@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.data
 
 import android.util.Log
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.AmplitudeCalculator
 import com.shippopotamus.bloviate.domain.evaluator.SilenceTrimmer
 import com.shippopotamus.bloviate.domain.model.ModelState
@@ -14,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -38,6 +41,14 @@ import javax.inject.Singleton
  * funnels through [finishRecording] exactly once per recording, whether the
  * trigger was [stop], [cancel], the cap, or the capture flow ending.
  *
+ * Amplitude is **display-only** and deliberately decoupled from the capture
+ * chunk cadence (ENC-66): the library recorder hands over device-sized
+ * chunks (hundreds of ms to ~1 s apart on some phones), so each chunk is
+ * sliced into ~33 ms windows as it lands and a ticker publishes one window
+ * level every ~33 ms — a ~30 Hz level stream for the waveform, whatever
+ * the chunk size. The transcription buffer is untouched by the slicing:
+ * chunks are stored whole, exactly as captured.
+ *
  * Availability: the published state is [RecordingSessionState.Unavailable]
  * unless the model is [ModelState.Ready] and the mic permission is granted.
  */
@@ -57,8 +68,14 @@ class RecordingSessionManager @Inject constructor(
     private var totalSamples: Int = 0
     private var latestElapsedMs: Long = 0L
     private var latestAmplitude: Float = 0f
-    private var lastPublishedElapsedMs: Long = -1L
     private var captureJob: Job? = null
+    private var levelJob: Job? = null
+
+    /** Sliced-but-unpublished amplitude windows, oldest first. Guarded by [stateLock]. */
+    private val pendingLevels = ArrayDeque<Float>()
+
+    /** Leftover samples not yet filling a whole amplitude window. Guarded by [stateLock]. */
+    private var windowCarry: FloatArray = FloatArray(0)
     private var completion: CompletableDeferred<FloatArray>? = null
     private var pendingResult: FloatArray? = null
 
@@ -95,11 +112,13 @@ class RecordingSessionManager @Inject constructor(
             totalSamples = 0
             latestElapsedMs = 0L
             latestAmplitude = 0f
-            lastPublishedElapsedMs = -1L
+            pendingLevels.clear()
+            windowCarry = FloatArray(0)
             pendingResult = null
             completion = CompletableDeferred()
             publishRecordingLocked()
             captureJob = sessionScope.launch { collectCapture() }
+            levelJob = sessionScope.launch { runLevelTicker() }
         }
         Log.d(TAG, "Recording started")
     }
@@ -175,19 +194,58 @@ class RecordingSessionManager @Inject constructor(
         }
     }
 
-    /** Appends [chunk] and refreshes the published recording state. Caller holds [stateLock]. */
+    /**
+     * Appends [chunk] to the transcription buffer and slices it into
+     * amplitude windows for the level ticker. Caller holds [stateLock].
+     */
     private fun appendChunkLocked(chunk: FloatArray): Boolean {
         chunks += chunk
         totalSamples += chunk.size
-        latestAmplitude = AmplitudeCalculator.rms(chunk)
         latestElapsedMs = totalSamples.toLong() * MS_PER_SECOND / SilenceTrimmer.SAMPLE_RATE_HZ
-        if (lastPublishedElapsedMs < 0 ||
-            latestElapsedMs - lastPublishedElapsedMs >= AMPLITUDE_PUBLISH_INTERVAL_MS
-        ) {
-            lastPublishedElapsedMs = latestElapsedMs
-            publishRecordingLocked()
-        }
+        sliceLevelsLocked(chunk)
         return totalSamples >= MAX_RECORDING_SAMPLES
+    }
+
+    /**
+     * Slices [chunk] into [AMPLITUDE_WINDOW_SAMPLES]-sized windows (carrying
+     * a partial window across chunk boundaries) and queues each window's RMS
+     * for the ticker. Display-only: the buffered chunk above is untouched.
+     * The queue is bounded — a stalled ticker drops the oldest levels rather
+     * than growing memory. Caller holds [stateLock].
+     */
+    private fun sliceLevelsLocked(chunk: FloatArray) {
+        val source = if (windowCarry.isEmpty()) chunk else windowCarry + chunk
+        var offset = 0
+        while (source.size - offset >= AMPLITUDE_WINDOW_SAMPLES) {
+            val window = source.copyOfRange(offset, offset + AMPLITUDE_WINDOW_SAMPLES)
+            pendingLevels.addLast(AmplitudeCalculator.rms(window))
+            while (pendingLevels.size > MAX_PENDING_LEVELS) {
+                pendingLevels.removeFirst()
+            }
+            offset += AMPLITUDE_WINDOW_SAMPLES
+        }
+        windowCarry =
+            if (offset < source.size) source.copyOfRange(offset, source.size) else FloatArray(0)
+    }
+
+    /**
+     * Publishes one queued amplitude window every [AMPLITUDE_TICK_MS] —
+     * ~30 Hz, paced in wall time so the waveform flows at the rate the
+     * windows were recorded, whatever the capture chunk cadence. When the
+     * queue runs dry (capture momentarily behind), nothing publishes and
+     * the displayed level simply holds until the next chunk lands.
+     */
+    private suspend fun runLevelTicker() {
+        while (currentCoroutineContext().isActive) {
+            delay(AMPLITUDE_TICK_MS)
+            synchronized(stateLock) {
+                if (!recording) return@synchronized
+                val level = pendingLevels.removeFirstOrNull() ?: return@synchronized
+                latestAmplitude = level
+                publishRecordingLocked()
+                CadenceCounters.tickerPublish() // ENC-69 cadence counters (L1)
+            }
+        }
     }
 
     /**
@@ -204,6 +262,10 @@ class RecordingSessionManager @Inject constructor(
             if (!recording) return
             recording = false
             captureJob = null
+            levelJob?.cancel()
+            levelJob = null
+            pendingLevels.clear()
+            windowCarry = FloatArray(0)
             discarded = discardOnFinish
             discardOnFinish = false
             val buffered = assembleLocked()
@@ -265,8 +327,15 @@ class RecordingSessionManager @Inject constructor(
         const val MAX_RECORDING_SECONDS: Int = 180
         const val MAX_RECORDING_SAMPLES: Int = MAX_RECORDING_SECONDS * SilenceTrimmer.SAMPLE_RATE_HZ
 
-        /** Minimum audio time between published recording-state updates (~12 Hz). */
-        const val AMPLITUDE_PUBLISH_INTERVAL_MS: Long = 80L
+        /** Wall-time interval between amplitude publishes (~30 Hz level stream). */
+        const val AMPLITUDE_TICK_MS: Long = 33L
+
+        /** Samples per amplitude window: ~33 ms at 16 kHz — matches [AMPLITUDE_TICK_MS]. */
+        const val AMPLITUDE_WINDOW_SAMPLES: Int = 528
+
+        /** Bounded level queue (~3 s); overflow drops the oldest levels. */
+        const val MAX_PENDING_LEVELS: Int = 90
+
         const val MS_PER_SECOND: Long = 1_000L
     }
 }

@@ -44,4 +44,5 @@
     <string name="model_status_failed_format">Model: download failed — %1$s</string>
     <string name="model_retry">Retry download</string>
     <string name="model_hint">Dictation runs the Whisper model on this device (~148 MB, downloaded once). If a download fails, the exact reason shows above — no logcat needed. Audio never leaves the phone.</string>
+    <string name="build_tag_format">Build %1$s</string>
 </resources>
