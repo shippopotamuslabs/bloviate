@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.data
 
 import android.util.Log
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.AmplitudeCalculator
 import com.shippopotamus.bloviate.domain.evaluator.SilenceTrimmer
 import com.shippopotamus.bloviate.domain.model.ModelState
@@ -242,6 +243,7 @@ class RecordingSessionManager @Inject constructor(
                 val level = pendingLevels.removeFirstOrNull() ?: return@synchronized
                 latestAmplitude = level
                 publishRecordingLocked()
+                CadenceCounters.tickerPublish() // ENC-69 cadence counters (L1)
             }
         }
     }

@@ -10,6 +10,20 @@ kotlin {
     jvmToolchain(17)
 }
 
+// In-app build tag (ENC-69): the status screen shows the short SHA of the
+// commit the build was made from, so any installed build can be identified
+// exactly from inside the app. Read through the exec provider so it stays
+// configuration-cache compatible; falls back to "dev" when git or the
+// checkout is unavailable.
+val gitShortSha: String = try {
+    providers.exec {
+        commandLine("git", "rev-parse", "--short", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().ifEmpty { "dev" }
+} catch (exception: Exception) {
+    "dev"
+}
+
 android {
     namespace = "com.shippopotamus.bloviate"
     compileSdk = 37
@@ -20,6 +34,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

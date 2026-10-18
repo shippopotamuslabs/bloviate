@@ -29,6 +29,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shippopotamus.bloviate.BuildConfig
 import com.shippopotamus.bloviate.R
 
 /** Wires [MainViewModel] state into [MainScreen]; the route is the only place the ViewModel is touched. */
@@ -111,6 +112,14 @@ fun MainScreen(
             ModelStatusCard(
                 uiState = uiState,
                 onRetryModelDownload = onRetryModelDownload,
+            )
+            // Exact build identity, readable in-app (ENC-69): one-off test
+            // builds all report version 1.0, so the commit SHA is the only
+            // reliable way to tell which build is installed.
+            Text(
+                text = stringResource(R.string.build_tag_format, BuildConfig.GIT_SHA),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

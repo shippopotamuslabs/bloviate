@@ -26,6 +26,7 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
@@ -177,6 +178,7 @@ class BubbleOverlayService : Service() {
         recordingController = controller
         serviceScope.launch {
             controller.barState.collect { state ->
+                CadenceCounters.snapshotWrite() // ENC-69 cadence counters (L3)
                 barStateSnapshot.value = state
                 onBarStateChanged(state)
             }

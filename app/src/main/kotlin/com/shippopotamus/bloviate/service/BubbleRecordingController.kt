@@ -2,6 +2,7 @@ package com.shippopotamus.bloviate.service
 
 import android.os.SystemClock
 import android.util.Log
+import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
@@ -15,7 +16,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,6 +85,14 @@ class BubbleRecordingController(
     private var autoStopCollectJob: Job? = null
     private var pipelineJob: Job? = null
     private var resetJob: Job? = null
+
+    /**
+     * ENC-69 cadence instrumentation: whether the session stream is inside
+     * a recording (drives [CadenceCounters.begin]/totals) and the job that
+     * logs the per-second cadence summary while it runs.
+     */
+    private var cadenceRecordingSeen: Boolean = false
+    private var cadenceJob: Job? = null
 
     /**
      * Redraw tick for the current recording, published as
@@ -221,12 +232,19 @@ class BubbleRecordingController(
         autoStopCollectJob?.cancel()
         pipelineJob?.cancel()
         cancelResetJob()
+        stopCadenceSummary()
     }
 
     private suspend fun collectSessionState() {
         session.state.collect { state ->
             when (state) {
                 is RecordingSessionState.Recording -> {
+                    CadenceCounters.sessionReceipt() // ENC-69 cadence counters (L2r)
+                    if (!cadenceRecordingSeen) {
+                        cadenceRecordingSeen = true
+                        CadenceCounters.begin(nowMs())
+                        startCadenceSummary()
+                    }
                     val windowChanged = waveform.record(state.amplitude)
                     val bar = mutableBarState.value
                     if (bar == RecordingBarState.Idle) {
@@ -235,6 +253,7 @@ class BubbleRecordingController(
                         mutableBarState.update {
                             RecordingBarState.Recording(state.elapsedMs, recordingFrame)
                         }
+                        CadenceCounters.barPublish() // ENC-69 cadence counters (L2p)
                     } else if (bar is RecordingBarState.Recording &&
                         (state.elapsedMs != bar.elapsedMs || windowChanged)
                     ) {
@@ -247,11 +266,18 @@ class BubbleRecordingController(
                         mutableBarState.update {
                             RecordingBarState.Recording(state.elapsedMs, recordingFrame)
                         }
+                        CadenceCounters.barPublish() // ENC-69 cadence counters (L2p)
                     }
                 }
                 RecordingSessionState.Idle,
                 RecordingSessionState.Unavailable,
                 -> {
+                    if (cadenceRecordingSeen) {
+                        cadenceRecordingSeen = false
+                        stopCadenceSummary()
+                        Log.d(TAG, CadenceCounters.totalsLine())
+                        CadenceCounters.end()
+                    }
                     // The session ended without the bar's buttons (external
                     // cancel, capture failure): fall back to the mic bubble.
                     if (mutableBarState.value is RecordingBarState.Recording) {
@@ -261,6 +287,26 @@ class BubbleRecordingController(
                 }
             }
         }
+    }
+
+    /**
+     * ENC-69 cadence instrumentation: once a second while the session
+     * records, log the per-layer counts (see [CadenceCounters]). Pure
+     * observation — the job publishes nothing and touches no state.
+     */
+    private fun startCadenceSummary() {
+        if (cadenceJob != null) return
+        cadenceJob = scope.launch {
+            while (currentCoroutineContext().isActive) {
+                delay(CadenceCounters.SUMMARY_INTERVAL_MS)
+                CadenceCounters.summaryLineIfDue(nowMs())?.let { line -> Log.d(TAG, line) }
+            }
+        }
+    }
+
+    private fun stopCadenceSummary() {
+        cadenceJob?.cancel()
+        cadenceJob = null
     }
 
     private suspend fun collectAutoStopped() {
