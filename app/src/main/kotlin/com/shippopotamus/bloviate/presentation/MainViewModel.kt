@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,43 +25,60 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     observeFieldFocus: ObserveFieldFocusUseCase,
     private val isFieldWatcherEnabled: IsFieldWatcherEnabledUseCase,
+    private val isOverlayPermissionGranted: IsOverlayPermissionGrantedUseCase,
+    observeBubbleServiceRunning: ObserveBubbleServiceRunningUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
+    private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
 
     val uiState: StateFlow<MainUiState> = combine(
         observeFieldFocus(),
         watcherEnabled,
-    ) { focusState, enabled -> mapToUiState(focusState, enabled) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-            initialValue = mapToUiState(FieldFocusState.NoEditableFocus, isFieldWatcherEnabled()),
+        overlayPermissionGranted,
+        observeBubbleServiceRunning(),
+    ) { focusState, watcherOn, overlayGranted, bubbleRunning ->
+        mapToUiState(
+            focusState = focusState,
+            watcherEnabled = watcherOn,
+            overlayPermissionGranted = overlayGranted,
+            bubbleServiceRunning = bubbleRunning,
         )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
+        initialValue = mapToUiState(
+            focusState = FieldFocusState.NoEditableFocus,
+            watcherEnabled = isFieldWatcherEnabled(),
+            overlayPermissionGranted = isOverlayPermissionGranted(),
+            bubbleServiceRunning = observeBubbleServiceRunning().value,
+        ),
+    )
 
-    /** Re-reads the system setting; called when the screen resumes after a settings detour. */
+    /** Re-reads the system settings; called when the screen resumes after a settings detour. */
     fun onResumed() {
         watcherEnabled.update { isFieldWatcherEnabled() }
+        overlayPermissionGranted.update { isOverlayPermissionGranted() }
     }
 
     private fun mapToUiState(
         focusState: FieldFocusState,
         watcherEnabled: Boolean,
-    ): MainUiState =
-        when (focusState) {
-            FieldFocusState.NoEditableFocus -> MainUiState(watcherEnabled = watcherEnabled)
-            is FieldFocusState.EditableFocus ->
-                MainUiState(
-                    watcherEnabled = watcherEnabled,
-                    focusClassification = FocusClassification.EDITABLE,
-                    focusPackageName = focusState.packageName,
-                )
-            is FieldFocusState.PasswordFocus ->
-                MainUiState(
-                    watcherEnabled = watcherEnabled,
-                    focusClassification = FocusClassification.PASSWORD,
-                    focusPackageName = focusState.packageName,
-                )
+        overlayPermissionGranted: Boolean,
+        bubbleServiceRunning: Boolean,
+    ): MainUiState {
+        val (classification, packageName) = when (focusState) {
+            FieldFocusState.NoEditableFocus -> FocusClassification.NONE to null
+            is FieldFocusState.EditableFocus -> FocusClassification.EDITABLE to focusState.packageName
+            is FieldFocusState.PasswordFocus -> FocusClassification.PASSWORD to focusState.packageName
         }
+        return MainUiState(
+            watcherEnabled = watcherEnabled,
+            focusClassification = classification,
+            focusPackageName = packageName,
+            overlayPermissionGranted = overlayPermissionGranted,
+            bubbleServiceRunning = bubbleServiceRunning,
+        )
+    }
 
     private companion object {
         const val STATE_SHARING_TIMEOUT_MS = 5_000L

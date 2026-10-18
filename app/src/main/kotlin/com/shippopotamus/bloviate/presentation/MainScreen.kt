@@ -33,6 +33,9 @@ import com.shippopotamus.bloviate.R
 @Composable
 fun MainRoute(
     onOpenAccessibilitySettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onStartBubble: () -> Unit,
+    onStopBubble: () -> Unit,
     viewModel: MainViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
@@ -40,20 +43,27 @@ fun MainRoute(
     MainScreen(
         uiState = uiState,
         onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+        onOpenOverlaySettings = onOpenOverlaySettings,
+        onStartBubble = onStartBubble,
+        onStopBubble = onStopBubble,
         modifier = modifier,
     )
 }
 
 /**
  * Status screen: whether the accessibility watcher is enabled, a deep link to
- * the system setting, and the live field-focus classification published by the
- * watcher (package + classification only — never field content).
+ * the system setting, the live field-focus classification published by the
+ * watcher (package + classification only — never field content), and the
+ * bubble overlay permission + service controls.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     uiState: MainUiState,
     onOpenAccessibilitySettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onStartBubble: () -> Unit,
+    onStopBubble: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -70,10 +80,17 @@ fun MainScreen(
                 .navigationBarsPadding()
                 .imePadding()
                 .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             WatcherStatusCard(
                 uiState = uiState,
                 onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+            )
+            BubbleStatusCard(
+                uiState = uiState,
+                onOpenOverlaySettings = onOpenOverlaySettings,
+                onStartBubble = onStartBubble,
+                onStopBubble = onStopBubble,
             )
         }
     }
@@ -119,6 +136,67 @@ private fun WatcherStatusCard(
 }
 
 @Composable
+private fun BubbleStatusCard(
+    uiState: MainUiState,
+    onOpenOverlaySettings: () -> Unit,
+    onStartBubble: () -> Unit,
+    onStopBubble: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.bubble_card_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(
+                    if (uiState.overlayPermissionGranted) {
+                        R.string.bubble_overlay_granted
+                    } else {
+                        R.string.bubble_overlay_missing
+                    },
+                ),
+            )
+            Text(
+                text = stringResource(
+                    if (uiState.bubbleServiceRunning) {
+                        R.string.bubble_service_running
+                    } else {
+                        R.string.bubble_service_stopped
+                    },
+                ),
+            )
+            Button(
+                onClick = onOpenOverlaySettings,
+                enabled = !uiState.overlayPermissionGranted,
+            ) {
+                Text(text = stringResource(R.string.bubble_overlay_open_settings))
+            }
+            Button(
+                onClick = onStartBubble,
+                enabled = !uiState.bubbleServiceRunning,
+            ) {
+                Text(text = stringResource(R.string.bubble_start))
+            }
+            Button(
+                onClick = onStopBubble,
+                enabled = uiState.bubbleServiceRunning,
+            ) {
+                Text(text = stringResource(R.string.bubble_stop))
+            }
+            Text(
+                text = stringResource(R.string.bubble_hint),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
 private fun focusLabel(classification: FocusClassification): String =
     stringResource(
         when (classification) {
@@ -141,6 +219,9 @@ private fun MainScreenEmptyPreview() {
         MainScreen(
             uiState = MainUiState(),
             onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onStartBubble = {},
+            onStopBubble = {},
         )
     }
 }
@@ -160,8 +241,13 @@ private fun MainScreenPopulatedPreview() {
                 watcherEnabled = true,
                 focusClassification = FocusClassification.EDITABLE,
                 focusPackageName = "com.google.android.gm",
+                overlayPermissionGranted = true,
+                bubbleServiceRunning = true,
             ),
             onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onStartBubble = {},
+            onStopBubble = {},
         )
     }
 }

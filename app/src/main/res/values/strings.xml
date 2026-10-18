@@ -12,4 +12,18 @@
     <string name="focus_label_editable">Focused field: editable</string>
     <string name="focus_label_password">Focused field: password (bubble hidden)</string>
     <string name="focus_package_format">App: %1$s</string>
+    <string name="bubble_card_title">Bubble overlay</string>
+    <string name="bubble_overlay_granted">Overlay permission: granted</string>
+    <string name="bubble_overlay_missing">Overlay permission: not granted</string>
+    <string name="bubble_overlay_open_settings">Grant overlay permission</string>
+    <string name="bubble_service_running">Bubble service: running</string>
+    <string name="bubble_service_stopped">Bubble service: stopped</string>
+    <string name="bubble_start">Start bubble</string>
+    <string name="bubble_stop">Stop bubble</string>
+    <string name="bubble_hint">Start the bubble, then tap a text field in any app — the bubble appears only over editable fields, never on password fields. Drag it to move it (the spot is remembered), or drag it to the bottom edge to dismiss it for that field.</string>
+    <string name="bubble_channel_name">Bubble overlay</string>
+    <string name="bubble_notification_title">Bloviate bubble active</string>
+    <string name="bubble_notification_text">The dictation bubble appears over editable text fields.</string>
+    <string name="bubble_notification_stop">Stop</string>
+    <string name="bubble_content_description">Bloviate dictation bubble</string>
 </resources>

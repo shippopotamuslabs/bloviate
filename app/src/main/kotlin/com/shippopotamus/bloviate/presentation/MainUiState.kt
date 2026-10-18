@@ -8,11 +8,14 @@ enum class FocusClassification {
 }
 
 /**
- * Home/status screen state: watcher enablement plus the live field-focus
- * classification. Carries no domain types and never any field content.
+ * Home/status screen state: watcher enablement, the live field-focus
+ * classification, and bubble overlay permission + service state. Carries no
+ * domain types and never any field content.
  */
 data class MainUiState(
     val watcherEnabled: Boolean = false,
     val focusClassification: FocusClassification = FocusClassification.NONE,
     val focusPackageName: String? = null,
+    val overlayPermissionGranted: Boolean = false,
+    val bubbleServiceRunning: Boolean = false,
 )
