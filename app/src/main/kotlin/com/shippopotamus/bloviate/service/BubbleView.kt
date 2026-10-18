@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -49,6 +50,7 @@ import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import kotlin.math.hypot
+import kotlinx.coroutines.delay
 
 private val BUBBLE_SIZE: Dp = 56.dp
 private val BUBBLE_ICON_SIZE: Dp = 28.dp
@@ -69,6 +71,15 @@ private const val DISMISS_ZONE_SCALE: Float = 0.8f
 private const val FULL_SCALE: Float = 1f
 private const val QUIET_BAR_ALPHA: Float = 0.35f
 private const val SILENCE_THRESHOLD: Float = 0.05f
+
+/**
+ * Display windows for the transient Done/Error states, mirroring
+ * [BubbleRecordingController]'s timer values. The composition reports the
+ * elapse as a backstop (ENC-65): the controller's own timer normally wins,
+ * and the guarded transition makes the second report a no-op.
+ */
+private const val DONE_DISPLAY_MS: Long = 1_200L
+private const val ERROR_DISPLAY_MS: Long = 1_500L
 
 /** Waveform width for [WaveformHistory.DEFAULT_BAR_COUNT] bars. */
 private val WAVEFORM_WIDTH: Dp =
@@ -99,6 +110,13 @@ private val WAVEFORM_WIDTH: Dp =
  * and the session. Waveform levels are read through the [waveformLevels]
  * lambda inside the Canvas draw block — amplitude updates never recompose
  * this tree (`CODE_STYLE_RULES.md` §4.5).
+ *
+ * Done/Error auto-return: an effect keyed on the bar state reports the
+ * display window's elapse through [onTransientStateElapsed] (ENC-65). The
+ * recording controller runs the same return on its own timer; whichever
+ * fires first wins, so the bubble can never strand on the check or the
+ * error mark — the composition is provably alive whenever either is
+ * visible (the transcribing spinner animates in this same window).
  */
 @Composable
 fun BubbleContent(
@@ -108,12 +126,27 @@ fun BubbleContent(
     onTap: () -> Unit = {},
     onCancelRecording: () -> Unit = {},
     onSendRecording: () -> Unit = {},
+    onTransientStateElapsed: () -> Unit = {},
     onDragStart: () -> Unit = {},
     onDrag: (deltaXPx: Float, deltaYPx: Float, timeMs: Long) -> Unit = { _, _, _ -> },
     onDragEnd: () -> Unit = {},
     onDragCancel: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    LaunchedEffect(barState) {
+        val displayMs = when (barState) {
+            RecordingBarState.Done -> DONE_DISPLAY_MS
+            RecordingBarState.Error -> ERROR_DISPLAY_MS
+            RecordingBarState.Idle,
+            is RecordingBarState.Recording,
+            RecordingBarState.Transcribing,
+            -> null
+        }
+        if (displayMs != null) {
+            delay(displayMs)
+            onTransientStateElapsed()
+        }
+    }
     when (barState) {
         RecordingBarState.Idle -> MicBubble(
             inDismissZone = inDismissZone,

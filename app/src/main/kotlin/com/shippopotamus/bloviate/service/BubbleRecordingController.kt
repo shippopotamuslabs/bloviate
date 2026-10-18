@@ -33,6 +33,11 @@ import kotlinx.coroutines.withContext
  * finishes arrive on [RecordingSessionPort.autoStoppedRecordings] and take
  * the same send path as a check tap.
  *
+ * Done and Error are transient: the controller returns them to Idle on a
+ * timer ([DONE_DISPLAY_MS] / [ERROR_DISPLAY_MS]), and the overlay
+ * composition reports its own display-window elapse through
+ * [onTransientStateElapsed] as a backstop — whichever fires first wins.
+ *
  * The host window hiding (focus left the field — above all: a password
  * field gained focus) cancels any active recording and discards any
  * in-flight transcription: a transcript is never produced for a field the
@@ -146,6 +151,20 @@ class BubbleRecordingController(
         waveform.clear()
     }
 
+    /**
+     * The Done/Error display window has elapsed, reported by the overlay
+     * composition's own effect (ENC-65). The controller's timer
+     * ([scheduleReset]) is the primary return path; the composition calls
+     * this as a backstop so a transient state can never be stranded on the
+     * bubble if the controller's timer is ever swallowed by the overlay's
+     * lifecycle. Whichever fires first wins — the transition is guarded,
+     * so the second call is a no-op.
+     */
+    fun onTransientStateElapsed() {
+        cancelResetJob()
+        returnToIdleIfTransient()
+    }
+
     /** Cancels all collectors and in-flight work; the owning service is going away. */
     fun shutdown() {
         sessionCollectJob?.cancel()
@@ -217,10 +236,15 @@ class BubbleRecordingController(
         cancelResetJob()
         resetJob = scope.launch {
             delay(delayMs)
-            val bar = mutableBarState.value
-            if (bar == RecordingBarState.Done || bar == RecordingBarState.Error) {
-                mutableBarState.update { RecordingBarState.Idle }
-            }
+            returnToIdleIfTransient()
+        }
+    }
+
+    /** Transient states (Done/Error) fall back to the mic bubble; anything else is left alone. */
+    private fun returnToIdleIfTransient() {
+        val bar = mutableBarState.value
+        if (bar == RecordingBarState.Done || bar == RecordingBarState.Error) {
+            mutableBarState.update { RecordingBarState.Idle }
         }
     }
 

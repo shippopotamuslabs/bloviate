@@ -47,7 +47,9 @@ class BubbleRecordingControllerTest {
         runCurrent()
 
         assertEquals(RecordingBarState.Recording(elapsedMs = 1_000L), controller.barState.value)
-        assertEquals(listOf(0.5f), controller.waveform.levels())
+        // The history stores display levels: the raw amplitude is gained and
+        // smoothed (see WaveformHistory), so 0.5 raw lands at 0.55 display.
+        assertEquals(listOf(0.55f), controller.waveform.levels())
     }
 
     @Test
@@ -254,15 +256,62 @@ class BubbleRecordingControllerTest {
     fun `waveform levels accumulate while recording and clear on cancel`() = runTest {
         val controller = createController(backgroundScope)
         controller.onBubbleTap()
-        fakeSession.setRecording(elapsedMs = 100L, amplitude = 0.3f)
+        // Realistic mic RMS: quiet speech, then louder speech.
+        fakeSession.setRecording(elapsedMs = 100L, amplitude = 0.04f)
         runCurrent()
-        fakeSession.setRecording(elapsedMs = 200L, amplitude = 0.7f)
+        fakeSession.setRecording(elapsedMs = 200L, amplitude = 0.1f)
         runCurrent()
 
-        assertEquals(listOf(0.3f, 0.7f), controller.waveform.levels())
+        val levels = controller.waveform.levels()
+        assertEquals(2, levels.size)
+        assertTrue(levels[0] > 0.1f, "gained level should clear the stub range: $levels")
+        assertTrue(levels[1] > levels[0], "louder speech should raise the bar: $levels")
 
         controller.onCancelTap()
         assertTrue(controller.waveform.levels().isEmpty())
+    }
+
+    @Test
+    fun `a reported transient elapse returns done to idle without waiting for the timer`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "hello world"
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+
+        // The composition's backstop (ENC-65): no virtual time passes, yet
+        // the bubble must not strand on the check.
+        controller.onTransientStateElapsed()
+
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+    }
+
+    @Test
+    fun `a reported transient elapse returns error to idle`() = runTest {
+        val controller = createController(backgroundScope)
+        fakeSession.setState(RecordingSessionState.Unavailable)
+        runCurrent()
+        controller.onBubbleTap()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        controller.onTransientStateElapsed()
+
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+    }
+
+    @Test
+    fun `a reported transient elapse is a no-op outside the transient states`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+
+        controller.onTransientStateElapsed()
+
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 500L),
+            controller.barState.value,
+        )
+        assertEquals(0, fakeSession.cancelCallCount)
     }
 
     @Test
