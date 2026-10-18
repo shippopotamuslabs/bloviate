@@ -188,7 +188,16 @@ class BubbleOverlayService : Service() {
             modelStore.state.collect { state -> onModelStateChanged(state) }
         }
         serviceScope.launch {
-            recordingSession.state.collect { state -> Log.d(TAG, "Recording session state: $state") }
+            // Amplitude publishes at ~30 Hz (ENC-66): log state *transitions*
+            // only, or logcat drowns in Recording updates.
+            var lastLoggedSessionKind: String? = null
+            recordingSession.state.collect { state ->
+                val kind = state::class.simpleName
+                if (kind != lastLoggedSessionKind) {
+                    lastLoggedSessionKind = kind
+                    Log.d(TAG, "Recording session state: $state")
+                }
+            }
         }
         serviceScope.launch(Dispatchers.Default) {
             modelStore.ensureModel()
