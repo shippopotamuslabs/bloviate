@@ -84,6 +84,17 @@ class BubbleRecordingController(
     private var resetJob: Job? = null
 
     /**
+     * Redraw tick for the current recording, published as
+     * [RecordingBarState.Recording.frame]. Bumped when the elapsed time
+     * advances or the waveform window materially changes, so the published
+     * bar state actually differs at the waveform's cadence — an
+     * elapsed-only state stays equal between recorder chunks (~1 s) and
+     * StateFlow conflation starves the overlay's redraw (ENC-69). Reset
+     * whenever a recording is (re)entered from Idle.
+     */
+    private var recordingFrame: Long = 0L
+
+    /**
      * The stopped samples of a failed send, kept for the one retry tap
      * (§5.3). Null when there is nothing to retry.
      */
@@ -115,7 +126,9 @@ class BubbleRecordingController(
         when (val sessionState = session.state.value) {
             is RecordingSessionState.Recording -> {
                 // The bar fell behind the session (e.g. window re-shown mid-recording): resync.
-                mutableBarState.update { RecordingBarState.Recording(sessionState.elapsedMs) }
+                mutableBarState.update {
+                    RecordingBarState.Recording(sessionState.elapsedMs, recordingFrame)
+                }
             }
             RecordingSessionState.Idle -> {
                 waveform.clear()
@@ -214,10 +227,26 @@ class BubbleRecordingController(
         session.state.collect { state ->
             when (state) {
                 is RecordingSessionState.Recording -> {
-                    waveform.record(state.amplitude)
+                    val windowChanged = waveform.record(state.amplitude)
                     val bar = mutableBarState.value
-                    if (bar == RecordingBarState.Idle || bar is RecordingBarState.Recording) {
-                        mutableBarState.update { RecordingBarState.Recording(state.elapsedMs) }
+                    if (bar == RecordingBarState.Idle) {
+                        // (Re)entering the bar: start the redraw tick.
+                        recordingFrame = 1L
+                        mutableBarState.update {
+                            RecordingBarState.Recording(state.elapsedMs, recordingFrame)
+                        }
+                    } else if (bar is RecordingBarState.Recording &&
+                        (state.elapsedMs != bar.elapsedMs || windowChanged)
+                    ) {
+                        // Publish only on a real change: a new elapsed tick,
+                        // or a waveform frame the Canvas has not drawn yet.
+                        // Republishing an equal state would be conflated by
+                        // the StateFlow anyway — and in settled silence
+                        // neither input changes, so the bar rests (ENC-69).
+                        recordingFrame += 1
+                        mutableBarState.update {
+                            RecordingBarState.Recording(state.elapsedMs, recordingFrame)
+                        }
                     }
                 }
                 RecordingSessionState.Idle,

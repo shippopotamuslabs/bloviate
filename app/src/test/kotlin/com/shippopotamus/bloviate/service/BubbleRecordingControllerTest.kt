@@ -10,12 +10,14 @@ import com.shippopotamus.bloviate.testing.FakeTranscriptionEngine
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -50,7 +52,10 @@ class BubbleRecordingControllerTest {
         fakeSession.setRecording(elapsedMs = 1_000L, amplitude = 0.5f)
         runCurrent()
 
-        assertEquals(RecordingBarState.Recording(elapsedMs = 1_000L), controller.barState.value)
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 1_000L, frame = 1L),
+            controller.barState.value,
+        )
         // The history stores display levels: the raw amplitude is sqrt-scaled
         // and enveloped (see WaveformHistory). 0.5 raw RMS is loud — it maps
         // to a full-scale target, and one attack frame (0.7) lands at 0.7.
@@ -65,7 +70,39 @@ class BubbleRecordingControllerTest {
         fakeSession.setRecording(elapsedMs = 2_500L, amplitude = 0.4f)
         runCurrent()
 
-        assertEquals(RecordingBarState.Recording(elapsedMs = 2_500L), controller.barState.value)
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 2_500L, frame = 2L),
+            controller.barState.value,
+        )
+    }
+
+    @Test
+    fun `a new amplitude at the same elapsed republishes a distinguishable bar state`() = runTest {
+        // Regression (ENC-69): elapsedMs is sample-count-derived and only
+        // advances when a recorder chunk lands (~1 s), while amplitudes
+        // stream at ~30 Hz. Publishing an elapsed-only state made every
+        // in-between value equal, so StateFlow conflation swallowed them
+        // and the overlay waveform redrew at ~1 Hz on device.
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+
+        // Same chunk (elapsed unchanged), a different voice level.
+        fakeSession.setRecording(elapsedMs = 500L, amplitude = 0.05f)
+        runCurrent()
+
+        val recordings = emissions.filterIsInstance<RecordingBarState.Recording>()
+        assertTrue(
+            recordings.size >= 2,
+            "the level change must republish the bar state, got $emissions",
+        )
+        val first = recordings.first()
+        val last = recordings.last()
+        assertEquals(first.elapsedMs, last.elapsedMs)
+        assertNotEquals(first, last)
+        assertTrue(last.frame > first.frame, "the redraw tick must advance: $recordings")
+        assertEquals(last, controller.barState.value)
     }
 
     @Test
@@ -313,7 +350,7 @@ class BubbleRecordingControllerTest {
         controller.onTransientStateElapsed()
 
         assertEquals(
-            RecordingBarState.Recording(elapsedMs = 500L),
+            RecordingBarState.Recording(elapsedMs = 500L, frame = 1L),
             controller.barState.value,
         )
         assertEquals(0, fakeSession.cancelCallCount)
@@ -496,7 +533,10 @@ class BubbleRecordingControllerTest {
         controller.onBubbleTap()
         fakeSession.setRecording(elapsedMs = 500L, amplitude = 0.5f)
         runCurrent()
-        assertEquals(RecordingBarState.Recording(elapsedMs = 500L), controller.barState.value)
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 500L, frame = 1L),
+            controller.barState.value,
+        )
     }
 
     private companion object {

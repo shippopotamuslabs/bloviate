@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -28,6 +29,14 @@ import kotlin.math.sqrt
  * Frames arrive at ~30 Hz from the session manager's amplitude ticker
  * (ENC-66), so one bar spans ~33 ms and the full window ~1/3 s of audio.
  *
+ * [record] reports whether the drawn window materially changed, which the
+ * recording controller uses to pace bar redraws (ENC-69): a level stream
+ * alone cannot move the UI, because the bar state between recorder chunks
+ * would otherwise stay equal and be conflated away — the Canvas would only
+ * redraw when the elapsed time ticks (~1 Hz). In settled silence the
+ * envelope decays until successive windows agree within
+ * [LEVEL_CHANGE_EPSILON], [record] reports no change, and the bar rests.
+ *
  * Not thread-safe by design: levels are recorded from the overlay service's
  * main-thread session collector and read on the main thread at draw time.
  */
@@ -41,15 +50,38 @@ class WaveformHistory(
     /**
      * Append one raw RMS amplitude; the stored display level is the scaled,
      * enveloped value. The oldest level drops off once the window is full.
+     *
+     * @return true when the window a Canvas would draw materially changed —
+     * the window grew, or any bar moved by more than [LEVEL_CHANGE_EPSILON].
+     * False means the new frame is visually identical to the previous one
+     * (settled silence), so no redraw is owed.
      */
-    fun record(amplitude: Float) {
+    fun record(amplitude: Float): Boolean {
         val target = displayLevel(amplitude)
         val alpha = if (target > envelopedLevel) ATTACK_ALPHA else RELEASE_ALPHA
-        envelopedLevel += (target - envelopedLevel) * alpha
+        val newLevel = envelopedLevel + (target - envelopedLevel) * alpha
+        val changed = windowWouldChange(newLevel)
+        envelopedLevel = newLevel
         recorded.addLast(envelopedLevel)
         while (recorded.size > barCount) {
             recorded.removeFirst()
         }
+        return changed
+    }
+
+    /**
+     * Whether appending [newLevel] (dropping the head when the window is
+     * full) would change any drawn bar by more than [LEVEL_CHANGE_EPSILON].
+     * A growing window always counts as changed: a new bar appears.
+     */
+    private fun windowWouldChange(newLevel: Float): Boolean {
+        if (recorded.size < barCount) return true
+        // Full window: the post-record window is the current one shifted by
+        // one, with newLevel in the last slot.
+        for (index in 0 until barCount - 1) {
+            if (abs(recorded[index + 1] - recorded[index]) > LEVEL_CHANGE_EPSILON) return true
+        }
+        return abs(newLevel - recorded[barCount - 1]) > LEVEL_CHANGE_EPSILON
     }
 
     /** Current display levels, oldest first, at most [barCount] entries, each in 0..1. */
@@ -80,6 +112,14 @@ class WaveformHistory(
 
         /** Envelope release per ~33 ms frame: silence settles to baseline in ~200 ms. */
         private const val RELEASE_ALPHA: Float = 0.4f
+
+        /**
+         * Bar movements at or below this fraction of full scale are not a
+         * material change: on the 28 dp waveform this is a fraction of a
+         * pixel, and settled-silence envelope residue decays through it
+         * quickly, letting the bar come fully to rest (ENC-69).
+         */
+        private const val LEVEL_CHANGE_EPSILON: Float = 0.005f
 
         /** Soft (sqrt) loudness scaling of a raw RMS amplitude into display range 0..1. */
         fun displayLevel(amplitude: Float): Float =

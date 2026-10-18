@@ -206,6 +206,39 @@ class WaveformHistoryTest {
     }
 
     @Test
+    fun `record reports a change while the window is filling and levels are moving`() {
+        val history = WaveformHistory()
+
+        assertTrue(history.record(0.5f))
+        assertTrue(history.record(0.05f))
+        assertTrue(history.record(0.9f))
+    }
+
+    @Test
+    fun `record stops reporting changes once silence has fully settled`() {
+        val history = WaveformHistory()
+        history.record(0.5f)
+
+        // The release envelope decays geometrically; after enough silent
+        // frames every bar sits within the change epsilon of its neighbour,
+        // so further silent frames are visually identical (ENC-69).
+        var lastReportedChange = true
+        repeat(60) { lastReportedChange = history.record(0f) }
+
+        assertEquals(false, lastReportedChange)
+        assertEquals(false, history.record(0f))
+    }
+
+    @Test
+    fun `record reports a change again when sound follows settled silence`() {
+        val history = WaveformHistory()
+        history.record(0.5f)
+        repeat(60) { history.record(0f) }
+
+        assertTrue(history.record(0.3f))
+    }
+
+    @Test
     fun `height fraction maps silence to the stub and full level to the whole area`() {
         assertEquals(0.15f, WaveformHistory.heightFraction(0f), FLOAT_DELTA)
         assertEquals(1f, WaveformHistory.heightFraction(1f), FLOAT_DELTA)

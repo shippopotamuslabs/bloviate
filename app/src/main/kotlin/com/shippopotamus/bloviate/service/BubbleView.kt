@@ -108,8 +108,13 @@ private val WAVEFORM_WIDTH: Dp =
  * hosting ComposeView would starve. High-level events go to the overlay
  * service's drag controller / recording controller, which own the window
  * and the session. Waveform levels are read through the [waveformLevels]
- * lambda inside the Canvas draw block — amplitude updates never recompose
- * this tree (`CODE_STYLE_RULES.md` §4.5).
+ * lambda inside the Canvas draw block (`CODE_STYLE_RULES.md` §4.5) — the
+ * level list itself never enters snapshot state. What paces the redraw is
+ * [RecordingBarState.Recording.frame]: the controller bumps it whenever
+ * the waveform window materially changes, so this branch recomposes at
+ * the level cadence (~30 Hz while speaking) and the Canvas draws the
+ * fresh levels; between recorder chunks an elapsed-only state would be
+ * equal, conflated, and the wave would step at ~1 Hz (ENC-69).
  *
  * Done/Error auto-return: an effect keyed on the bar state reports the
  * display window's elapse through [onTransientStateElapsed] (ENC-65). The
