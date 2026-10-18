@@ -51,9 +51,10 @@ class BubbleRecordingControllerTest {
         runCurrent()
 
         assertEquals(RecordingBarState.Recording(elapsedMs = 1_000L), controller.barState.value)
-        // The history stores display levels: the raw amplitude is gained and
-        // smoothed (see WaveformHistory), so 0.5 raw lands at 0.55 display.
-        assertEquals(listOf(0.55f), controller.waveform.levels())
+        // The history stores display levels: the raw amplitude is sqrt-scaled
+        // and enveloped (see WaveformHistory). 0.5 raw RMS is loud — it maps
+        // to a full-scale target, and one attack frame (0.7) lands at 0.7.
+        assertEquals(listOf(0.7f), controller.waveform.levels())
     }
 
     @Test

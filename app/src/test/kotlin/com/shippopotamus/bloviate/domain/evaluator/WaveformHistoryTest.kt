@@ -137,6 +137,75 @@ class WaveformHistoryTest {
     }
 
     @Test
+    fun `sustained conversational speech lives mid-range and never pins at max`() {
+        // ENC-66: the old linear gain saturated at RMS 0.125, so steady
+        // talking parked every bar at full scale. With sqrt scaling, a
+        // steady conversational RMS (0.08) settles around sqrt(0.08 * 5).
+        val history = WaveformHistory()
+
+        repeat(30) { history.record(0.08f) }
+
+        val settled = history.levels().last()
+        assertTrue(settled in 0.5f..0.75f, "mid speech should settle mid-range, got $settled")
+        assertTrue(history.levels().none { it >= 0.99f }, "no bar may pin at max: ${history.levels()}")
+    }
+
+    @Test
+    fun `attack rises most of a burst within two frames`() {
+        val history = WaveformHistory()
+        repeat(10) { history.record(0f) }
+
+        history.record(0.2f)
+        history.record(0.2f)
+
+        // Full-scale target (sqrt(0.2 * 5) = 1): two attack frames at 0.7
+        // cover 1 - 0.3^2 = 91% of the step.
+        assertTrue(history.levels().last() > 0.85f, "burst should register fast: ${history.levels()}")
+    }
+
+    @Test
+    fun `release falls slower than attack rises`() {
+        val history = WaveformHistory()
+        repeat(20) { history.record(0.2f) }
+        val peak = history.levels().last()
+
+        history.record(0f)
+
+        // One release frame sheds only the release fraction (0.4) of the
+        // level — visibly above where one attack frame would have put the
+        // mirror-image rise from silence (0.7 of the way would be a fall
+        // to 0.3 of peak; release leaves 0.6 of peak).
+        val afterOneSilentFrame = history.levels().last()
+        assertTrue(
+            afterOneSilentFrame > peak * 0.5f,
+            "release must glide, not step: peak $peak -> $afterOneSilentFrame",
+        )
+    }
+
+    @Test
+    fun `silence settles back to the quiet baseline`() {
+        val history = WaveformHistory()
+        repeat(10) { history.record(0.15f) }
+
+        repeat(30) { history.record(0f) }
+
+        assertTrue(
+            history.levels().last() < 0.02f,
+            "silence must settle to baseline: ${history.levels().last()}",
+        )
+    }
+
+    @Test
+    fun `display level maps raw rms through the soft curve`() {
+        assertEquals(0f, WaveformHistory.displayLevel(0f), FLOAT_DELTA)
+        // Conversational middle: sqrt(0.05 * 5) = 0.5.
+        assertEquals(0.5f, WaveformHistory.displayLevel(0.05f), FLOAT_DELTA)
+        // Loud close speech reaches full scale; beyond that clamps.
+        assertEquals(1f, WaveformHistory.displayLevel(0.2f), FLOAT_DELTA)
+        assertEquals(1f, WaveformHistory.displayLevel(0.9f), FLOAT_DELTA)
+    }
+
+    @Test
     fun `height fraction maps silence to the stub and full level to the whole area`() {
         assertEquals(0.15f, WaveformHistory.heightFraction(0f), FLOAT_DELTA)
         assertEquals(1f, WaveformHistory.heightFraction(1f), FLOAT_DELTA)
