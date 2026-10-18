@@ -1,6 +1,8 @@
 package com.shippopotamus.bloviate.service
 
 import android.content.res.Configuration
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -14,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -33,10 +36,13 @@ private const val FULL_SCALE: Float = 1f
 
 /**
  * The floating dictation bubble, Idle state (see `contracts/UI_DESIGN_SPEC.md`
- * §3). Purely visual: touch is intercepted by the overlay service's drag
- * controller before it reaches the composition, and window show/hide is
- * driven by field focus. While the bubble is dragged inside the dismiss zone
- * it shrinks toward the zone as the dismissal affordance.
+ * §3). Gestures are detected here, inside the composition: the composition's
+ * internal child view is the touch target, so a view-level touch listener on
+ * the hosting ComposeView would starve. The `pointerInput` detectors below
+ * report high-level events to the overlay service's gesture handler, which
+ * owns the window; show/hide is driven by field focus. While the bubble is
+ * dragged inside the dismiss zone it shrinks toward the zone as the
+ * dismissal affordance.
  *
  * Recording/Transcribing/Done/Error visuals land with the pipeline in
  * Phase 2 (ENC-48).
@@ -44,6 +50,12 @@ private const val FULL_SCALE: Float = 1f
 @Composable
 fun BubbleContent(
     inDismissZone: Boolean,
+    onTap: () -> Unit = {},
+    onLongPress: () -> Unit = {},
+    onDragStart: () -> Unit = {},
+    onDrag: (deltaXPx: Float, deltaYPx: Float, timeMs: Long) -> Unit = { _, _, _ -> },
+    onDragEnd: () -> Unit = {},
+    onDragCancel: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val description = stringResource(R.string.bubble_content_description)
@@ -61,6 +73,23 @@ fun BubbleContent(
     Surface(
         modifier = modifier
             .size(BUBBLE_SIZE)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onTap() },
+                    onLongPress = { onLongPress() },
+                )
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { onDragStart() },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.x, dragAmount.y, change.uptimeMillis)
+                    },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragCancel() },
+                )
+            }
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale

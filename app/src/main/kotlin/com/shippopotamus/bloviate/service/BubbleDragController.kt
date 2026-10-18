@@ -1,33 +1,35 @@
 package com.shippopotamus.bloviate.service
 
-import android.view.MotionEvent
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.runtime.MutableState
-import com.shippopotamus.bloviate.domain.evaluator.BubbleGestureClassifier
+import com.shippopotamus.bloviate.domain.evaluator.BubbleDragSession
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
 import com.shippopotamus.bloviate.domain.model.BubbleGesture
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
-import com.shippopotamus.bloviate.domain.model.PointerSample
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
 import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
-import kotlin.math.hypot
-import kotlin.math.roundToInt
 
 /**
- * Touch handling for the bubble window. Attached as the [View.OnTouchListener]
- * of the bubble's ComposeView, so every touch on the bubble lands here and
- * Compose stays purely visual.
+ * Gesture handling for the bubble window, driven by the gesture callbacks of
+ * the bubble's own composition (`BubbleContent`'s `pointerInput` detectors).
  *
- * Live behavior: once movement passes the touch slop, the window follows the
- * finger (clamped on-screen) and [inDismissZone] tracks whether the bubble's
- * center is inside the bottom dismiss zone, driving the shrink affordance.
- * On release, the completed sample sequence goes through
- * [BubbleGestureClassifier]: tap/long-press are routed to [BubbleActionsPort],
- * a drag persists its end position via [onDragEnded], and a drag ending in
- * the dismiss zone requests dismissal via [onDismissRequested].
+ * Gestures are deliberately NOT handled with a [View.OnTouchListener] on the
+ * ComposeView: the composition's internal child view becomes the touch target
+ * on `ACTION_DOWN` and consumes the stream, so a view-level listener never
+ * receives a usable move sequence and the window cannot follow the finger.
+ * Detecting inside the composition and reporting high-level events here keeps
+ * the window mutation and classification in one place.
+ *
+ * Tap and long-press route to [BubbleActionsPort]. A drag accumulates in a
+ * [BubbleDragSession]: the window follows the finger (clamped on-screen),
+ * [inDismissZone] tracks whether the bubble's center is inside the bottom
+ * dismiss zone (driving the shrink affordance), and on release a drag
+ * persists its end position via [onDragEnded] while a drag released in the
+ * dismiss zone requests dismissal via [onDismissRequested].
  */
 class BubbleDragController(
     private val windowManager: WindowManager,
@@ -39,58 +41,34 @@ class BubbleDragController(
     private val inDismissZone: MutableState<Boolean>,
 ) {
 
-    private val classifier = BubbleGestureClassifier()
     private val touchSlopPx: Float = ViewConfiguration.get(bubbleView.context).scaledTouchSlop.toFloat()
     private val longPressTimeoutMs: Long = ViewConfiguration.getLongPressTimeout().toLong()
 
-    private val samples = mutableListOf<PointerSample>()
-    private var dragOrigin = BubblePixelPosition(xPx = 0, yPx = 0)
-    private var dragging: Boolean = false
+    private var session: BubbleDragSession? = null
 
-    /** Attach to the bubble view. Consumes every event on the bubble. */
-    val touchListener: View.OnTouchListener = View.OnTouchListener { _, event -> handleTouchEvent(event) }
-
-    private fun handleTouchEvent(event: MotionEvent): Boolean =
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                onDown(event)
-                true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                onMove(event)
-                true
-            }
-            MotionEvent.ACTION_UP -> {
-                onUp(event)
-                true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                resetGesture()
-                true
-            }
-            else -> false
-        }
-
-    private fun onDown(event: MotionEvent) {
-        samples.clear()
-        samples += event.toSample()
-        dragOrigin = BubblePixelPosition(xPx = layoutParams.x, yPx = layoutParams.y)
-        dragging = false
+    fun onTap() {
+        actions.onTap()
     }
 
-    private fun onMove(event: MotionEvent) {
-        if (samples.isEmpty()) return
-        val sample = event.toSample()
-        samples += sample
-        if (!dragging && !exceedsSlop(sample)) return
-        dragging = true
-        val down = samples.first()
+    fun onLongPress() {
+        actions.onLongPress()
+    }
+
+    /** The drag detector crossed its slop gate; anchor a session at the current window position. */
+    fun onDragStart() {
+        session = BubbleDragSession(
+            originTopLeft = BubblePixelPosition(xPx = layoutParams.x, yPx = layoutParams.y),
+            startTimeMs = SystemClock.uptimeMillis(),
+        )
+    }
+
+    fun onDrag(deltaXPx: Float, deltaYPx: Float, timeMs: Long) {
+        val activeSession = session ?: return
         val bounds = currentBounds()
-        val moved = BubblePositionMath.clamp(
-            topLeft = BubblePixelPosition(
-                xPx = dragOrigin.xPx + (sample.xPx - down.xPx).roundToInt(),
-                yPx = dragOrigin.yPx + (sample.yPx - down.yPx).roundToInt(),
-            ),
+        val moved = activeSession.dragBy(
+            deltaXPx = deltaXPx,
+            deltaYPx = deltaYPx,
+            timeMs = timeMs,
             bubbleWidthPx = bubbleView.width,
             bubbleHeightPx = bubbleView.height,
             bounds = bounds,
@@ -104,30 +82,27 @@ class BubbleDragController(
         )
     }
 
-    private fun onUp(event: MotionEvent) {
-        if (samples.isEmpty()) {
-            resetGesture()
-            return
-        }
-        samples += event.toSample()
-        val gesture = classifier.classify(
-            samples = samples.toList(),
+    fun onDragEnd() {
+        val activeSession = session ?: return
+        session = null
+        val gesture = activeSession.finish(
             touchSlopPx = touchSlopPx,
             longPressTimeoutMs = longPressTimeoutMs,
-            endInDismissZone = dragging && inDismissZone.value,
+            endInDismissZone = inDismissZone.value,
         )
-        when (gesture) {
-            BubbleGesture.Tap -> actions.onTap()
-            BubbleGesture.LongPress -> actions.onLongPress()
-            BubbleGesture.Drag -> onDragEnded(currentNormalizedPosition())
-            BubbleGesture.DragDismiss -> onDismissRequested()
+        inDismissZone.value = false
+        // The session guarantees a drag verdict (see BubbleDragSession.finish):
+        // a dismiss ends the field session, any other drag persists its position.
+        if (gesture == BubbleGesture.DragDismiss) {
+            onDismissRequested()
+        } else {
+            onDragEnded(currentNormalizedPosition())
         }
-        resetGesture()
     }
 
-    private fun exceedsSlop(sample: PointerSample): Boolean {
-        val down = samples.first()
-        return hypot(sample.xPx - down.xPx, sample.yPx - down.yPx) > touchSlopPx
+    fun onDragCancel() {
+        session = null
+        inDismissZone.value = false
     }
 
     private fun currentNormalizedPosition(): BubblePosition =
@@ -142,15 +117,6 @@ class BubbleDragController(
         val rect = windowManager.currentWindowMetrics.bounds
         return ScreenBounds(widthPx = rect.width(), heightPx = rect.height())
     }
-
-    private fun resetGesture() {
-        samples.clear()
-        dragging = false
-        inDismissZone.value = false
-    }
-
-    private fun MotionEvent.toSample(): PointerSample =
-        PointerSample(timeMs = eventTime, xPx = rawX, yPx = rawY)
 
     private companion object {
         const val CENTER_DIVISOR: Int = 2

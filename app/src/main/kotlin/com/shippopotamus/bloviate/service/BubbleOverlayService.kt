@@ -160,14 +160,9 @@ class BubbleOverlayService : Service() {
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
-            setContent {
-                MaterialTheme(
-                    colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-                ) {
-                    BubbleContent(inDismissZone = inDismissZone.value)
-                }
-            }
         }
+        // Gestures are detected inside the composition (see BubbleContent):
+        // the drag controller only handles the high-level events it reports.
         val dragController = BubbleDragController(
             windowManager = windowManager,
             bubbleView = view,
@@ -177,7 +172,21 @@ class BubbleOverlayService : Service() {
             onDragEnded = { position -> serviceScope.launch { saveBubblePosition(position) } },
             inDismissZone = inDismissZone,
         )
-        view.setOnTouchListener(dragController.touchListener)
+        view.setContent {
+            MaterialTheme(
+                colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
+            ) {
+                BubbleContent(
+                    inDismissZone = inDismissZone.value,
+                    onTap = dragController::onTap,
+                    onLongPress = dragController::onLongPress,
+                    onDragStart = dragController::onDragStart,
+                    onDrag = dragController::onDrag,
+                    onDragEnd = dragController::onDragEnd,
+                    onDragCancel = dragController::onDragCancel,
+                )
+            }
+        }
         windowManager.addView(view, params)
         lifecycleOwner = owner
         bubbleView = view
