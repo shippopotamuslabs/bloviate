@@ -6,9 +6,9 @@ import com.shippopotamus.bloviate.domain.evaluator.AmplitudeCalculator
 import com.shippopotamus.bloviate.domain.evaluator.SilenceTrimmer
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -50,12 +50,13 @@ import javax.inject.Singleton
  * chunks are stored whole, exactly as captured.
  *
  * Availability: the published state is [RecordingSessionState.Unavailable]
- * unless the model is [ModelState.Ready] and the mic permission is granted.
+ * unless the **selected engine's** model is [ModelState.Ready] (via
+ * [ActiveModelStorePort], ENC-54) and the mic permission is granted.
  */
 @Singleton
 class RecordingSessionManager @Inject constructor(
     private val audioCapture: AudioCapturePort,
-    private val modelStore: ModelStorePort,
+    private val modelStore: ActiveModelStorePort,
     private val micPermission: MicPermissionPort,
     private val sessionScope: CoroutineScope,
 ) : RecordingSessionPort {

@@ -2,16 +2,23 @@ package com.shippopotamus.bloviate.di
 
 import android.content.Context
 import com.shippopotamus.bloviate.data.AndroidMicPermissionAccess
+import com.shippopotamus.bloviate.data.DataStoreEnginePreferenceStore
 import com.shippopotamus.bloviate.data.HttpModelFileDownloader
 import com.shippopotamus.bloviate.data.LibraryAudioCapture
 import com.shippopotamus.bloviate.data.ModelFileDownloader
-import com.shippopotamus.bloviate.data.OnDeviceWhisperTranscriptionEngine
+import com.shippopotamus.bloviate.data.ParakeetModelFileSet
+import com.shippopotamus.bloviate.data.ParakeetModelStore
 import com.shippopotamus.bloviate.data.RecordingSessionManager
+import com.shippopotamus.bloviate.data.SelectedModelStore
+import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
 import com.shippopotamus.bloviate.domain.evaluator.BaselineTextPostProcessor
+import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
+import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
@@ -32,8 +39,15 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class VoiceModule {
 
+    /** The bound engine is the selector: it delegates to Whisper or Parakeet per the persisted preference (ENC-54). */
     @Binds
-    abstract fun bindTranscriptionEngine(engine: OnDeviceWhisperTranscriptionEngine): TranscriptionEngine
+    abstract fun bindTranscriptionEngine(engine: SelectingTranscriptionEngine): TranscriptionEngine
+
+    @Binds
+    abstract fun bindEnginePreferencePort(store: DataStoreEnginePreferenceStore): EnginePreferencePort
+
+    @Binds
+    abstract fun bindActiveModelStorePort(store: SelectedModelStore): ActiveModelStorePort
 
     @Binds
     abstract fun bindAudioCapturePort(capture: LibraryAudioCapture): AudioCapturePort
@@ -62,6 +76,17 @@ abstract class VoiceModule {
             WhisperModelStore(
                 modelDir = File(context.filesDir, MODEL_DIR_NAME),
                 downloader = downloader,
+            )
+
+        /** Parakeet's store downloads four files from four URLs, so it gets a downloader factory. */
+        @Provides
+        @Singleton
+        fun provideParakeetModelStorePort(
+            @ApplicationContext context: Context,
+        ): ParakeetModelStorePort =
+            ParakeetModelStore(
+                modelDir = File(File(context.filesDir, MODEL_DIR_NAME), ParakeetModelFileSet.MODEL_NAME),
+                downloaderFactory = { url -> HttpModelFileDownloader(url = url) },
             )
 
         /** Scope owning the recording session's capture/availability coroutines. */

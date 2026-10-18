@@ -2,16 +2,21 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
+import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,6 +42,10 @@ class MainViewModel @Inject constructor(
     private val refreshMicPermission: RefreshMicPermissionUseCase,
     observeModelState: ObserveModelStateUseCase,
     private val ensureModel: EnsureModelUseCase,
+    observeParakeetModelState: ObserveParakeetModelStateUseCase,
+    private val ensureParakeetModel: EnsureParakeetModelUseCase,
+    observeEnginePreference: ObserveEnginePreferenceUseCase,
+    private val selectEngine: SelectEngineUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
@@ -71,18 +80,47 @@ class MainViewModel @Inject constructor(
     val uiState: StateFlow<MainUiState> = combine(
         baseUiState,
         observeModelState(),
-    ) { baseState, modelState ->
-        baseState.copy(modelStatus = mapModelStatus(modelState))
+        observeParakeetModelState(),
+        observeEnginePreference(),
+    ) { baseState, whisperState, parakeetState, engine ->
+        baseState.copy(
+            whisperModelStatus = mapModelStatus(whisperState),
+            parakeetModelStatus = mapModelStatus(parakeetState),
+            selectedEngine = mapEngine(engine),
+        )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-        initialValue = baseUiState.value.copy(modelStatus = mapModelStatus(observeModelState().value)),
+        initialValue = baseUiState.value.copy(
+            whisperModelStatus = mapModelStatus(observeModelState().value),
+            parakeetModelStatus = mapModelStatus(observeParakeetModelState().value),
+            selectedEngine = mapEngine(observeEnginePreference().value),
+        ),
     )
 
-    /** Model card retry: re-runs the store's ensure (download + verify) in the background. */
-    fun onRetryModelDownload() {
+    /** Whisper row download/retry: re-runs the store's ensure (download + verify) in the background. */
+    fun onWhisperDownloadClick() {
         viewModelScope.launch {
             ensureModel()
+        }
+    }
+
+    /** Parakeet row download/retry: downloads + verifies the ~640 MiB model set in the background. */
+    fun onParakeetDownloadClick() {
+        viewModelScope.launch {
+            ensureParakeetModel()
+        }
+    }
+
+    /** Engine toggle: persists the choice; the next dictation transcribes with it. */
+    fun onSelectEngine(engine: DictationEngineUi) {
+        viewModelScope.launch {
+            selectEngine(
+                when (engine) {
+                    DictationEngineUi.WHISPER -> DictationEngine.WHISPER
+                    DictationEngineUi.PARAKEET -> DictationEngine.PARAKEET
+                },
+            )
         }
     }
 
@@ -134,6 +172,12 @@ class MainViewModel @Inject constructor(
                 )
             ModelState.Ready -> ModelUiStatus.Ready
             is ModelState.Failed -> ModelUiStatus.Failed(reason = modelState.reason)
+        }
+
+    private fun mapEngine(engine: DictationEngine): DictationEngineUi =
+        when (engine) {
+            DictationEngine.WHISPER -> DictationEngineUi.WHISPER
+            DictationEngine.PARAKEET -> DictationEngineUi.PARAKEET
         }
 
     private companion object {

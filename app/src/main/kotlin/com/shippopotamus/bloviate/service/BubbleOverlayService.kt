@@ -36,8 +36,9 @@ import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
+import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
+import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
@@ -109,7 +110,10 @@ class BubbleOverlayService : Service() {
     lateinit var textPostProcessor: TextPostProcessor
 
     @Inject
-    lateinit var modelStore: ModelStorePort
+    lateinit var modelStore: ActiveModelStorePort
+
+    @Inject
+    lateinit var enginePreference: EnginePreferencePort
 
     @Inject
     lateinit var transcriptionEngine: TranscriptionEngine
@@ -173,6 +177,7 @@ class BubbleOverlayService : Service() {
             transcriptionEngine = transcriptionEngine,
             textPostProcessor = textPostProcessor,
             transcriptSink = transcriptSink,
+            enginePreference = enginePreference,
             scope = serviceScope,
         )
         recordingController = controller

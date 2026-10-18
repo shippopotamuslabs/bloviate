@@ -37,12 +37,20 @@
     <string name="mic_status_missing">Microphone permission: not granted</string>
     <string name="mic_request">Grant microphone permission</string>
     <string name="mic_hint">Dictation needs the microphone. Grant it here; the bubble service then runs with the microphone foreground-service type and recording becomes available once the model has downloaded (watch logcat tags “ModelStore”, “TranscriptionEngine”, “RecordingSession”).</string>
-    <string name="model_card_title">Transcription model</string>
-    <string name="model_status_absent">Model: not downloaded yet</string>
-    <string name="model_status_downloading_format">Model: downloading — %1$d%%</string>
-    <string name="model_status_ready">Model: ready (Whisper base.en, on-device)</string>
-    <string name="model_status_failed_format">Model: download failed — %1$s</string>
-    <string name="model_retry">Retry download</string>
-    <string name="model_hint">Dictation runs the Whisper model on this device (~148 MB, downloaded once). If a download fails, the exact reason shows above — no logcat needed. Audio never leaves the phone.</string>
+    <string name="model_card_title">Dictation engines</string>
+    <string name="model_status_absent">Not downloaded yet</string>
+    <string name="model_status_downloading_format">Downloading — %1$d%%</string>
+    <string name="model_status_ready">Ready</string>
+    <string name="model_status_failed_format">Download failed — %1$s</string>
+    <string name="model_download">Download</string>
+    <string name="engine_whisper_name">Whisper base.en</string>
+    <string name="engine_whisper_short">Whisper</string>
+    <string name="engine_whisper_detail">On-device · ~148 MB · 99 languages</string>
+    <string name="engine_parakeet_name">Parakeet TDT 0.6B v3 (recommended)</string>
+    <string name="engine_parakeet_short">Parakeet</string>
+    <string name="engine_parakeet_detail">On-device · ~640 MB download (Wi-Fi recommended) · 25 European languages · typically faster and more accurate for English</string>
+    <string name="engine_selector_title">Dictation engine</string>
+    <string name="model_hint">Both engines run entirely on this device — audio never leaves the phone. An engine can be selected once its model shows Ready. If a download fails, the exact reason shows above — no logcat needed.</string>
+    <string name="engine_attribution">Parakeet TDT 0.6B v3 © NVIDIA, licensed CC-BY-4.0; recognition by sherpa-onnx (Apache-2.0). Whisper base.en via whisper.cpp (MIT).</string>
     <string name="build_tag_format">Build %1$s</string>
 </resources>

@@ -3,7 +3,7 @@ package com.shippopotamus.bloviate.data
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.testing.FakeAudioCapturePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
-import com.shippopotamus.bloviate.testing.FakeModelStorePort
+import com.shippopotamus.bloviate.testing.FakeActiveModelStorePort
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
 class RecordingSessionManagerTest {
 
     private val fakeCapture = FakeAudioCapturePort()
-    private val fakeModelStore = FakeModelStorePort()
+    private val fakeModelStore = FakeActiveModelStorePort()
     private val fakeMicPermission = FakeMicPermissionPort()
 
     @Test
