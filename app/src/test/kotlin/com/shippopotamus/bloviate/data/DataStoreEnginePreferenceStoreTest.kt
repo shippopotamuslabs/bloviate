@@ -35,8 +35,8 @@ class DataStoreEnginePreferenceStoreTest {
     }
 
     @Test
-    fun `default selection is whisper`() = runTest {
-        assertEquals(DictationEngine.WHISPER, store.selectedEngine.value)
+    fun `default selection is parakeet`() = runTest {
+        assertEquals(DictationEngine.PARAKEET, store.selectedEngine.value)
     }
 
     @Test
@@ -58,22 +58,24 @@ class DataStoreEnginePreferenceStoreTest {
     }
 
     @Test
-    fun `an unrecognized persisted value falls back to whisper`() = runTest {
+    fun `an unrecognized persisted value falls back to parakeet`() = runTest {
         dataStore.edit { preferences ->
             preferences[intPreferencesKey("engine_preference_schema_version")] = 1
             preferences[stringPreferencesKey("dictation_engine")] = "NOT_AN_ENGINE"
         }
 
-        assertEquals(DictationEngine.WHISPER, store.selectedEngine.value)
+        assertEquals(DictationEngine.PARAKEET, store.selectedEngine.value)
     }
 
     @Test
     fun `an unknown schema version invalidates the record to the default`() = runTest {
         dataStore.edit { preferences ->
             preferences[intPreferencesKey("engine_preference_schema_version")] = 99
-            preferences[stringPreferencesKey("dictation_engine")] = "PARAKEET"
+            preferences[stringPreferencesKey("dictation_engine")] = "WHISPER"
         }
 
-        assertEquals(DictationEngine.WHISPER, store.selectedEngine.value)
+        // The stored WHISPER is not reinterpreted: an unknown version
+        // invalidates the whole record to the default (Parakeet).
+        assertEquals(DictationEngine.PARAKEET, store.selectedEngine.value)
     }
 }

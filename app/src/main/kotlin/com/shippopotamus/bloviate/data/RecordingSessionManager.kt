@@ -50,7 +50,7 @@ import javax.inject.Singleton
  * chunks are stored whole, exactly as captured.
  *
  * Availability: the published state is [RecordingSessionState.Unavailable]
- * unless the **selected engine's** model is [ModelState.Ready] (via
+ * unless the **effective engine's** model is [ModelState.Ready] (via
  * [ActiveModelStorePort], ENC-54) and the mic permission is granted.
  */
 @Singleton

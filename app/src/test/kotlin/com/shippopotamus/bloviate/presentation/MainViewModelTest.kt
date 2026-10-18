@@ -269,14 +269,78 @@ class MainViewModelTest {
         }
 
     @Test
-    fun `engine selection defaults to whisper and follows the preference`() =
+    fun `engine selection defaults to parakeet and follows the preference`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
-                assertEquals(DictationEngineUi.WHISPER, awaitItem().selectedEngine)
-
-                fakeEnginePreferencePort.setSelected(DictationEngine.PARAKEET)
-
                 assertEquals(DictationEngineUi.PARAKEET, awaitItem().selectedEngine)
+
+                fakeEnginePreferencePort.setSelected(DictationEngine.WHISPER)
+
+                assertEquals(DictationEngineUi.WHISPER, awaitItem().selectedEngine)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note shows while the selected parakeet model is missing and whisper is ready`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertNull(awaitItem().engineFallback)
+
+                fakeModelStorePort.setReady()
+
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.PARAKEET,
+                        effective = DictationEngineUi.WHISPER,
+                    ),
+                    awaitItem().engineFallback,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note clears when the selected engine's model becomes ready`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeModelStorePort.setReady()
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.PARAKEET,
+                        effective = DictationEngineUi.WHISPER,
+                    ),
+                    awaitItem().engineFallback,
+                )
+
+                fakeParakeetModelStorePort.setReady()
+
+                assertNull(awaitItem().engineFallback)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `fallback note shows whisper selected with parakeet effective`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeEnginePreferencePort.setSelected(DictationEngine.WHISPER)
+                // Neither model is ready yet: no fallback to report.
+                assertNull(awaitItem().engineFallback)
+
+                fakeParakeetModelStorePort.setReady()
+
+                assertEquals(
+                    EngineFallbackUi(
+                        selected = DictationEngineUi.WHISPER,
+                        effective = DictationEngineUi.PARAKEET,
+                    ),
+                    awaitItem().engineFallback,
+                )
                 cancelAndIgnoreRemainingEvents()
             }
         }

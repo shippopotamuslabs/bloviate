@@ -136,8 +136,11 @@ fun MainScreen(
 /**
  * Per-engine model rows + the engine toggle (ENC-54): each engine shows its
  * own download state and download/retry button; the "Dictation engine"
- * choice is enabled only for engines whose model is Ready, so the pipeline
- * can never be pointed at a model that is not on the device.
+ * choice reflects the persisted preference and is enabled only for engines
+ * whose model is Ready. While the selected engine's model is not Ready
+ * but the other engine's is, dictation falls back to the ready engine —
+ * the note under the toggle says so rather than letting the toggle imply
+ * the selected engine is the one transcribing.
  */
 @Composable
 private fun EnginesCard(
@@ -184,6 +187,16 @@ private fun EnginesCard(
                     selected = uiState.selectedEngine == DictationEngineUi.PARAKEET,
                     enabled = uiState.parakeetModelStatus is ModelUiStatus.Ready,
                     onClick = { onSelectEngine(DictationEngineUi.PARAKEET) },
+                )
+            }
+            uiState.engineFallback?.let { fallback ->
+                Text(
+                    text = stringResource(
+                        R.string.engine_fallback_note,
+                        engineShortName(fallback.selected),
+                        engineShortName(fallback.effective),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
                 )
             }
             Text(
@@ -241,6 +254,15 @@ private fun EngineChoiceButton(
         }
     }
 }
+
+@Composable
+private fun engineShortName(engine: DictationEngineUi): String =
+    stringResource(
+        when (engine) {
+            DictationEngineUi.WHISPER -> R.string.engine_whisper_short
+            DictationEngineUi.PARAKEET -> R.string.engine_parakeet_short
+        },
+    )
 
 @Composable
 private fun modelStatusLabel(status: ModelUiStatus): String =

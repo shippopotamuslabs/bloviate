@@ -6,10 +6,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Hand-written fake of [EnginePreferencePort]; drive the selection directly. */
-class FakeEnginePreferencePort : EnginePreferencePort {
+/**
+ * Hand-written fake of [EnginePreferencePort]; drive the selection
+ * directly. The default initial value mirrors the real store's default
+ * (Parakeet, ENC-54); pass another engine to start elsewhere.
+ */
+class FakeEnginePreferencePort(
+    initial: DictationEngine = DictationEngine.PARAKEET,
+) : EnginePreferencePort {
 
-    private val mutableSelected = MutableStateFlow(DictationEngine.WHISPER)
+    private val mutableSelected = MutableStateFlow(initial)
 
     override val selectedEngine: StateFlow<DictationEngine> = mutableSelected.asStateFlow()
 

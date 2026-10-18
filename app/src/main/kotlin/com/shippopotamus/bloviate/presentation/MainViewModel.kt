@@ -3,6 +3,7 @@ package com.shippopotamus.bloviate.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.domain.model.DictationEngine
+import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
@@ -87,6 +88,7 @@ class MainViewModel @Inject constructor(
             whisperModelStatus = mapModelStatus(whisperState),
             parakeetModelStatus = mapModelStatus(parakeetState),
             selectedEngine = mapEngine(engine),
+            engineFallback = mapEngineFallback(engine, whisperState, parakeetState),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -95,6 +97,11 @@ class MainViewModel @Inject constructor(
             whisperModelStatus = mapModelStatus(observeModelState().value),
             parakeetModelStatus = mapModelStatus(observeParakeetModelState().value),
             selectedEngine = mapEngine(observeEnginePreference().value),
+            engineFallback = mapEngineFallback(
+                observeEnginePreference().value,
+                observeModelState().value,
+                observeParakeetModelState().value,
+            ),
         ),
     )
 
@@ -179,6 +186,24 @@ class MainViewModel @Inject constructor(
             DictationEngine.WHISPER -> DictationEngineUi.WHISPER
             DictationEngine.PARAKEET -> DictationEngineUi.PARAKEET
         }
+
+    /**
+     * The fallback note's data, via the shared `EffectiveEngineResolver`:
+     * present only while a fallback engine is actually in use — the
+     * selected engine's model is not Ready but the other engine's is.
+     */
+    private fun mapEngineFallback(
+        selected: DictationEngine,
+        whisperState: ModelState,
+        parakeetState: ModelState,
+    ): EngineFallbackUi? {
+        val effective = EffectiveEngineResolver.resolve(selected, whisperState, parakeetState)
+        return if (effective != null && effective != selected) {
+            EngineFallbackUi(selected = mapEngine(selected), effective = mapEngine(effective))
+        } else {
+            null
+        }
+    }
 
     private companion object {
         const val STATE_SHARING_TIMEOUT_MS = 5_000L

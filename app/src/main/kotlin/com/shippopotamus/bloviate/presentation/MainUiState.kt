@@ -13,6 +13,18 @@ enum class DictationEngineUi {
     PARAKEET,
 }
 
+/**
+ * The fallback in effect on the status screen: the user [selected] one
+ * engine, but its model is not Ready yet, so dictation is currently
+ * running on the [effective] engine (ENC-54 default flip). Null in the UI
+ * state whenever the selected engine is the one in use — or when neither
+ * model is Ready and there is no fallback to report.
+ */
+data class EngineFallbackUi(
+    val selected: DictationEngineUi,
+    val effective: DictationEngineUi,
+)
+
 /** Presentation-only mapping of a transcription model's lifecycle state. */
 sealed interface ModelUiStatus {
 
@@ -44,5 +56,6 @@ data class MainUiState(
     val micPermissionGranted: Boolean = false,
     val whisperModelStatus: ModelUiStatus = ModelUiStatus.Absent,
     val parakeetModelStatus: ModelUiStatus = ModelUiStatus.Absent,
-    val selectedEngine: DictationEngineUi = DictationEngineUi.WHISPER,
+    val selectedEngine: DictationEngineUi = DictationEngineUi.PARAKEET,
+    val engineFallback: EngineFallbackUi? = null,
 )

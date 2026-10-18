@@ -23,7 +23,7 @@ import javax.inject.Singleton
  *
  * Persisted format (schema v1, see `contracts/DATA_LAYER_RULES.md` §2): a
  * version int plus the engine enum name. A missing or unknown version, or
- * an unrecognized value, reads as the default [DictationEngine.WHISPER] —
+ * an unrecognized value, reads as the default [DictationEngine.PARAKEET] —
  * an explicit invalidation, never a silent reinterpretation — and the next
  * save rewrites the record at v1.
  */
@@ -45,7 +45,7 @@ class DataStoreEnginePreferenceStore @Inject constructor(
         .stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
-            initialValue = DictationEngine.WHISPER,
+            initialValue = DEFAULT_ENGINE,
         )
 
     override suspend fun selectEngine(engine: DictationEngine) {
@@ -56,12 +56,14 @@ class DataStoreEnginePreferenceStore @Inject constructor(
     }
 
     private fun Preferences.toDictationEngine(): DictationEngine {
-        if (this[KEY_SCHEMA_VERSION] != SCHEMA_VERSION) return DictationEngine.WHISPER
-        val name = this[KEY_ENGINE] ?: return DictationEngine.WHISPER
-        return runCatching { DictationEngine.valueOf(name) }.getOrDefault(DictationEngine.WHISPER)
+        if (this[KEY_SCHEMA_VERSION] != SCHEMA_VERSION) return DEFAULT_ENGINE
+        val name = this[KEY_ENGINE] ?: return DEFAULT_ENGINE
+        return runCatching { DictationEngine.valueOf(name) }.getOrDefault(DEFAULT_ENGINE)
     }
 
     private companion object {
+        /** The engine an absent or invalidated record reads as (ENC-54: Parakeet won the A/B). */
+        val DEFAULT_ENGINE: DictationEngine = DictationEngine.PARAKEET
         const val SCHEMA_VERSION: Int = 1
         val KEY_SCHEMA_VERSION = intPreferencesKey("engine_preference_schema_version")
         val KEY_ENGINE = stringPreferencesKey("dictation_engine")

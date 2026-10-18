@@ -50,6 +50,7 @@
     <string name="engine_parakeet_short">Parakeet</string>
     <string name="engine_parakeet_detail">On-device · ~640 MB download (Wi-Fi recommended) · 25 European languages · typically faster and more accurate for English</string>
     <string name="engine_selector_title">Dictation engine</string>
+    <string name="engine_fallback_note">%1$s selected — using %2$s until the %1$s model downloads</string>
     <string name="model_hint">Both engines run entirely on this device — audio never leaves the phone. An engine can be selected once its model shows Ready. If a download fails, the exact reason shows above — no logcat needed.</string>
     <string name="engine_attribution">Parakeet TDT 0.6B v3 © NVIDIA, licensed CC-BY-4.0; recognition by sherpa-onnx (Apache-2.0). Whisper base.en via whisper.cpp (MIT).</string>
     <string name="build_tag_format">Build %1$s</string>

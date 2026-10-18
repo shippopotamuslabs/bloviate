@@ -4,10 +4,13 @@ import android.os.SystemClock
 import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
+import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
@@ -68,6 +71,8 @@ class BubbleRecordingController(
     private val textPostProcessor: TextPostProcessor,
     private val transcriptSink: TranscriptSinkPort,
     private val enginePreference: EnginePreferencePort,
+    private val whisperStore: ModelStorePort,
+    private val parakeetStore: ParakeetModelStorePort,
     private val scope: CoroutineScope,
     private val workDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val doneDisplayMs: Long = DONE_DISPLAY_MS,
@@ -331,8 +336,11 @@ class BubbleRecordingController(
      * Stop→insert latency (the Phase 2 exit metric) is logged from
      * [stoppedAtMs], captured the moment `session.stop()` returned. A/B
      * telemetry (ENC-54): every transcription also logs the engine that ran
-     * (resolved from the preference at send time), the audio length, the
-     * engine time, and a short output preview, so Whisper vs Parakeet can be
+     * — the **effective** engine, resolved at send time through
+     * `EffectiveEngineResolver` (the preference, or the fallback while the
+     * preferred model is not Ready), which is the engine the bound
+     * `TranscriptionEngine` delegates to — the audio length, the engine
+     * time, and a short output preview, so Whisper vs Parakeet can be
      * compared from logcat alone.
      */
     private suspend fun transcribeAndFinish(
@@ -341,7 +349,13 @@ class BubbleRecordingController(
         isRetry: Boolean = false,
     ) {
         try {
-            val engineName = enginePreference.selectedEngine.value.name
+            val engineName = (
+                EffectiveEngineResolver.resolve(
+                    preference = enginePreference.selectedEngine.value,
+                    whisperState = whisperStore.state.value,
+                    parakeetState = parakeetStore.state.value,
+                ) ?: enginePreference.selectedEngine.value
+                ).name
             val rawTranscript = withContext(workDispatcher) {
                 val transcribeStartMs = nowMs()
                 val raw = transcriptionEngine.transcribe(samples)

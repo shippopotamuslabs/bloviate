@@ -9,9 +9,14 @@ package com.shippopotamus.bloviate.domain.model
  *
  * Ship-both design (ENC-54): [PARAKEET] is the recommended default download
  * for its 25 European languages; [WHISPER] covers the languages outside
- * Parakeet's set (99 languages) and is the proven fallback. The persisted
- * default stays [WHISPER] until the user flips it — Parakeet's ~640 MiB
- * model download must never start as a surprise.
+ * Parakeet's set (99 languages) and is the proven fallback.
+ *
+ * The persisted default is [PARAKEET] (Sean's on-device A/B verdict,
+ * 2026-10-18: Parakeet preserved the proper nouns — "Parakeet",
+ * "Nantucket", "Bloviate" — that Whisper mangled). Until Parakeet's
+ * ~640 MiB model is Ready on the device, the **effective** engine falls
+ * back to [WHISPER] whenever Whisper's model is Ready — see
+ * [EffectiveEngineResolver], the one place that resolution happens.
  */
 enum class DictationEngine {
 
