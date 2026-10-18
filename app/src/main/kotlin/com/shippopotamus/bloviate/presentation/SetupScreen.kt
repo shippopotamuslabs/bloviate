@@ -1,9 +1,6 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.content.res.Configuration
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,8 +8,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -21,58 +19,31 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.BuildConfig
 import com.shippopotamus.bloviate.R
 
-/** Wires [MainViewModel] state into [MainScreen]; the route is the only place the ViewModel is touched. */
-@Composable
-fun MainRoute(
-    onOpenAccessibilitySettings: () -> Unit,
-    onOpenOverlaySettings: () -> Unit,
-    onStartBubble: () -> Unit,
-    onStopBubble: () -> Unit,
-    onRequestMicPermission: () -> Unit,
-    viewModel: MainViewModel = hiltViewModel(),
-    modifier: Modifier = Modifier,
-) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    MainScreen(
-        uiState = uiState,
-        onOpenAccessibilitySettings = onOpenAccessibilitySettings,
-        onOpenOverlaySettings = onOpenOverlaySettings,
-        onStartBubble = onStartBubble,
-        onStopBubble = onStopBubble,
-        onRequestMicPermission = onRequestMicPermission,
-        onWhisperDownloadClick = viewModel::onWhisperDownloadClick,
-        onParakeetDownloadClick = viewModel::onParakeetDownloadClick,
-        onSelectEngine = viewModel::onSelectEngine,
-        modifier = modifier,
-    )
-}
-
 /**
- * Status screen: whether the accessibility watcher is enabled, a deep link to
- * the system setting, the live field-focus classification published by the
- * watcher (package + classification only — never field content), the
- * bubble overlay permission + service controls, the microphone
- * permission state + request, and the model download state + retry. The
- * card column scrolls: the cards together exceed short viewports (fold
- * cover screens, split windows), and every card must stay reachable
- * (ENC-65).
+ * The Setup tab: everything a person needs to get dictation working,
+ * written the way a person would say it — what each permission is for,
+ * whether it's on, and a button that fixes it when it isn't. Same state
+ * and wiring as the old status screen (watcher enablement, the live
+ * field-focus readout, bubble permission + service controls, microphone
+ * permission, both voice models and the engine choice); the rework is
+ * presentation only.
+ *
+ * The card column scrolls: the cards together exceed short viewports
+ * (fold cover screens, split windows), and every card must stay
+ * reachable (ENC-65). The shell's navigation bar owns the bottom system
+ * inset, so the column does not pad for it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(
+fun SetupScreen(
     uiState: MainUiState,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
@@ -95,55 +66,48 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            WatcherStatusCard(
+            FieldAccessCard(
                 uiState = uiState,
                 onOpenAccessibilitySettings = onOpenAccessibilitySettings,
             )
-            BubbleStatusCard(
+            BubbleCard(
                 uiState = uiState,
                 onOpenOverlaySettings = onOpenOverlaySettings,
                 onStartBubble = onStartBubble,
                 onStopBubble = onStopBubble,
             )
-            MicPermissionCard(
+            MicrophoneCard(
                 uiState = uiState,
                 onRequestMicPermission = onRequestMicPermission,
             )
-            EnginesCard(
+            VoiceModelsCard(
                 uiState = uiState,
                 onWhisperDownloadClick = onWhisperDownloadClick,
                 onParakeetDownloadClick = onParakeetDownloadClick,
                 onSelectEngine = onSelectEngine,
             )
-            // Exact build identity, readable in-app (ENC-69): one-off test
-            // builds all report version 1.0, so the commit SHA is the only
-            // reliable way to tell which build is installed.
-            Text(
-                text = stringResource(R.string.build_tag_format, BuildConfig.GIT_SHA),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            BubbleLookCard()
+            AboutBlock()
         }
     }
 }
 
 /**
- * Per-engine model rows + the engine toggle (ENC-54): each engine shows its
- * own download state and download/retry button; the "Dictation engine"
- * choice reflects the persisted preference and is enabled only for engines
- * whose model is Ready. While the selected engine's model is not Ready
- * but the other engine's is, dictation falls back to the ready engine —
- * the note under the toggle says so rather than letting the toggle imply
- * the selected engine is the one transcribing.
+ * Per-engine model rows + the engine choice (ENC-54): each engine shows
+ * its own download state and download/retry button; the choice reflects
+ * the persisted preference and is enabled only for engines whose model is
+ * downloaded. While the selected engine's model is not downloaded but
+ * the other engine's is, dictation falls back to the ready engine — the
+ * note under the choice says so rather than letting the choice imply the
+ * selected engine is the one transcribing.
  */
 @Composable
-private fun EnginesCard(
+private fun VoiceModelsCard(
     uiState: MainUiState,
     onWhisperDownloadClick: () -> Unit,
     onParakeetDownloadClick: () -> Unit,
@@ -160,16 +124,16 @@ private fun EnginesCard(
                 style = MaterialTheme.typography.titleMedium,
             )
             EngineRow(
-                name = stringResource(R.string.engine_whisper_name),
-                detail = stringResource(R.string.engine_whisper_detail),
-                status = uiState.whisperModelStatus,
-                onDownloadClick = onWhisperDownloadClick,
-            )
-            EngineRow(
                 name = stringResource(R.string.engine_parakeet_name),
                 detail = stringResource(R.string.engine_parakeet_detail),
                 status = uiState.parakeetModelStatus,
                 onDownloadClick = onParakeetDownloadClick,
+            )
+            EngineRow(
+                name = stringResource(R.string.engine_whisper_name),
+                detail = stringResource(R.string.engine_whisper_detail),
+                status = uiState.whisperModelStatus,
+                onDownloadClick = onWhisperDownloadClick,
             )
             Text(
                 text = stringResource(R.string.engine_selector_title),
@@ -225,7 +189,15 @@ private fun EngineRow(
             onClick = onDownloadClick,
             enabled = status is ModelUiStatus.Absent || status is ModelUiStatus.Failed,
         ) {
-            Text(text = stringResource(R.string.model_download))
+            Text(
+                text = stringResource(
+                    if (status is ModelUiStatus.Failed) {
+                        R.string.model_retry
+                    } else {
+                        R.string.model_download
+                    },
+                ),
+            )
         }
         Text(
             text = detail,
@@ -242,7 +214,7 @@ private fun EngineChoiceButton(
     onClick: () -> Unit,
 ) {
     // The selected engine stays clickable (it is a no-op re-selection); an
-    // unselected engine is clickable only when its model is Ready.
+    // unselected engine is clickable only when its model is downloaded.
     val clickable = enabled || selected
     if (selected) {
         Button(onClick = onClick, enabled = clickable) {
@@ -276,7 +248,7 @@ private fun modelStatusLabel(status: ModelUiStatus): String =
     }
 
 @Composable
-private fun MicPermissionCard(
+private fun MicrophoneCard(
     uiState: MainUiState,
     onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -314,7 +286,7 @@ private fun MicPermissionCard(
 }
 
 @Composable
-private fun WatcherStatusCard(
+private fun FieldAccessCard(
     uiState: MainUiState,
     onOpenAccessibilitySettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -353,7 +325,7 @@ private fun WatcherStatusCard(
 }
 
 @Composable
-private fun BubbleStatusCard(
+private fun BubbleCard(
     uiState: MainUiState,
     onOpenOverlaySettings: () -> Unit,
     onStartBubble: () -> Unit,
@@ -413,6 +385,61 @@ private fun BubbleStatusCard(
     }
 }
 
+/**
+ * Reserved home for the bubble appearance settings (ENC-68): a section
+ * header and an honest "coming soon" note only — no controls until that
+ * ticket builds them.
+ */
+@Composable
+private fun BubbleLookCard(modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.bubble_look_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.bubble_look_soon),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/**
+ * Exact build identity, readable in-app (ENC-69): one-off test builds all
+ * report version 1.0, so the commit SHA is the only reliable way to tell
+ * which build is installed. Demoted to a quiet About block at the bottom
+ * of Setup (ENC-71) — still visible, no longer competing with the cards
+ * a user actually needs.
+ */
+@Composable
+private fun AboutBlock(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.about_title),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.about_version_format, BuildConfig.VERSION_NAME),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.build_tag_format, BuildConfig.GIT_SHA),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun focusLabel(classification: FocusClassification): String =
     stringResource(
@@ -431,9 +458,9 @@ private fun focusLabel(classification: FocusClassification): String =
     uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
-private fun MainScreenEmptyPreview() {
+private fun SetupScreenEmptyPreview() {
     PreviewTheme {
-        MainScreen(
+        SetupScreen(
             uiState = MainUiState(),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
@@ -455,9 +482,9 @@ private fun MainScreenEmptyPreview() {
     uiMode = Configuration.UI_MODE_NIGHT_YES,
 )
 @Composable
-private fun MainScreenPopulatedPreview() {
+private fun SetupScreenPopulatedPreview() {
     PreviewTheme {
-        MainScreen(
+        SetupScreen(
             uiState = MainUiState(
                 watcherEnabled = true,
                 focusClassification = FocusClassification.EDITABLE,
@@ -479,12 +506,4 @@ private fun MainScreenPopulatedPreview() {
             onSelectEngine = {},
         )
     }
-}
-
-@Composable
-private fun PreviewTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-        content = content,
-    )
 }
