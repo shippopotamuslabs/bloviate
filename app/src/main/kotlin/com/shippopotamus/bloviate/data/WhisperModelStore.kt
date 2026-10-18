@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,14 @@ import java.security.MessageDigest
  * §4). Verification is cached for the process lifetime; the load gate is
  * [verifiedModelPath], which re-verifies after any doubt.
  *
+ * Failure semantics (ENC-64): every failure lands in [ModelState.Failed]
+ * **with its reason** — the status screen shows it, so an on-device failure
+ * is diagnosable without logcat. Transport failures (the downloader threw:
+ * network, HTTP status) are retried up to [MAX_DOWNLOAD_ATTEMPTS] attempts
+ * with [retryDelaysMs] backoff; a completed download that fails integrity
+ * and a free-space shortfall are NOT retried automatically (different
+ * signals — re-running `ensureModel` from the UI is the manual retry).
+ *
  * This is the placeholder the ENC-55 download stack replaces; it stays small
  * on purpose.
  */
@@ -34,6 +43,7 @@ class WhisperModelStore(
     private val expectedSizeBytes: Long = EXPECTED_SIZE_BYTES,
     private val expectedSha256: String = EXPECTED_SHA256,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val retryDelaysMs: List<Long> = DEFAULT_RETRY_DELAYS_MS,
 ) : ModelStorePort {
 
     private val ensureMutex = Mutex()
@@ -73,13 +83,15 @@ class WhisperModelStore(
                 Log.e(TAG, "Model failed integrity check; deleting ${file.absolutePath}")
                 file.delete()
                 verifiedThisProcess = false
-                mutableState.update { ModelState.Failed }
+                mutableState.update { ModelState.Failed(REASON_CORRUPT_EXISTING_MODEL) }
                 null
             }
         }
 
     private suspend fun downloadAndFinalize() {
         val tempFile = tempModelFile()
+        // Free-space is a precondition, not a transport failure: fail once,
+        // with the reason, and never burn download retries on it.
         try {
             withContext(ioDispatcher) {
                 modelDir.mkdirs()
@@ -88,61 +100,105 @@ class WhisperModelStore(
                     "Not enough free space for the model: $freeBytes bytes available"
                 }
             }
-            mutableState.update { ModelState.Downloading(progressFraction = 0f) }
-            Log.d(TAG, "Downloading model from $MODEL_DOWNLOAD_URL")
-            downloader.downloadTo(tempFile) { downloadedBytes, totalBytes ->
-                val fraction = when {
-                    totalBytes > 0 -> (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
-                    expectedSizeBytes > 0 -> (downloadedBytes.toFloat() / expectedSizeBytes).coerceIn(0f, 1f)
-                    else -> 0f
-                }
-                mutableState.update { current ->
-                    if (current is ModelState.Downloading &&
-                        fraction - current.progressFraction < PROGRESS_UPDATE_STEP
-                    ) {
-                        current
-                    } else {
-                        ModelState.Downloading(progressFraction = fraction)
-                    }
-                }
-            }
-            val finalized = withContext(ioDispatcher) {
-                if (!verifyIntegrity(tempFile)) {
-                    Log.e(TAG, "Downloaded model failed integrity check; discarding")
-                    tempFile.delete()
-                    false
-                } else if (!tempFile.renameTo(modelFile())) {
-                    // Same-directory rename is atomic on Android; fall back to copy+delete.
-                    tempFile.copyTo(modelFile(), overwrite = true)
-                    tempFile.delete()
-                    true
-                } else {
-                    true
-                }
-            }
-            if (finalized) {
-                verifiedThisProcess = true
-                mutableState.update { ModelState.Ready }
-                Log.d(TAG, "Model downloaded and finalized: ${modelFile().absolutePath}")
-            } else {
-                mutableState.update { ModelState.Failed }
-            }
         } catch (exception: CancellationException) {
-            discardFailedDownload(tempFile)
-            Log.d(TAG, "Model download cancelled")
             throw exception
         } catch (exception: Exception) {
-            discardFailedDownload(tempFile)
-            Log.e(TAG, "Model download failed", exception)
+            Log.e(TAG, "Model download precondition failed", exception)
+            mutableState.update { ModelState.Failed(failureReason(exception)) }
+            return
+        }
+
+        var lastFailure: Exception? = null
+        for (attempt in 1..MAX_DOWNLOAD_ATTEMPTS) {
+            if (attempt > 1) {
+                val backoffMs = retryDelaysMs.getOrElse(attempt - 2) { retryDelaysMs.lastOrNull() ?: 0L }
+                Log.w(TAG, "Retrying model download (attempt $attempt of $MAX_DOWNLOAD_ATTEMPTS) after ${backoffMs}ms")
+                delay(backoffMs)
+            }
+            try {
+                downloadOnce(tempFile)
+            } catch (exception: CancellationException) {
+                discardPartialDownload(tempFile)
+                mutableState.update { ModelState.Failed(REASON_DOWNLOAD_CANCELLED) }
+                Log.d(TAG, "Model download cancelled")
+                throw exception
+            } catch (exception: Exception) {
+                // Transport failure (network error, HTTP status): bounded retry.
+                lastFailure = exception
+                discardPartialDownload(tempFile)
+                Log.e(TAG, "Model download attempt $attempt of $MAX_DOWNLOAD_ATTEMPTS failed", exception)
+                continue
+            }
+            finalizeDownloadedModel(tempFile)
+            return
+        }
+        mutableState.update {
+            ModelState.Failed(lastFailure?.let(::failureReason) ?: REASON_UNKNOWN_FAILURE)
         }
     }
 
-    /** Deletes the partial download and reports failure; completes even when the caller was cancelled. */
-    private suspend fun discardFailedDownload(tempFile: File) {
+    /** One download attempt: streams the model into [tempFile], publishing throttled progress. */
+    private suspend fun downloadOnce(tempFile: File) {
+        mutableState.update { ModelState.Downloading(progressFraction = 0f) }
+        Log.d(TAG, "Downloading model from $MODEL_DOWNLOAD_URL")
+        downloader.downloadTo(tempFile) { downloadedBytes, totalBytes ->
+            val fraction = when {
+                totalBytes > 0 -> (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+                expectedSizeBytes > 0 -> (downloadedBytes.toFloat() / expectedSizeBytes).coerceIn(0f, 1f)
+                else -> 0f
+            }
+            mutableState.update { current ->
+                if (current is ModelState.Downloading &&
+                    fraction - current.progressFraction < PROGRESS_UPDATE_STEP
+                ) {
+                    current
+                } else {
+                    ModelState.Downloading(progressFraction = fraction)
+                }
+            }
+        }
+    }
+
+    /**
+     * Verifies a completed download and renames it into place. An integrity
+     * failure here is terminal for this ensure call — a full-length file
+     * with a wrong hash is not a transport problem, so no automatic retry.
+     */
+    private suspend fun finalizeDownloadedModel(tempFile: File) {
+        val finalized = withContext(ioDispatcher) {
+            if (!verifyIntegrity(tempFile)) {
+                Log.e(TAG, "Downloaded model failed integrity check; discarding")
+                tempFile.delete()
+                false
+            } else if (!tempFile.renameTo(modelFile())) {
+                // Same-directory rename is atomic on Android; fall back to copy+delete.
+                tempFile.copyTo(modelFile(), overwrite = true)
+                tempFile.delete()
+                true
+            } else {
+                true
+            }
+        }
+        if (finalized) {
+            verifiedThisProcess = true
+            mutableState.update { ModelState.Ready }
+            Log.d(TAG, "Model downloaded and finalized: ${modelFile().absolutePath}")
+        } else {
+            mutableState.update { ModelState.Failed(REASON_INTEGRITY_FAILED) }
+        }
+    }
+
+    /** Deletes the partial download; completes even when the caller was cancelled. */
+    private suspend fun discardPartialDownload(tempFile: File) {
         withContext(NonCancellable) {
             tempFile.delete()
         }
-        mutableState.update { ModelState.Failed }
+    }
+
+    /** Compact "ExceptionKind: message" for [ModelState.Failed]; the UI shows it verbatim. */
+    private fun failureReason(exception: Throwable): String {
+        val message = exception.message?.takeIf { it.isNotBlank() } ?: "no details"
+        return "${exception.javaClass.simpleName}: $message".take(MAX_FAILURE_REASON_LENGTH)
     }
 
     /** Size + SHA-256 against the pinned values. Runs on the caller's (IO) context. */
@@ -183,5 +239,19 @@ class WhisperModelStore(
         private const val FREE_SPACE_MARGIN_BYTES: Long = 32L * 1024 * 1024
         private const val HASH_BUFFER_SIZE_BYTES: Int = 64 * 1024
         private const val PROGRESS_UPDATE_STEP: Float = 0.01f
+
+        /** Total attempts per ensure call for transport failures (1 initial + 2 retries). */
+        const val MAX_DOWNLOAD_ATTEMPTS: Int = 3
+
+        /** Backoff before attempts 2 and 3 of a transport-failed download. */
+        val DEFAULT_RETRY_DELAYS_MS: List<Long> = listOf(2_000L, 5_000L)
+
+        private const val MAX_FAILURE_REASON_LENGTH: Int = 160
+        private const val REASON_INTEGRITY_FAILED: String =
+            "Downloaded file failed the integrity check (size or SHA-256 mismatch)"
+        private const val REASON_CORRUPT_EXISTING_MODEL: String =
+            "Existing model file failed the integrity check and was deleted"
+        private const val REASON_DOWNLOAD_CANCELLED: String = "Download cancelled"
+        private const val REASON_UNKNOWN_FAILURE: String = "Download failed for an unknown reason"
     }
 }

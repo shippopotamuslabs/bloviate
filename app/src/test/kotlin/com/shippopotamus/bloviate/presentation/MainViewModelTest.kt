@@ -2,18 +2,23 @@ package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
+import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
+import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -33,6 +38,7 @@ class MainViewModelTest {
     private val fakeBubbleOverlayAccessPort = FakeBubbleOverlayAccessPort()
     private val fakeBubbleServiceStatePort = FakeBubbleServiceStatePort()
     private val fakeMicPermissionPort = FakeMicPermissionPort()
+    private val fakeModelStorePort = FakeModelStorePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -44,6 +50,8 @@ class MainViewModelTest {
             observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
             isMicPermissionGranted = IsMicPermissionGrantedUseCase(fakeMicPermissionPort),
             refreshMicPermission = RefreshMicPermissionUseCase(fakeMicPermissionPort),
+            observeModelState = ObserveModelStateUseCase(fakeModelStorePort),
+            ensureModel = EnsureModelUseCase(fakeModelStorePort),
         )
     }
 
@@ -157,6 +165,68 @@ class MainViewModelTest {
                 assertTrue(awaitItem().bubbleServiceRunning)
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `model starts absent in ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertEquals(ModelUiStatus.Absent, awaitItem().modelStatus)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `model downloading maps to a percent in ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeModelStorePort.setState(ModelState.Downloading(progressFraction = 0.42f))
+
+                assertEquals(ModelUiStatus.Downloading(percent = 42), awaitItem().modelStatus)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `model ready maps to ready ui status`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeModelStorePort.setReady()
+
+                assertEquals(ModelUiStatus.Ready, awaitItem().modelStatus)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `model failure maps its reason into ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeModelStorePort.setState(ModelState.Failed("IOException: network down"))
+
+                assertEquals(
+                    ModelUiStatus.Failed("IOException: network down"),
+                    awaitItem().modelStatus,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `retry model download runs ensure on the store`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            assertEquals(0, fakeModelStorePort.ensureModelCallCount)
+
+            viewModel.onRetryModelDownload()
+            advanceUntilIdle()
+
+            assertEquals(1, fakeModelStorePort.ensureModelCallCount)
         }
 
     private companion object {

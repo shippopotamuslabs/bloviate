@@ -110,8 +110,86 @@ class BubblePositionMathTest {
         assertFalse(BubblePositionMath.isInDismissZone(centerYPx = 1200, bounds = PORTRAIT))
     }
 
+    @Test
+    fun `bar window x grows rightward from a left parked bubble`() {
+        val barX = BubblePositionMath.barWindowX(
+            bubbleXPx = 24,
+            barWidthPx = BAR_PX,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+
+        assertEquals(24, barX)
+        assertTrue(barX + BAR_PX <= PORTRAIT.widthPx - MARGIN_PX)
+    }
+
+    @Test
+    fun `bar window x grows leftward from a right parked bubble`() {
+        // Bubble parked against the right edge, as Sean keeps it.
+        val bubbleX = PORTRAIT.widthPx - BUBBLE_PX
+        val barX = BubblePositionMath.barWindowX(
+            bubbleXPx = bubbleX,
+            barWidthPx = BAR_PX,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+
+        assertEquals(PORTRAIT.widthPx - MARGIN_PX - BAR_PX, barX)
+        assertTrue(barX < bubbleX, "the bar must expand toward the interior")
+        assertTrue(barX >= 0 && barX + BAR_PX <= PORTRAIT.widthPx)
+    }
+
+    @Test
+    fun `bar window x in the center grows rightward while the bar fits and leftward once it would overflow`() {
+        val centeredX = 200
+        val fitted = BubblePositionMath.barWindowX(
+            bubbleXPx = centeredX,
+            barWidthPx = BAR_PX,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+        assertEquals(centeredX, fitted)
+
+        val nearRightX = PORTRAIT.widthPx - MARGIN_PX - BAR_PX + 1
+        val pulledBack = BubblePositionMath.barWindowX(
+            bubbleXPx = nearRightX,
+            barWidthPx = BAR_PX,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+        assertEquals(PORTRAIT.widthPx - MARGIN_PX - BAR_PX, pulledBack)
+    }
+
+    @Test
+    fun `bar window x keeps the full bar on screen on the unfolded fold display`() {
+        val bubbleX = UNFOLDED.widthPx - BUBBLE_PX
+        val barX = BubblePositionMath.barWindowX(
+            bubbleXPx = bubbleX,
+            barWidthPx = BAR_PX,
+            bounds = UNFOLDED,
+            edgeMarginPx = MARGIN_PX,
+        )
+
+        assertEquals(UNFOLDED.widthPx - MARGIN_PX - BAR_PX, barX)
+        assertTrue(barX + BAR_PX <= UNFOLDED.widthPx - MARGIN_PX)
+    }
+
+    @Test
+    fun `bar window x pins to the left edge when the bar is wider than the screen allows`() {
+        val barX = BubblePositionMath.barWindowX(
+            bubbleXPx = 500,
+            barWidthPx = PORTRAIT.widthPx,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+
+        assertEquals(0, barX)
+    }
+
     private companion object {
         const val BUBBLE_PX: Int = 168
+        const val BAR_PX: Int = 640
+        const val MARGIN_PX: Int = 24
         const val FRACTION_TOLERANCE: Float = 0.001f
 
         /** Pixel-class phone portrait. */

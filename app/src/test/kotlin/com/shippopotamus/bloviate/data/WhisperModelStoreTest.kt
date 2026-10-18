@@ -52,40 +52,66 @@ class WhisperModelStoreTest {
     }
 
     @Test
-    fun `hash mismatch fails and leaves no model behind`() = runTest {
+    fun `hash mismatch fails with the integrity reason and does not retry`() = runTest {
         fakeDownloader.bytesToWrite = "fake-whisper-model-bytex".toByteArray() // same length, wrong bytes
         val store = createStore()
 
         store.ensureModel()
 
-        assertEquals(ModelState.Failed, store.state.value)
+        val state = store.state.value
+        assertTrue(state is ModelState.Failed, "expected Failed, was $state")
+        assertTrue((state as ModelState.Failed).reason.contains("integrity", ignoreCase = true))
+        // A completed download with a wrong hash is not a transport failure:
+        // the retry budget must not be burned on it.
+        assertEquals(1, fakeDownloader.callCount)
         assertFalse(modelFile().exists())
         assertFalse(tempFile().exists())
         assertNull(store.verifiedModelPath())
     }
 
     @Test
-    fun `size mismatch fails and leaves no model behind`() = runTest {
+    fun `size mismatch fails with the integrity reason and does not retry`() = runTest {
         fakeDownloader.bytesToWrite = "too-short".toByteArray()
         val store = createStore()
 
         store.ensureModel()
 
-        assertEquals(ModelState.Failed, store.state.value)
+        val state = store.state.value
+        assertTrue(state is ModelState.Failed, "expected Failed, was $state")
+        assertTrue((state as ModelState.Failed).reason.contains("integrity", ignoreCase = true))
+        assertEquals(1, fakeDownloader.callCount)
         assertFalse(modelFile().exists())
         assertFalse(tempFile().exists())
     }
 
     @Test
-    fun `download failure reports Failed`() = runTest {
+    fun `persistent download failure retries the full budget then reports Failed with the reason`() = runTest {
         fakeDownloader.failure = IOException("network down")
         val store = createStore()
 
         store.ensureModel()
 
-        assertEquals(ModelState.Failed, store.state.value)
+        assertEquals(WhisperModelStore.MAX_DOWNLOAD_ATTEMPTS, fakeDownloader.callCount)
+        val state = store.state.value
+        assertTrue(state is ModelState.Failed, "expected Failed, was $state")
+        val reason = (state as ModelState.Failed).reason
+        assertTrue(reason.contains("IOException"), "reason should name the failure kind: $reason")
+        assertTrue(reason.contains("network down"), "reason should carry the message: $reason")
         assertFalse(modelFile().exists())
         assertFalse(tempFile().exists())
+    }
+
+    @Test
+    fun `transport failures are retried and a later success finalizes the model`() = runTest {
+        fakeDownloader.scriptedFailureCount = WhisperModelStore.MAX_DOWNLOAD_ATTEMPTS - 1
+        fakeDownloader.bytesToWrite = payload
+        val store = createStore()
+
+        store.ensureModel()
+
+        assertEquals(WhisperModelStore.MAX_DOWNLOAD_ATTEMPTS, fakeDownloader.callCount)
+        assertEquals(ModelState.Ready, store.state.value)
+        assertTrue(modelFile().readBytes().contentEquals(payload))
     }
 
     @Test
@@ -112,7 +138,9 @@ class WhisperModelStoreTest {
 
         assertNull(path)
         assertFalse(modelFile().exists())
-        assertEquals(ModelState.Failed, store.state.value)
+        val state = store.state.value
+        assertTrue(state is ModelState.Failed, "expected Failed, was $state")
+        assertTrue((state as ModelState.Failed).reason.contains("integrity", ignoreCase = true))
     }
 
     @Test
@@ -136,6 +164,7 @@ class WhisperModelStoreTest {
             expectedSizeBytes = payload.size.toLong(),
             expectedSha256 = payloadSha256,
             ioDispatcher = UnconfinedTestDispatcher(),
+            retryDelaysMs = listOf(0L, 0L),
         )
 
     private fun modelDir(): File = File(tempDir, "models")

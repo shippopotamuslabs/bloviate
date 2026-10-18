@@ -71,6 +71,34 @@ object BubblePositionMath {
     fun isInDismissZone(centerYPx: Int, bounds: ScreenBounds): Boolean =
         centerYPx.toFloat() >= bounds.heightPx * (MAX_FRACTION - DISMISS_ZONE_HEIGHT_FRACTION)
 
+    /**
+     * Window x for the recording bar the bubble morphs into (ENC-65). The bar
+     * is much wider than the bubble and the window is anchored at its
+     * top-left, so growing rightward from a right-parked bubble would push
+     * the bar off-screen. The expansion is positionally aware instead: the
+     * bar grows rightward from the bubble's own x while the whole bar fits
+     * (keeping [edgeMarginPx] clear of the right edge); when it would not
+     * fit, the bar grows leftward — its right edge lands [edgeMarginPx]
+     * inside the screen and its x is pulled back toward the interior. The
+     * result always keeps the full bar on-screen (or pins it to the left
+     * edge when the bar is wider than the screen allows). This moves only
+     * the *window*; the bubble's own anchor is restored by the caller when
+     * the bar closes — the bar's x is never the bubble's position.
+     */
+    fun barWindowX(
+        bubbleXPx: Int,
+        barWidthPx: Int,
+        bounds: ScreenBounds,
+        edgeMarginPx: Int,
+    ): Int {
+        val rightLimitPx = bounds.widthPx - edgeMarginPx
+        return if (bubbleXPx + barWidthPx <= rightLimitPx) {
+            bubbleXPx.coerceAtLeast(MIN_OFFSET_PX)
+        } else {
+            (rightLimitPx - barWidthPx).coerceAtLeast(MIN_OFFSET_PX)
+        }
+    }
+
     private fun maxTravelPx(screenPx: Int, bubblePx: Int): Int = (screenPx - bubblePx).coerceAtLeast(MIN_OFFSET_PX)
 
     private fun fractionOf(offsetPx: Int, travelPx: Int): Float =

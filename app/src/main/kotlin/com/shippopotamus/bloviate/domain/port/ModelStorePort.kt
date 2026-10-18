@@ -23,7 +23,7 @@ interface ModelStorePort {
      * Makes the model ready if possible: verifies the on-disk file, or
      * downloads + verifies + finalizes it when absent or corrupt. Idempotent
      * and safe to call concurrently; on return the state is [ModelState.Ready]
-     * or [ModelState.Failed].
+     * or [ModelState.Failed] carrying the failure reason.
      */
     suspend fun ensureModel()
 

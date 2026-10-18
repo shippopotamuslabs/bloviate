@@ -8,11 +8,11 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import com.shippopotamus.bloviate.data.AndroidBubbleOverlayAccess
 import com.shippopotamus.bloviate.data.BubbleServiceStateHolder
 import com.shippopotamus.bloviate.data.DataStoreBubblePositionStore
-import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubblePositionPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
-import com.shippopotamus.bloviate.service.LoggingBubbleActions
+import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
+import com.shippopotamus.bloviate.service.LoggingTranscriptSink
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -36,7 +36,7 @@ abstract class BubbleModule {
     abstract fun bindBubbleOverlayAccessPort(access: AndroidBubbleOverlayAccess): BubbleOverlayAccessPort
 
     @Binds
-    abstract fun bindBubbleActionsPort(actions: LoggingBubbleActions): BubbleActionsPort
+    abstract fun bindTranscriptSinkPort(sink: LoggingTranscriptSink): TranscriptSinkPort
 
     companion object {
 

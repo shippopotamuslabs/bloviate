@@ -2,6 +2,8 @@ package com.shippopotamus.bloviate.presentation
 
 import android.content.res.Configuration
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -48,6 +50,7 @@ fun MainRoute(
         onStartBubble = onStartBubble,
         onStopBubble = onStopBubble,
         onRequestMicPermission = onRequestMicPermission,
+        onRetryModelDownload = viewModel::onRetryModelDownload,
         modifier = modifier,
     )
 }
@@ -56,8 +59,11 @@ fun MainRoute(
  * Status screen: whether the accessibility watcher is enabled, a deep link to
  * the system setting, the live field-focus classification published by the
  * watcher (package + classification only — never field content), the
- * bubble overlay permission + service controls, and the microphone
- * permission state + request.
+ * bubble overlay permission + service controls, the microphone
+ * permission state + request, and the model download state + retry. The
+ * card column scrolls: the cards together exceed short viewports (fold
+ * cover screens, split windows), and every card must stay reachable
+ * (ENC-65).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +74,7 @@ fun MainScreen(
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
     onRequestMicPermission: () -> Unit,
+    onRetryModelDownload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -83,6 +90,7 @@ fun MainScreen(
                 .padding(innerPadding)
                 .navigationBarsPadding()
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -100,9 +108,55 @@ fun MainScreen(
                 uiState = uiState,
                 onRequestMicPermission = onRequestMicPermission,
             )
+            ModelStatusCard(
+                uiState = uiState,
+                onRetryModelDownload = onRetryModelDownload,
+            )
         }
     }
 }
+
+@Composable
+private fun ModelStatusCard(
+    uiState: MainUiState,
+    onRetryModelDownload: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.model_card_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(text = modelStatusLabel(uiState.modelStatus))
+            Button(
+                onClick = onRetryModelDownload,
+                enabled = uiState.modelStatus is ModelUiStatus.Absent ||
+                    uiState.modelStatus is ModelUiStatus.Failed,
+            ) {
+                Text(text = stringResource(R.string.model_retry))
+            }
+            Text(
+                text = stringResource(R.string.model_hint),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun modelStatusLabel(status: ModelUiStatus): String =
+    when (status) {
+        ModelUiStatus.Absent -> stringResource(R.string.model_status_absent)
+        is ModelUiStatus.Downloading ->
+            stringResource(R.string.model_status_downloading_format, status.percent)
+        ModelUiStatus.Ready -> stringResource(R.string.model_status_ready)
+        is ModelUiStatus.Failed ->
+            stringResource(R.string.model_status_failed_format, status.reason)
+    }
 
 @Composable
 private fun MicPermissionCard(
@@ -269,6 +323,7 @@ private fun MainScreenEmptyPreview() {
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
+            onRetryModelDownload = {},
         )
     }
 }
@@ -291,12 +346,14 @@ private fun MainScreenPopulatedPreview() {
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
                 micPermissionGranted = true,
+                modelStatus = ModelUiStatus.Ready,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
             onStartBubble = {},
             onStopBubble = {},
             onRequestMicPermission = {},
+            onRetryModelDownload = {},
         )
     }
 }

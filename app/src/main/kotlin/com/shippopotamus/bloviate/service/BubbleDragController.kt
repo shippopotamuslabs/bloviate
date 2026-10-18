@@ -11,7 +11,6 @@ import com.shippopotamus.bloviate.domain.model.BubbleGesture
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
-import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
 
 /**
  * Gesture handling for the bubble window, driven by the gesture callbacks of
@@ -24,7 +23,8 @@ import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
  * Detecting inside the composition and reporting high-level events here keeps
  * the window mutation and classification in one place.
  *
- * Tap and long-press route to [BubbleActionsPort]. A drag accumulates in a
+ * A tap routes to [onTapGesture] (the recording controller: tap starts a
+ * recording — there is no hold-to-talk). A drag accumulates in a
  * [BubbleDragSession]: the window follows the finger (clamped on-screen),
  * [inDismissZone] tracks whether the bubble's center is inside the bottom
  * dismiss zone (driving the shrink affordance), and on release a drag
@@ -35,7 +35,7 @@ class BubbleDragController(
     private val windowManager: WindowManager,
     private val bubbleView: View,
     private val layoutParams: WindowManager.LayoutParams,
-    private val actions: BubbleActionsPort,
+    private val onTapGesture: () -> Unit,
     private val onDismissRequested: () -> Unit,
     private val onDragEnded: (BubblePosition) -> Unit,
     private val inDismissZone: MutableState<Boolean>,
@@ -47,11 +47,7 @@ class BubbleDragController(
     private var session: BubbleDragSession? = null
 
     fun onTap() {
-        actions.onTap()
-    }
-
-    fun onLongPress() {
-        actions.onLongPress()
+        onTapGesture()
     }
 
     /** The drag detector crossed its slop gate; anchor a session at the current window position. */
