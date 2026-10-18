@@ -36,6 +36,7 @@ fun MainRoute(
     onOpenOverlaySettings: () -> Unit,
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
+    onRequestMicPermission: () -> Unit,
     viewModel: MainViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
@@ -46,6 +47,7 @@ fun MainRoute(
         onOpenOverlaySettings = onOpenOverlaySettings,
         onStartBubble = onStartBubble,
         onStopBubble = onStopBubble,
+        onRequestMicPermission = onRequestMicPermission,
         modifier = modifier,
     )
 }
@@ -53,8 +55,9 @@ fun MainRoute(
 /**
  * Status screen: whether the accessibility watcher is enabled, a deep link to
  * the system setting, the live field-focus classification published by the
- * watcher (package + classification only — never field content), and the
- * bubble overlay permission + service controls.
+ * watcher (package + classification only — never field content), the
+ * bubble overlay permission + service controls, and the microphone
+ * permission state + request.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +67,7 @@ fun MainScreen(
     onOpenOverlaySettings: () -> Unit,
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
+    onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -91,6 +95,48 @@ fun MainScreen(
                 onOpenOverlaySettings = onOpenOverlaySettings,
                 onStartBubble = onStartBubble,
                 onStopBubble = onStopBubble,
+            )
+            MicPermissionCard(
+                uiState = uiState,
+                onRequestMicPermission = onRequestMicPermission,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MicPermissionCard(
+    uiState: MainUiState,
+    onRequestMicPermission: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.mic_card_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(
+                    if (uiState.micPermissionGranted) {
+                        R.string.mic_status_granted
+                    } else {
+                        R.string.mic_status_missing
+                    },
+                ),
+            )
+            Button(
+                onClick = onRequestMicPermission,
+                enabled = !uiState.micPermissionGranted,
+            ) {
+                Text(text = stringResource(R.string.mic_request))
+            }
+            Text(
+                text = stringResource(R.string.mic_hint),
+                style = MaterialTheme.typography.bodySmall,
             )
         }
     }
@@ -222,6 +268,7 @@ private fun MainScreenEmptyPreview() {
             onOpenOverlaySettings = {},
             onStartBubble = {},
             onStopBubble = {},
+            onRequestMicPermission = {},
         )
     }
 }
@@ -243,11 +290,13 @@ private fun MainScreenPopulatedPreview() {
                 focusPackageName = "com.google.android.gm",
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
+                micPermissionGranted = true,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
             onStartBubble = {},
             onStopBubble = {},
+            onRequestMicPermission = {},
         )
     }
 }

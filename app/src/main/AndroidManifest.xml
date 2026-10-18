@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".BloviateApplication"
@@ -39,16 +41,16 @@
         </service>
 
         <!--
-          Foreground type is specialUse for now, NOT microphone: Android 14+
-          refuses to start a microphone-typed FGS without RECORD_AUDIO, and
-          the mic permission flow arrives with recording in Phase 2 (ENC-48),
-          which switches this to the microphone type. No audio is captured
-          while the type is specialUse.
+          Foreground types (ENC-60): the service starts as microphone once
+          RECORD_AUDIO is granted — Android 14+ refuses a microphone-typed
+          FGS without it — and falls back to specialUse until then, in which
+          case it cannot record yet. The subtype property below is required
+          because specialUse remains a declared type.
         -->
         <service
             android:name=".service.BubbleOverlayService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="microphone|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows a user-enabled floating dictation bubble over editable text fields in other apps" />

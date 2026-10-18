@@ -9,7 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.content.ComponentCallbacks2
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
@@ -29,9 +31,14 @@ import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
+import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
+import com.shippopotamus.bloviate.domain.port.MicPermissionPort
+import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubblePositionUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleVisibilityUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveBubblePositionUseCase
@@ -55,12 +62,17 @@ import javax.inject.Inject
  * (non-negotiable: a focusable overlay would steal the host field's caret)
  * and `FLAG_LAYOUT_NO_LIMITS`.
  *
- * Foreground type: `specialUse`, deliberately NOT `microphone`. Android 14+
- * refuses to start a microphone-typed foreground service without
- * `RECORD_AUDIO` already granted, and the mic permission flow is Phase 2
- * work — when recording lands (ENC-48), `startForeground` switches to the
- * microphone type and the manifest follows. This ticket requests no audio
- * permission and records nothing.
+ * Foreground type: `microphone` once `RECORD_AUDIO` is granted (the
+ * ENC-59 intermediate step, completed by ENC-60). Android 14+ refuses to
+ * start a microphone-typed foreground service without the permission, so
+ * until it is granted the service still starts as `specialUse` and simply
+ * cannot record yet — the pair (permission, mic type) is decided at start.
+ *
+ * The service also owns the voice plumbing lifecycle (ENC-60): it ensures
+ * the transcription model is present, keeps the [TranscriptionEngine]
+ * context warm while running, and releases it under memory pressure
+ * ([onTrimMemory]) or on destroy, per `contracts/TRANSCRIPTION_RULES.md`.
+ * The recording session itself is driven by the bubble UI (ENC-61).
  *
  * Started explicitly by the user from the main screen; it never starts
  * itself. Without overlay permission every show command is a safe no-op
@@ -87,6 +99,18 @@ class BubbleOverlayService : Service() {
     @Inject
     lateinit var bubbleActions: BubbleActionsPort
 
+    @Inject
+    lateinit var modelStore: ModelStorePort
+
+    @Inject
+    lateinit var transcriptionEngine: TranscriptionEngine
+
+    @Inject
+    lateinit var micPermission: MicPermissionPort
+
+    @Inject
+    lateinit var recordingSession: RecordingSessionPort
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var windowManager: WindowManager
@@ -99,10 +123,24 @@ class BubbleOverlayService : Service() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
         createNotificationChannel()
+        micPermission.refresh()
+        val micGranted = micPermission.isGrantedNow()
         startForeground(
             NOTIFICATION_ID,
             buildNotification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            if (micGranted) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            },
+        )
+        Log.d(
+            TAG,
+            if (micGranted) {
+                "Foreground service started with the microphone type"
+            } else {
+                "Foreground service started with the specialUse type (microphone permission not granted)"
+            },
         )
         bubbleServiceState.publishServiceRunning(true)
         if (!bubbleOverlayAccess.canDrawOverlays()) {
@@ -110,6 +148,35 @@ class BubbleOverlayService : Service() {
         }
         serviceScope.launch {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
+        }
+        serviceScope.launch {
+            modelStore.state.collect { state -> onModelStateChanged(state) }
+        }
+        serviceScope.launch {
+            recordingSession.state.collect { state -> Log.d(TAG, "Recording session state: $state") }
+        }
+        serviceScope.launch(Dispatchers.Default) {
+            modelStore.ensureModel()
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Memory watchdog (TRANSCRIPTION_RULES §4): at RUNNING_CRITICAL the
+        // warm native context is the biggest reclaimable asset — release it
+        // rather than let the LMK kill the process; it re-loads lazily on
+        // the next dictation. At RUNNING_LOW there are no cached buffers
+        // worth releasing yet (waveform history arrives with ENC-61).
+        when {
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
+                Log.w(TAG, "onTrimMemory RUNNING_CRITICAL (level $level): releasing the warm whisper context")
+                serviceScope.launch(Dispatchers.Default) {
+                    transcriptionEngine.release()
+                }
+            }
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                Log.d(TAG, "onTrimMemory RUNNING_LOW (level $level): nothing cached to release")
+            }
         }
     }
 
@@ -135,8 +202,32 @@ class BubbleOverlayService : Service() {
         hideBubble()
         observeBubbleVisibility.reset()
         bubbleServiceState.publishServiceRunning(false)
+        // Release the native context on a fire-and-forget scope: serviceScope
+        // is cancelled below and runBlocking is banned by the style contract.
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            transcriptionEngine.release()
+        }
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun onModelStateChanged(state: ModelState) {
+        Log.d(TAG, "Model state: $state")
+        if (state is ModelState.Ready && !transcriptionEngine.isWarm()) {
+            if (thermalAllowsModelLoad()) {
+                serviceScope.launch(Dispatchers.Default) {
+                    transcriptionEngine.warmUp()
+                }
+            } else {
+                Log.w(TAG, "Model ready but thermal status is severe; deferring engine warm-up")
+            }
+        }
+    }
+
+    /** Never start a model load while the device is thermally severe (TRANSCRIPTION_RULES §4). */
+    private fun thermalAllowsModelLoad(): Boolean {
+        val powerManager = getSystemService(PowerManager::class.java) ?: return true
+        return powerManager.currentThermalStatus < PowerManager.THERMAL_STATUS_SEVERE
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

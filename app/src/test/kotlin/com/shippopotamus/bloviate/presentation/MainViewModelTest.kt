@@ -3,12 +3,15 @@ package com.shippopotamus.bloviate.presentation
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
+import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
+import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.test.runTest
@@ -29,6 +32,7 @@ class MainViewModelTest {
     private val fakeWatcherAccessPort = FakeWatcherAccessPort()
     private val fakeBubbleOverlayAccessPort = FakeBubbleOverlayAccessPort()
     private val fakeBubbleServiceStatePort = FakeBubbleServiceStatePort()
+    private val fakeMicPermissionPort = FakeMicPermissionPort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -38,6 +42,8 @@ class MainViewModelTest {
             isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
             isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
             observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
+            isMicPermissionGranted = IsMicPermissionGrantedUseCase(fakeMicPermissionPort),
+            refreshMicPermission = RefreshMicPermissionUseCase(fakeMicPermissionPort),
         )
     }
 
@@ -107,6 +113,35 @@ class MainViewModelTest {
                 viewModel.onResumed()
 
                 assertTrue(awaitItem().overlayPermissionGranted)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `mic permission state is reflected and re-read on resume`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().micPermissionGranted)
+
+                fakeMicPermissionPort.liveGranted = true
+                viewModel.onResumed()
+
+                assertTrue(awaitItem().micPermissionGranted)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `mic permission result re-reads the grant and republishes it`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().micPermissionGranted)
+
+                fakeMicPermissionPort.liveGranted = true
+                viewModel.onMicPermissionResult()
+
+                assertTrue(awaitItem().micPermissionGranted)
+                assertTrue(fakeMicPermissionPort.refreshCount > 0)
                 cancelAndIgnoreRemainingEvents()
             }
         }

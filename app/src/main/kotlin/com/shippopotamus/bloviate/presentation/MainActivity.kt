@@ -1,11 +1,13 @@
 package com.shippopotamus.bloviate.presentation
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +29,12 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        viewModel.onMicPermissionResult()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -38,6 +46,7 @@ class MainActivity : ComponentActivity() {
                     onOpenOverlaySettings = ::openOverlaySettings,
                     onStartBubble = ::startBubbleService,
                     onStopBubble = ::stopBubbleService,
+                    onRequestMicPermission = ::requestMicPermission,
                 )
             }
         }
@@ -70,5 +79,9 @@ class MainActivity : ComponentActivity() {
 
     private fun stopBubbleService() {
         stopService(Intent(this, BubbleOverlayService::class.java))
+    }
+
+    private fun requestMicPermission() {
+        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 }
