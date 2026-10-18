@@ -2,6 +2,8 @@ package com.shippopotamus.bloviate.presentation
 
 import android.content.res.Configuration
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -57,8 +59,11 @@ fun MainRoute(
  * Status screen: whether the accessibility watcher is enabled, a deep link to
  * the system setting, the live field-focus classification published by the
  * watcher (package + classification only — never field content), the
- * bubble overlay permission + service controls, and the microphone
- * permission state + request.
+ * bubble overlay permission + service controls, the microphone
+ * permission state + request, and the model download state + retry. The
+ * card column scrolls: the cards together exceed short viewports (fold
+ * cover screens, split windows), and every card must stay reachable
+ * (ENC-65).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +90,7 @@ fun MainScreen(
                 .padding(innerPadding)
                 .navigationBarsPadding()
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
