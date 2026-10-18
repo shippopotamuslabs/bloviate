@@ -1,0 +1,175 @@
+# Bloviate CI — merge-request gates + merge-to-phone distribution.
+#
+# Mirrors Stratum's pipeline shape (home-server runner, .android-job template,
+# distribute-internal lane) with Bloviate-specific adaptations:
+#
+# - NO google-services.json: Bloviate does not integrate the Firebase SDK
+#   (App Distribution needs no in-app SDK), so there is no
+#   GOOGLE_SERVICES_JSON variable and no config-copy step.
+# - COMPOSITE BUILD: whisper-android is a git submodule consumed via
+#   includeBuild. GIT_SUBMODULE_STRATEGY=recursive clones it plus its nested
+#   whisper.cpp submodule. The whisper-android project's CI job-token
+#   allowlist includes this project, which is what lets this project's job
+#   token clone the submodule.
+# - INCLUDED-BUILD SDK: the included whisper-android build resolves the SDK
+#   location per build (see README / AGENTS.md §4), so before_script writes
+#   sdk.dir local.properties at the root AND into third_party/whisper-android,
+#   and installs the pinned NDK 28.2.13676358 the native build requires.
+# - SIGNING: v1 distributes the DEBUG-signed APK. App Distribution accepts
+#   debug-signed builds and Sean dogfoods personally; a real keystore is
+#   deferred together with the Play-publication decision (ENC-63).
+#
+# ONE-TIME SETUP (done 2026-10-18, ENC-63 — recorded for posterity):
+# - Firebase project `bloviate-app` (#74044613867); Android app
+#   1:74044613867:android:37d80fbdff97cd7b0d8aae for
+#   com.shippopotamus.bloviate; App Distribution group "Internal" with Sean
+#   as tester.
+# - FIREBASE_SERVICE_ACCOUNT_JSON (type: File, protected) on this project:
+#   the app-distribution-uploader@stratum-a1a5b service-account key (same
+#   account Stratum's CI uses), granted roles/firebaseappdistro.admin on the
+#   bloviate-app project.
+# - whisper-android GitLab project: this project added to its CI/CD job
+#   token allowlist.
+
+workflow:
+  rules:
+    # Cost control (mirrors Stratum STR-110): MR pipelines run only when the
+    # MR targets the default branch.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'schedule'
+
+default:
+  interruptible: true
+
+variables:
+  # Gradle home lives INSIDE the project dir so the `cache:` stanza on
+  # .android-job can capture it (same reasoning as Stratum).
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.ci-gradle-home"
+  ANDROID_USER_HOME: "$CI_PROJECT_DIR/../ci-home/android-home"
+  GRADLE_OPTS: "-Dorg.gradle.caching=true"
+  # Recursive: bloviate -> whisper-android -> whisper.cpp; all three levels
+  # are required for the composite build's native compile.
+  GIT_SUBMODULE_STRATEGY: recursive
+
+stages:
+  - lint
+  - test
+  - deploy
+
+# Shared setup for every Android job. Runs on the home-server (Katana) shell
+# runner (same as Stratum since its Oct 2026 cost control): `image:` is
+# ignored by the shell executor — the host toolchain is used.
+.android-job:
+  image:
+    name: ghcr.io/cirruslabs/android-sdk:36
+    pull_policy: if-not-present
+  tags: [home-server]
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+  cache:
+    key:
+      files:
+        - gradle/libs.versions.toml
+      prefix: gradle-deps
+    paths:
+      - .ci-gradle-home/caches/modules-2/
+      - .ci-gradle-home/wrapper/
+  before_script:
+    - chmod +x gradlew
+    # Shell executor runs non-login shells that may not carry ANDROID_HOME/PATH;
+    # fall back to the home-server SDK location so sdkmanager/adb resolve.
+    - export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
+    - export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+    - command -v sdkmanager || (echo "sdkmanager not found under $ANDROID_HOME" && exit 1)
+    # `yes` dies with SIGPIPE (141) once sdkmanager exits; tolerate only that.
+    - yes | sdkmanager --licenses > /dev/null || [ $? -eq 141 ]
+    # App + whisper-android both compile against SDK 37, a preview-channel
+    # platform published only as android-37.0 (idempotent).
+    - yes | sdkmanager --channel=3 "platforms;android-37.0" > /dev/null || [ $? -eq 141 ]
+    # whisper-android pins NDK 28.2.13676358 for its CMake build (idempotent).
+    - yes | sdkmanager "ndk;28.2.13676358" > /dev/null || [ $? -eq 141 ]
+    # The composite build resolves the SDK location per build: the included
+    # whisper-android build does not see this repo's local.properties, so
+    # write sdk.dir into both (the README documents the same step for IDEs).
+    - printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+    - printf 'sdk.dir=%s\n' "$ANDROID_HOME" > third_party/whisper-android/local.properties
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Static analysis in one job (mirrors Stratum STR-76): detekt (hard gate,
+# maxIssues: 0) and Android lint share one compile.
+static-analysis:
+  extends: .android-job
+  stage: lint
+  # needs: [] opts out of stage gating so the job starts immediately.
+  needs: []
+  script:
+    - ./gradlew detekt lintDebug --continue
+  artifacts:
+    when: always
+    paths:
+      - '**/build/reports/detekt/'
+      - '**/build/reports/lint-results-debug.html'
+    expire_in: 1 week
+
+unit-tests:
+  extends: .android-job
+  stage: test
+  needs: []
+  script:
+    - ./gradlew testDebugUnitTest
+  artifacts:
+    when: always
+    paths:
+      - '**/build/reports/tests/'
+    reports:
+      junit: '**/build/test-results/**/TEST-*.xml'
+    expire_in: 2 weeks
+
+assemble-debug:
+  extends: .android-job
+  stage: test
+  needs: []
+  script:
+    - ./gradlew :app:assembleDebug
+  artifacts:
+    paths:
+      - app/build/outputs/apk/debug/*.apk
+    expire_in: 1 week
+
+# Firebase App Distribution: merge-to-phone for Sean's dogfooding (ENC-63).
+# Auto-runs on every main merge. Uploads the DEBUG-signed APK produced by
+# assemble-debug — no version bump required, upload as often as needed.
+# Targets the "Internal" tester group.
+distribute-internal:
+  extends: .android-job
+  tags: [home-server]
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # needs: opts out of stage gating, so list the gate jobs explicitly to
+  # prevent distributing an unbuilt/untested change.
+  needs: [assemble-debug, unit-tests, static-analysis]
+  script:
+    - test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Missing FIREBASE_SERVICE_ACCOUNT_JSON file variable — see header of .gitlab-ci.yml" && exit 1)
+    - export GOOGLE_APPLICATION_CREDENTIALS="$FIREBASE_SERVICE_ACCOUNT_JSON"
+    # Explicit contract: assemble-debug must have produced exactly one APK.
+    - |
+      shopt -s nullglob
+      APK_FILES=(app/build/outputs/apk/debug/*.apk)
+      shopt -u nullglob
+      if [ ${#APK_FILES[@]} -eq 0 ]; then echo "No APK found" && exit 1; fi
+      if [ ${#APK_FILES[@]} -gt 1 ]; then echo "Multiple APKs found: ${APK_FILES[*]}" && exit 1; fi
+      npx firebase-tools appdistribution:distribute "${APK_FILES[0]}" \
+        --app 1:74044613867:android:37d80fbdff97cd7b0d8aae \
+        --groups "Internal" \
+        --release-notes "Build ${CI_COMMIT_SHORT_SHA} from main" \
+        --non-interactive
+  artifacts:
+    paths:
+      - app/build/outputs/apk/debug/*.apk
+    expire_in: 1 week
