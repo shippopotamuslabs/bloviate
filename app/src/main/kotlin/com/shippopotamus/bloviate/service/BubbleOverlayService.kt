@@ -32,12 +32,13 @@ import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
 import com.shippopotamus.bloviate.domain.model.ModelState
-import com.shippopotamus.bloviate.domain.port.BubbleActionsPort
+import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubblePositionUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleVisibilityUseCase
@@ -72,7 +73,9 @@ import javax.inject.Inject
  * the transcription model is present, keeps the [TranscriptionEngine]
  * context warm while running, and releases it under memory pressure
  * ([onTrimMemory]) or on destroy, per `contracts/TRANSCRIPTION_RULES.md`.
- * The recording session itself is driven by the bubble UI (ENC-61).
+ * The bubble window doubles as the recording bar (ENC-61): a
+ * [BubbleRecordingController] drives the session from the bar's taps and
+ * feeds the bar state back into the same composition.
  *
  * Started explicitly by the user from the main screen; it never starts
  * itself. Without overlay permission every show command is a safe no-op
@@ -97,7 +100,7 @@ class BubbleOverlayService : Service() {
     lateinit var bubbleOverlayAccess: BubbleOverlayAccessPort
 
     @Inject
-    lateinit var bubbleActions: BubbleActionsPort
+    lateinit var transcriptSink: TranscriptSinkPort
 
     @Inject
     lateinit var modelStore: ModelStorePort
@@ -118,6 +121,8 @@ class BubbleOverlayService : Service() {
     private var bubbleView: ComposeView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private val inDismissZone = mutableStateOf(false)
+    private var recordingController: BubbleRecordingController? = null
+    private val barStateSnapshot = mutableStateOf<RecordingBarState>(RecordingBarState.Idle)
 
     override fun onCreate() {
         super.onCreate()
@@ -146,6 +151,16 @@ class BubbleOverlayService : Service() {
         if (!bubbleOverlayAccess.canDrawOverlays()) {
             Log.w(TAG, "Started without overlay permission; the bubble will not show until it is granted")
         }
+        val controller = BubbleRecordingController(
+            session = recordingSession,
+            transcriptionEngine = transcriptionEngine,
+            transcriptSink = transcriptSink,
+            scope = serviceScope,
+        )
+        recordingController = controller
+        serviceScope.launch {
+            controller.barState.collect { state -> barStateSnapshot.value = state }
+        }
         serviceScope.launch {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
         }
@@ -165,8 +180,8 @@ class BubbleOverlayService : Service() {
         // Memory watchdog (TRANSCRIPTION_RULES §4): at RUNNING_CRITICAL the
         // warm native context is the biggest reclaimable asset — release it
         // rather than let the LMK kill the process; it re-loads lazily on
-        // the next dictation. At RUNNING_LOW there are no cached buffers
-        // worth releasing yet (waveform history arrives with ENC-61).
+        // the next dictation. At RUNNING_LOW the waveform history is the
+        // releasable cache.
         when {
             level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> {
                 Log.w(TAG, "onTrimMemory RUNNING_CRITICAL (level $level): releasing the warm whisper context")
@@ -175,7 +190,8 @@ class BubbleOverlayService : Service() {
                 }
             }
             level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
-                Log.d(TAG, "onTrimMemory RUNNING_LOW (level $level): nothing cached to release")
+                recordingController?.onLowMemory()
+                Log.d(TAG, "onTrimMemory RUNNING_LOW (level $level): waveform history released")
             }
         }
     }
@@ -200,6 +216,8 @@ class BubbleOverlayService : Service() {
 
     override fun onDestroy() {
         hideBubble()
+        recordingController?.shutdown()
+        recordingController = null
         observeBubbleVisibility.reset()
         bubbleServiceState.publishServiceRunning(false)
         // Release the native context on a fire-and-forget scope: serviceScope
@@ -245,6 +263,11 @@ class BubbleOverlayService : Service() {
             Log.w(TAG, "Show requested but overlay permission is not granted; no-op")
             return
         }
+        val controller = recordingController
+        if (controller == null) {
+            Log.w(TAG, "Show requested before the recording controller exists; no-op")
+            return
+        }
         val owner = ServiceLifecycleOwner()
         val params = createLayoutParams()
         val view = ComposeView(this).apply {
@@ -258,7 +281,7 @@ class BubbleOverlayService : Service() {
             windowManager = windowManager,
             bubbleView = view,
             layoutParams = params,
-            actions = bubbleActions,
+            onTapGesture = controller::onBubbleTap,
             onDismissRequested = ::onBubbleDismissRequested,
             onDragEnded = { position -> serviceScope.launch { saveBubblePosition(position) } },
             inDismissZone = inDismissZone,
@@ -268,9 +291,12 @@ class BubbleOverlayService : Service() {
                 colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
             ) {
                 BubbleContent(
+                    barState = barStateSnapshot.value,
+                    waveformLevels = controller.waveform::levels,
                     inDismissZone = inDismissZone.value,
                     onTap = dragController::onTap,
-                    onLongPress = dragController::onLongPress,
+                    onCancelRecording = controller::onCancelTap,
+                    onSendRecording = controller::onSendTap,
                     onDragStart = dragController::onDragStart,
                     onDrag = dragController::onDrag,
                     onDragEnd = dragController::onDragEnd,
@@ -288,6 +314,10 @@ class BubbleOverlayService : Service() {
     }
 
     private fun hideBubble() {
+        // The window going away cancels any active recording and discards
+        // any in-flight transcription — critically when a password field
+        // takes focus, nothing may be transcribed for it.
+        recordingController?.onHostHidden()
         val view = bubbleView ?: return
         windowManager.removeViewImmediate(view)
         bubbleView = null
