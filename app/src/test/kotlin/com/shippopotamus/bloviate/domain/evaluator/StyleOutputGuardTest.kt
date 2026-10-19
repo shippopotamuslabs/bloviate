@@ -152,6 +152,26 @@ class StyleOutputGuardTest {
     }
 
     @Test
+    fun `a long restyle with a paragraph break and spelling drift passes`() {
+        // Sean's 2026-10-19 ~09:54 EDT datapoint (logged on ENC-83): a
+        // 655-token Aristotle completion, HTTP 200 server-side, that
+        // fell back locally. Its output shape — an inserted paragraph
+        // break, 'colour' for 'color', elevated diction, but EVERY
+        // content word preserved — is a legitimate restyle and must
+        // PASS; only the Idiocracy drop may fail this guard.
+        val source = "a man's character is revealed not by his grand declarations but by his small daily choices. " +
+            "anyone can be generous when the world is watching, but the color of his soul shows in how he " +
+            "treats people who can do nothing for him. excellence is not a single act but a habit, " +
+            "repeated until it becomes the shape of a life."
+        val styled = "A man's character is revealed not by his grand declarations, but by his small daily choices. " +
+            "Anyone can be generous when the world is watching; the colour of his soul, though, shows in how he " +
+            "treats people who can do nothing for him.\n\n" +
+            "Excellence, then, is not a single act but a habit, repeated until it becomes the shape of a life."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
     fun `a blank output passes and leaves emptiness to the client`() {
         assertEquals(Verdict.PASS, StyleOutputGuard.classify("some words", "   "))
     }
