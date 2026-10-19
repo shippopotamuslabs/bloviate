@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import com.shippopotamus.bloviate.data.AndroidBubbleOverlayAccess
 import com.shippopotamus.bloviate.data.BubbleServiceStateHolder
+import com.shippopotamus.bloviate.data.DataStoreBubbleAppearanceStore
 import com.shippopotamus.bloviate.data.DataStoreBubblePositionStore
+import com.shippopotamus.bloviate.domain.port.BubbleAppearancePort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubblePositionPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
@@ -31,6 +33,9 @@ abstract class BubbleModule {
 
     @Binds
     abstract fun bindBubblePositionPort(store: DataStoreBubblePositionStore): BubblePositionPort
+
+    @Binds
+    abstract fun bindBubbleAppearancePort(store: DataStoreBubbleAppearanceStore): BubbleAppearancePort
 
     @Binds
     abstract fun bindBubbleServiceStatePort(holder: BubbleServiceStateHolder): BubbleServiceStatePort
