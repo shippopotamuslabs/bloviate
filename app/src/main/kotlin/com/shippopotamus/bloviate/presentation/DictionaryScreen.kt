@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.presentation
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,10 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +27,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -55,11 +56,15 @@ fun DictionaryRoute(
 }
 
 /**
- * The Dictionary tab (ENC-74): the user's personal dictionary — words
- * whose spelling and capitalization Bloviate enforces, and corrections
- * for the mis-hearings that keep happening. Both lists are fully
- * editable here; changes reach the very next dictation, because the
- * cleanup pipeline reads the dictionary at send time.
+ * The Dictionary tab (ENC-74, dashboard form ENC-75/ENC-79): the user's
+ * personal dictionary — words whose spelling and capitalization
+ * Bloviate enforces, and corrections for the mis-hearings that keep
+ * happening. Dashboard tightening only: section headers carry the
+ * counts, the intro paragraphs became one-line footers, and the add
+ * forms slimmed down to placeholder-led fields inside the cards. The
+ * store and edit behavior are untouched; changes still reach the very
+ * next dictation, because the cleanup pipeline reads the dictionary at
+ * send time — the header pill says so.
  *
  * The column scrolls, like Setup's: the lists grow with the user, and
  * every row must stay reachable on short viewports (ENC-65).
@@ -79,7 +84,16 @@ fun DictionaryScreen(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(text = stringResource(R.string.tab_dictionary)) })
+            TopAppBar(
+                title = { Text(text = stringResource(R.string.tab_dictionary)) },
+                actions = {
+                    StatusPill(
+                        text = stringResource(R.string.dictionary_pill),
+                        tone = StatusTone.ACCENT,
+                        modifier = Modifier.padding(end = 16.dp),
+                    )
+                },
+            )
         },
         contentWindowInsets = WindowInsets(0),
         modifier = modifier,
@@ -91,13 +105,23 @@ fun DictionaryScreen(
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            DashboardSectionHeader(
+                text = stringResource(R.string.dictionary_words_title),
+                trailingText = uiState.words.size.toString(),
+            )
             WordsCard(
                 uiState = uiState,
                 onWordDraftChange = onWordDraftChange,
                 onAddWordClick = onAddWordClick,
                 onRemoveWordClick = onRemoveWordClick,
+            )
+            DictionaryFooter(text = stringResource(R.string.dictionary_words_footer))
+            DashboardSectionHeader(
+                text = stringResource(R.string.dictionary_corrections_title),
+                trailingText = uiState.corrections.size.toString(),
+                modifier = Modifier.padding(top = 10.dp),
             )
             CorrectionsCard(
                 uiState = uiState,
@@ -106,6 +130,7 @@ fun DictionaryScreen(
                 onAddCorrectionClick = onAddCorrectionClick,
                 onRemoveCorrectionClick = onRemoveCorrectionClick,
             )
+            DictionaryFooter(text = stringResource(R.string.dictionary_footer))
         }
     }
 }
@@ -118,56 +143,46 @@ private fun WordsCard(
     onRemoveWordClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.dictionary_words_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.dictionary_words_body),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (uiState.words.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.dictionary_words_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                uiState.words.forEach { word ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = word,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f),
-                        )
+    DashboardCard(modifier = modifier) {
+        if (uiState.words.isEmpty()) {
+            EmptyNote(text = stringResource(R.string.dictionary_words_empty))
+        } else {
+            uiState.words.forEachIndexed { index, word ->
+                DashboardRow(
+                    label = word,
+                    dividerAbove = index > 0,
+                    trailing = {
                         IconButton(onClick = { onRemoveWordClick(word) }) {
                             Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.dictionary_remove_word, word),
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = stringResource(
+                                    R.string.dictionary_remove_word,
+                                    word,
+                                ),
                             )
                         }
-                    }
-                }
+                    },
+                )
             }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(
+            modifier = Modifier.padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val fieldLabel = stringResource(R.string.dictionary_word_field_label)
                 OutlinedTextField(
                     value = uiState.wordDraft,
                     onValueChange = onWordDraftChange,
-                    label = { Text(text = stringResource(R.string.dictionary_word_field_label)) },
+                    placeholder = { Text(text = stringResource(R.string.dictionary_word_field_hint)) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = fieldLabel },
                 )
                 Button(onClick = onAddWordClick) {
                     Text(text = stringResource(R.string.dictionary_add))
@@ -193,70 +208,60 @@ private fun CorrectionsCard(
     onRemoveCorrectionClick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.dictionary_corrections_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.dictionary_corrections_body),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (uiState.corrections.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.dictionary_corrections_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                uiState.corrections.forEach { correction ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = stringResource(
-                                R.string.dictionary_correction_format,
-                                correction.heardAs,
-                                correction.replacement,
-                            ),
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = Modifier.weight(1f),
-                        )
+    DashboardCard(modifier = modifier) {
+        if (uiState.corrections.isEmpty()) {
+            EmptyNote(text = stringResource(R.string.dictionary_corrections_empty))
+        } else {
+            uiState.corrections.forEachIndexed { index, correction ->
+                DashboardRow(
+                    label = stringResource(
+                        R.string.dictionary_correction_format,
+                        correction.heardAs,
+                        correction.replacement,
+                    ),
+                    dividerAbove = index > 0,
+                    trailing = {
                         IconButton(onClick = { onRemoveCorrectionClick(correction.heardAs) }) {
                             Icon(
-                                imageVector = Icons.Default.Delete,
+                                imageVector = Icons.Filled.Close,
                                 contentDescription = stringResource(
                                     R.string.dictionary_remove_correction,
                                     correction.heardAs,
                                 ),
                             )
                         }
-                    }
-                }
+                    },
+                )
             }
-            OutlinedTextField(
-                value = uiState.heardAsDraft,
-                onValueChange = onHeardAsDraftChange,
-                label = { Text(text = stringResource(R.string.dictionary_heard_as_label)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(
+            modifier = Modifier.padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val heardAsLabel = stringResource(R.string.dictionary_heard_as_label)
+                OutlinedTextField(
+                    value = uiState.heardAsDraft,
+                    onValueChange = onHeardAsDraftChange,
+                    placeholder = { Text(text = heardAsLabel) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = heardAsLabel },
+                )
+                val replacementLabel = stringResource(R.string.dictionary_replacement_label)
                 OutlinedTextField(
                     value = uiState.replacementDraft,
                     onValueChange = onReplacementDraftChange,
-                    label = { Text(text = stringResource(R.string.dictionary_replacement_label)) },
+                    placeholder = { Text(text = replacementLabel) },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = replacementLabel },
                 )
                 Button(onClick = onAddCorrectionClick) {
                     Text(text = stringResource(R.string.dictionary_add))
@@ -273,6 +278,34 @@ private fun CorrectionsCard(
     }
 }
 
+/** An empty list's one quiet line inside its card, in place of rows. */
+@Composable
+private fun EmptyNote(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(13.dp),
+    )
+}
+
+/** A section's one-line footer — where the intro paragraphs went (ENC-79). */
+@Composable
+private fun DictionaryFooter(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(horizontal = 4.dp),
+    )
+}
+
 /** Each card only ever holds its own cases (the ViewModel maps add outcomes per form); the mapping is total regardless. */
 private fun DictionaryEditError.messageRes(): Int =
     when (this) {
@@ -284,12 +317,7 @@ private fun DictionaryEditError.messageRes(): Int =
     }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Dictionary empty - Light", showBackground = true)
-@Preview(
-    name = "Dictionary empty - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Dictionary empty - Dark", showBackground = true)
 @Composable
 private fun DictionaryScreenEmptyPreview() {
     PreviewTheme {
@@ -307,12 +335,7 @@ private fun DictionaryScreenEmptyPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Dictionary populated - Light", showBackground = true)
-@Preview(
-    name = "Dictionary populated - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Dictionary populated - Dark", showBackground = true)
 @Composable
 private fun DictionaryScreenPopulatedPreview() {
     PreviewTheme {
