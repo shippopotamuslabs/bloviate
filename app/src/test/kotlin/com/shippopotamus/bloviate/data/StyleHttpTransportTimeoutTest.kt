@@ -28,6 +28,23 @@ class StyleHttpTransportTimeoutTest {
     }
 
     @Test
+    fun `the socket read timeout never binds before the client pre-content budgets`() {
+        // ENC-91: the pre-content budgets grew past the old socket
+        // value — the pin follows them, or the ENC-83 failure returns
+        // wearing a reasoning model's clothes.
+        assertTrue(
+            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS > OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS,
+            "read timeout ${HttpURLConnectionStyleTransport.READ_TIMEOUT_MS}ms would pre-empt " +
+                "the client's ${OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS}ms first-token budget",
+        )
+        assertTrue(
+            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS > OpenRouterStyleClient.REASONING_GAP_TIMEOUT_MS,
+            "read timeout ${HttpURLConnectionStyleTransport.READ_TIMEOUT_MS}ms would pre-empt " +
+                "the client's ${OpenRouterStyleClient.REASONING_GAP_TIMEOUT_MS}ms reasoning budget",
+        )
+    }
+
+    @Test
     fun `the socket read timeout stays below the client absolute cap`() {
         assertTrue(
             HttpURLConnectionStyleTransport.READ_TIMEOUT_MS < OpenRouterStyleClient.ABSOLUTE_CAP_MS,

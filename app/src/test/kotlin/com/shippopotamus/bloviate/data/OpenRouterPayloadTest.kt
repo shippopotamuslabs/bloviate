@@ -167,6 +167,61 @@ class OpenRouterPayloadTest {
     }
 
     @Test
+    fun `an xai reasoning chunk yields its reasoning text`() {
+        // ENC-91: xAI's wire shape — the thought rides in reasoning_content.
+        val chunk = "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"Thinking it over.\"}}]}"
+
+        assertEquals("Thinking it over.", OpenRouterPayload.extractReasoningDelta(chunk))
+    }
+
+    @Test
+    fun `an openrouter reasoning chunk yields its reasoning text`() {
+        // ENC-91: OpenRouter's unified shape — plain `reasoning`.
+        val chunk = "{\"choices\":[{\"delta\":{\"reasoning\":\"Thinking it over.\"}}]}"
+
+        assertEquals("Thinking it over.", OpenRouterPayload.extractReasoningDelta(chunk))
+    }
+
+    @Test
+    fun `a reasoning details chunk registers as reasoning`() {
+        // ENC-91: structured reasoning entries have no single text
+        // field; presence alone is the sign of life.
+        val chunk = "{\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"...\"}]}}]}"
+
+        assertEquals("", OpenRouterPayload.extractReasoningDelta(chunk))
+    }
+
+    @Test
+    fun `a content chunk carries no reasoning`() {
+        val chunk = "{\"choices\":[{\"delta\":{\"content\":\"The answer.\"}}]}"
+
+        assertNull(OpenRouterPayload.extractReasoningDelta(chunk))
+    }
+
+    @Test
+    fun `a null reasoning field is not a sign of life`() {
+        val chunk = "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning\":null}}]}"
+
+        assertNull(OpenRouterPayload.extractReasoningDelta(chunk))
+    }
+
+    @Test
+    fun `a non-streamed completion body yields its message content`() {
+        // ENC-91: the single-shot shape — message, not delta.
+        val body = "{\"id\":\"gen-1\",\"provider\":\"SpaceXAI\",\"choices\":[{\"index\":0," +
+            "\"message\":{\"role\":\"assistant\",\"content\":\"The whole answer.\"},\"finish_reason\":\"stop\"}]}"
+
+        assertEquals("The whole answer.", OpenRouterPayload.extractMessageContent(body))
+    }
+
+    @Test
+    fun `a streamed chunk is not a message body`() {
+        val chunk = "{\"choices\":[{\"delta\":{\"content\":\"Partial.\"}}]}"
+
+        assertNull(OpenRouterPayload.extractMessageContent(chunk))
+    }
+
+    @Test
     fun `a 404 is model-unavailable`() {
         assertTrue(OpenRouterPayload.isModelUnavailable(404, ""))
     }
