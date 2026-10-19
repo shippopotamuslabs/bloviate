@@ -75,7 +75,7 @@ fun SetupScreen(
                 actions = {
                     SetupStatusPill(
                         status = uiState.setupStatus(),
-                        modifier = Modifier.padding(end = 16.dp),
+                        modifier = Modifier.padding(end = BloviateSpacing.s16),
                     )
                 },
             )
@@ -89,8 +89,8 @@ fun SetupScreen(
                 .padding(innerPadding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
             DashboardSectionHeader(text = stringResource(R.string.setup_section_permissions))
             PermissionsCard(
@@ -101,7 +101,6 @@ fun SetupScreen(
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.setup_section_dictation),
-                modifier = Modifier.padding(top = 10.dp),
             )
             DictationCard(
                 uiState = uiState,
@@ -110,7 +109,6 @@ fun SetupScreen(
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.model_card_title),
-                modifier = Modifier.padding(top = 10.dp),
             )
             VoiceModelsCard(
                 uiState = uiState,
@@ -118,7 +116,7 @@ fun SetupScreen(
                 onParakeetDownloadClick = onParakeetDownloadClick,
                 onSelectEngine = onSelectEngine,
             )
-            SetupFooter(modifier = Modifier.padding(top = 6.dp))
+            SetupFooter()
         }
     }
 }
@@ -265,6 +263,7 @@ private fun DictationCard(
                     onCheckedChange = { turnOn ->
                         if (turnOn) onStartBubble() else onStopBubble()
                     },
+                    colors = bloviateSwitchColors(),
                 )
             },
         )
@@ -315,8 +314,12 @@ private fun VoiceModelsCard(
             dividerAbove = true,
         )
         Column(
-            modifier = Modifier.padding(start = 13.dp, end = 13.dp, bottom = 13.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(
+                start = BloviateSpacing.s16,
+                end = BloviateSpacing.s16,
+                bottom = BloviateSpacing.s12,
+            ),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 EngineSegment(
@@ -439,12 +442,12 @@ private fun SetupFooter(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = BloviateSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s4),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s4),
         ) {
             Icon(
                 imageVector = Icons.Filled.Lock,

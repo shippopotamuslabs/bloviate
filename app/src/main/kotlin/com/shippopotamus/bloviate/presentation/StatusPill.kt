@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.dp
  * The header pill (ENC-75): a screen's whole verdict in one glance —
  * a colored dot + a short label on a tinted, outlined pill. Setup uses
  * it for "Ready to dictate" vs the first blocker; Style for the AI
- * connection state.
+ * connection state. Shape is the Compose Gospel's full capsule
+ * ([BloviateShapes.Pill], ENC-86) and padding/gap come from
+ * [BloviateSpacing].
  */
 @Composable
 fun StatusPill(
@@ -31,16 +33,19 @@ fun StatusPill(
 ) {
     val colors = tone.colors()
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = BloviateShapes.Pill,
         color = colors.container.copy(alpha = PILL_CONTAINER_ALPHA),
         contentColor = colors.content,
         border = BorderStroke(1.dp, colors.content.copy(alpha = PILL_BORDER_ALPHA)),
         modifier = modifier,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(
+                horizontal = BloviateSpacing.s12,
+                vertical = BloviateSpacing.s4,
+            ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s4),
         ) {
             Box(
                 modifier = Modifier
@@ -64,8 +69,8 @@ private const val PILL_BORDER_ALPHA = 0.35f
 private fun StatusPillPreview() {
     BloviateTheme {
         Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             StatusPill(text = "Ready to dictate", tone = StatusTone.POSITIVE)
             StatusPill(text = "Allow microphone", tone = StatusTone.ATTENTION)

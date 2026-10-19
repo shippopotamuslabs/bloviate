@@ -2,15 +2,16 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 
 /**
  * Semantic tone for status surfaces across the dashboard screens
@@ -58,7 +59,12 @@ internal fun StatusTone.colors(): StatusColors {
     }
 }
 
-/** A compact status word in a rounded chip — the dashboard's unit of state (ENC-75). */
+/**
+ * A compact status word in a chip — the dashboard's unit of state
+ * (ENC-75). Geometry is the Compose Gospel's chip spec (ENC-86): 32dp
+ * height, the small (8dp) shape, labelLarge text, s16 horizontal
+ * padding.
+ */
 @Composable
 fun StatusChip(
     text: String,
@@ -67,16 +73,22 @@ fun StatusChip(
 ) {
     val colors = tone.colors()
     Surface(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = MaterialTheme.shapes.small,
         color = colors.container,
         contentColor = colors.content,
         modifier = modifier,
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-        )
+        Row(
+            modifier = Modifier
+                .height(BloviateSpacing.s32)
+                .padding(horizontal = BloviateSpacing.s16),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
     }
 }
 
@@ -86,8 +98,8 @@ fun StatusChip(
 private fun StatusChipPreview() {
     BloviateTheme {
         Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             StatusChip(text = "On", tone = StatusTone.POSITIVE)
             StatusChip(text = "Soon", tone = StatusTone.NEUTRAL)
