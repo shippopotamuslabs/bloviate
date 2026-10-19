@@ -149,6 +149,39 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `the same transcript through both era styles carries opposite architecture mandates`() {
+        // ENC-104: the contrast lives in the assembled prompts, not
+        // just the catalog data — one transcript through Talkie
+        // carries the clip mandate and the ban on the periodic
+        // sentence; through The Colonel it carries the periodic
+        // mandate and the ban on clipping. Both keep the demarcated
+        // shape.
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        val talkiePrompt = builder.build(style = talkie, transcript = TRANSCRIPT)
+        assertTrue(
+            talkiePrompt.system.content.contains("no sentence runs past twelve words"),
+            "talkie prompt lacks the sentence cap",
+        )
+        assertTrue(
+            talkiePrompt.system.content.contains("NEVER write a periodic sentence"),
+            "talkie prompt lacks the ban on the periodic swell",
+        )
+        assertDemarcatedShape(talkiePrompt, talkie)
+
+        val colonelPrompt = builder.build(style = colonel, transcript = TRANSCRIPT)
+        assertTrue(
+            colonelPrompt.system.content.contains("the main clause arriving only at the end"),
+            "the colonel prompt lacks the periodic mandate",
+        )
+        assertTrue(
+            colonelPrompt.system.content.contains("NEVER clip a thought into wire-service fragments"),
+            "the colonel prompt lacks the ban on clipping",
+        )
+        assertDemarcatedShape(colonelPrompt, colonel)
+    }
+
+    @Test
     fun `every style's user message is task plus demarcated input only`() {
         StyleCatalog.ALL.forEach { style ->
             val prompt = builder.build(style = style, transcript = TRANSCRIPT)
