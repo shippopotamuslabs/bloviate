@@ -21,31 +21,54 @@ object OpenRouterPayload {
     const val ENDPOINT_PATH: String = "https://openrouter.ai/api/v1/chat/completions"
 
     /**
-     * Style chain primary (ENC-99, as revised by Sean 2026-10-19):
-     * Gemini 3.1 Flash-Lite — the ONLY model in the default chain;
-     * its failure lands on the local text (see [OpenRouterStyleClient]).
+     * Style chain primary (ENC-100, Sean 2026-10-19): DeepSeek
+     * V4.1 Flash, the dated 1017 snapshot, pinned to US fast
+     * providers only (see [PRIMARY_PROVIDER_ONLY]). Sean's call on
+     * the ENC-99 build's device retest: "probably less censored
+     * than Google as a model" — the retest's Gemini completion had
+     * euphemized the dictation's profanity ('coarse words') and
+     * appended an aphorism the speaker never said, the guard
+     * rightly failed it, and with no fallback model in the chain
+     * the local text was the only landing. This head answers the
+     * censorship suspect; [FALLBACK_MODEL] existing again answers
+     * the nowhere-to-go suspect.
      *
-     * ENC-99 as filed named x-ai/grok-4.1-fast here, but that slug is
-     * not a live OpenRouter model — verified twice at implementation:
-     * the full models list carries no grok-4.1 variant, and its
-     * endpoints route is a delisted remnant with zero servable
-     * endpoints. Shipping against it would have made every primary
-     * attempt 404 into the fallback — a primary that isn't doing the
-     * job, the exact failure this ticket exists to end. Sean's
-     * revision promoted the ticket's own fallback to the head and
-     * left the fallback slot DELIBERATELY EMPTY: openai/gpt-4.1-mini
-     * is the standing candidate from the research, and filling the
-     * slot is his call, not this ticket's.
-     *
-     * The pick's own numbers (ticket research, live-verified):
-     * $0.25 in / $1.50 out per 1M (≈$0.000575/call), TTFT
-     * 0.52–0.93s at 122–185 tok/s. Its known hazard is trained
-     * Gemini refusals / sanitisation on explicit content — the
-     * ticket's adversarial preservation battery is this primary's
-     * acceptance gate, and the ENC-82 guard still judges every
-     * output before it may land.
+     * The pick's own numbers (live-verified 2026-10-19): $0.15 in
+     * / $0.60 out per 1M, 1M context. Its reasoning profile is the
+     * ENC-99 trap in a stronger form — models-API metadata reports
+     * reasoning `default_enabled: true` at `default_effort:
+     * "high"`, with `supported_efforts` running max → none and
+     * `mandatory: false` — so the explicit effort "none" on every
+     * attempt ([REASONING_EFFORT]) is what keeps this a fast
+     * non-reasoning primary instead of a 19-second deliberator;
+     * the slug DOES have a true reasoning-off, which the ticket's
+     * reasoning gate required before any payload was written.
      */
-    const val PRIMARY_MODEL: String = "google/gemini-3.1-flash-lite"
+    const val PRIMARY_MODEL: String = "deepseek/deepseek-v4.1-flash-1017"
+
+    /**
+     * Style chain fallback (ENC-100): Gemini 3.1 Flash-Lite,
+     * demoted from the head it held for exactly one build
+     * (ENC-99, as revised — the ticket as filed named a Grok slug
+     * that is not a live OpenRouter model; Sean promoted Gemini
+     * then, and demotes it now). It keeps its ENC-99 profile:
+     * reasoning explicitly off on every attempt (its metadata has
+     * reasoning ON by default at minimal effort), the adversarial
+     * preservation pins as its acceptance. Its routing CHANGES
+     * with the demotion: vertex-only (see [FALLBACK_PROVIDER_ONLY])
+     * — the ENC-99 build's retest recorded a Google AI Studio
+     * BYOK 400 on Sean's account (an invalid stored key) alongside
+     * the Vertex 200 that carried the call, so the AI Studio
+     * endpoint leaves the pool until the key is fixed.
+     *
+     * The pick's own numbers (ENC-99 research, live-verified):
+     * $0.25 in / $1.50 out per 1M (≈$0.000575/call), TTFT
+     * 0.52–0.93s at 122–185 tok/s. Its known hazard is unchanged:
+     * trained Gemini refusals / sanitisation on explicit content —
+     * as the fallback it is the chain's second chance, and the
+     * ENC-82 guard still judges its output before it may land.
+     */
+    const val FALLBACK_MODEL: String = "google/gemini-3.1-flash-lite"
 
     /**
      * The demoted primary (ENC-84 → ENC-96). This floating `~` alias
@@ -86,22 +109,23 @@ object OpenRouterPayload {
     const val MAX_TOKENS: Int = 1024
 
     /**
-     * Reasoning control for style requests (ENC-99; ENC-94/95 before
-     * it). A restyle is a surface transformation — it needs no
-     * deliberation — but the ENC-99 primary DOES reason by default:
-     * Gemini 3.1 Flash-Lite's models-API reasoning metadata
-     * (live-verified 2026-10-19) reports `default_enabled: true` at
-     * `default_effort: "minimal"`, with `supported_efforts` running
-     * high → none and `mandatory: false`. An explicit setting is
-     * therefore REQUIRED on every attempt, and the setting is the
-     * strongest one the model honors: effort "none" — reasoning
-     * disabled entirely, so the happy path's telemetry reads
-     * reasoningTokens=0 and no thought tokens bill against
-     * [MAX_TOKENS]. It rides BOTH payload shapes (full and the
-     * client's ENC-95 degraded retry): the degraded shape drops
-     * `stream_options`, never this block, because a retry that
-     * silently re-enabled the model's default reasoning would
-     * re-open the latency wound the whole saga was about.
+     * Reasoning control for style requests (ENC-100; ENC-99 and
+     * ENC-94/95 before it). A restyle is a surface transformation —
+     * it needs no deliberation — and BOTH links of the ENC-100
+     * chain reason by default, so the explicit setting is REQUIRED
+     * on every attempt of both. Live-verified models-API metadata
+     * (2026-10-19): the primary (DeepSeek V4.1 Flash) reports
+     * `default_enabled: true` at `default_effort: "high"`; the
+     * fallback (Gemini 3.1 Flash-Lite) at `"minimal"`. Both list
+     * `supported_efforts` running to "none" with `mandatory:
+     * false` — so the setting is the strongest one both honor:
+     * effort "none", reasoning disabled entirely, the happy path's
+     * telemetry reading reasoningTokens=0 with no thought tokens
+     * billed against [MAX_TOKENS]. It rides BOTH payload shapes
+     * (full and the client's ENC-95 degraded retry): the degraded
+     * shape drops `stream_options`, never this block, because a
+     * retry that silently re-enabled a model's default reasoning
+     * would re-open the latency wound the whole saga was about.
      *
      * The block stays effort-only, always: ENC-95's regression was
      * ENC-94's `reasoning: {effort, max_tokens: 512}` — OpenRouter's
@@ -112,24 +136,26 @@ object OpenRouterPayload {
     const val REASONING_EFFORT: String = "none"
 
     /**
-     * Provider pin for the primary (ENC-80's mechanism, ENC-99's
-     * pool): an `only` allow-list of Gemini 3.1 Flash-Lite's
-     * STANDARD endpoints, sorted by live latency ([PRIMARY_PROVIDER_SORT]).
-     * Queried from OpenRouter's endpoints API at implementation
-     * time (2026-10-19); every standard endpoint sat at 100% 30-day
-     * uptime:
+     * Provider pin for the primary (ENC-80's mechanism, ENC-100's
+     * pool): an `only` allow-list of DeepSeek V4.1 Flash's US
+     * FAST endpoints, sorted by live latency
+     * ([PRIMARY_PROVIDER_SORT]) — Sean's specification: "through
+     * a really fast US provider". Endpoint tags are the OpenRouter
+     * endpoints API's values, queried at implementation time
+     * (2026-10-19); every endpoint in the pool sat at status 0 /
+     * 100% 30-day uptime:
      *
-     * - `google-vertex/global`, `google-vertex/us`,
-     *   `google-vertex/eu`, `google-ai-studio` — the pool.
-     * - `google-vertex/global/flex` (status −5, 64% uptime) and
-     *   `google-ai-studio/flex` — the Flex service tier: batch-class
-     *   latency at half price, the opposite of a dictation profile.
-     *   They are excluded by ABSENCE: an allow-list positively
-     *   enumerates the pool, so Flex, priority, and any future
-     *   endpoint shape stay out by construction — where an `ignore`
-     *   list would admit anything it forgot to name.
-     * - The `/priority` tier endpoints are likewise unlisted: not
-     *   requested by the ticket, at +80% price.
+     * - `deepinfra/fp8/priority`, `deepinfra/fp8` — DeepInfra's
+     *   priority and standard fp8 tiers.
+     * - `fireworks`, `together`, `baseten`, `parasail/fp8` — the
+     *   rest of the US fast class.
+     * - Excluded by ABSENCE (an allow-list positively enumerates
+     *   the pool, so anything it does not name stays out by
+     *   construction): `deepinfra/fp8/flex` — the Flex tier is
+     *   batch-class latency, the opposite of a dictation profile;
+     *   `deepseek` (DeepSeek direct) and `alibaba` — Sean specified
+     *   US providers; and every other listed endpoint (Cloudflare,
+     *   Morph, Crusoe, …) — not in the ticket's fast class.
      *
      * Slugs are the endpoints API's `tag` values, the same form
      * ENC-80 pinned. `allow_fallbacks` stays on (see
@@ -137,10 +163,38 @@ object OpenRouterPayload {
      * still fail over endpoint to endpoint.
      */
     val PRIMARY_PROVIDER_ONLY: List<String> =
-        listOf("google-vertex/global", "google-ai-studio", "google-vertex/us", "google-vertex/eu")
+        listOf(
+            "deepinfra/fp8/priority",
+            "deepinfra/fp8",
+            "fireworks",
+            "together",
+            "baseten",
+            "parasail/fp8",
+        )
 
-    /** Sort the allow-listed endpoints by live-measured latency (ENC-99). */
+    /** Sort the allow-listed endpoints by live-measured latency (ENC-100; ENC-99's value). */
     const val PRIMARY_PROVIDER_SORT: String = "latency"
+
+    /**
+     * Provider pin for the fallback (ENC-100): VERTEX-ONLY.
+     * ENC-99's pool also allow-listed `google-ai-studio`; the
+     * ENC-99 build's device retest showed why it goes — OpenRouter
+     * recorded a Google AI Studio BYOK 400 ("API key not valid")
+     * from Sean's stored AI Studio key alongside the Vertex 200
+     * that carried the call. The endpoint leaves the pool until
+     * Sean fixes that key: routing noise on the chain's second
+     * chance is still noise. What remains is Gemini 3.1
+     * Flash-Lite's standard Vertex endpoints (tags live-verified
+     * 2026-10-19, all at 100% 30-day uptime), latency-sorted; the
+     * Flex tags (`google-vertex/global/flex`, status −5 / 64%
+     * uptime in the ENC-99 survey) stay excluded by absence, as
+     * do the `/priority` tier endpoints.
+     */
+    val FALLBACK_PROVIDER_ONLY: List<String> =
+        listOf("google-vertex/global", "google-vertex/us", "google-vertex/eu")
+
+    /** Sort the fallback's allow-listed endpoints by live-measured latency (ENC-100). */
+    const val FALLBACK_PROVIDER_SORT: String = "latency"
 
     /**
      * Builds the chat-completions request body for [model] and [prompt].
@@ -156,7 +210,7 @@ object OpenRouterPayload {
      * counts reach telemetry. [reasoningEffort] adds the unified
      * `reasoning` block (effort only, never a token cap — ENC-95;
      * see [REASONING_EFFORT]); null omits it. The client's degraded
-     * retry (ENC-95, reshaped by ENC-99) passes `includeUsage = false`
+     * retry (ENC-95, reshaped by ENC-99/100) passes `includeUsage = false`
      * with the link's reasoning effort intact: a streamed request
      * carrying nothing optional but the one control that defines the
      * link.

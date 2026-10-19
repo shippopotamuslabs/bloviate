@@ -86,46 +86,52 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a server error falls back with its status after one attempt`() = runTest {
+    fun `a server error on both models falls back with its status`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-99: there is no second model to retry on — a provider
-        // failure is the chain's report, and a 500 is not a request
-        // rejection, so it does not earn the degraded retry either.
+        // A provider failure retries once on the other model
+        // (ENC-82's chain shape, restored by ENC-100); the final
+        // reason is the last attempt's.
         fakeTransport.handler = { _, _, _ -> HttpResult(status = 500, body = "boom") }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "http-500", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "http-500", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
     fun `the responding provider is surfaced on success`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-80: streamed chunks carry the serving upstream; telemetry
-        // surfaces it so instability is visible from logcat. ENC-99:
+        // surfaces it so instability is visible from logcat. ENC-100:
         // on the happy path that upstream is one of the allow-listed
-        // Google endpoints.
+        // US endpoints serving the DeepSeek primary.
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
+            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
-        assertEquals("Google", styled.provider)
+        assertEquals("DeepInfra", styled.provider)
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
     }
 
     @Test
     fun `the responding provider is surfaced on an http failure`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        fakeTransport.handler = { _, _, _ ->
-            HttpResult(status = 500, body = "{\"provider\":\"Google\",\"error\":{}}")
+        // Both links fail; the chain's report carries the LAST
+        // attempt's provider (the fallback's Google endpoint).
+        fakeTransport.handler = { callIndex, _, _ ->
+            if (callIndex == 0) {
+                HttpResult(status = 500, body = "{\"provider\":\"DeepInfra\",\"error\":{}}")
+            } else {
+                HttpResult(status = 500, body = "{\"provider\":\"Google\",\"error\":{}}")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -133,55 +139,113 @@ class OpenRouterStyleClientTest {
         val fellBack = outcome as LlmStyleOutcome.FellBack
         assertEquals("http-500", fellBack.reason)
         assertEquals("Google", fellBack.provider)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, fellBack.model)
     }
 
     @Test
-    fun `the attempt pins its provider routing and requests the stream`() = runTest {
+    fun `each attempt pins its provider routing and requests the stream`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-99 pins + ENC-81 streaming, asserted on the recorded body:
-        // the allow-listed standard endpoints, latency-sorted, Flex
-        // nowhere in the pool.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(STYLED_TEXT))
-            HttpResult(status = 200, body = "")
+        // ENC-100 pins + ENC-81 streaming, asserted on the recorded
+        // bodies: the primary's US-only allow-list (latency-sorted,
+        // Flex and the non-US endpoints nowhere in the pool), then
+        // the fallback's VERTEX-ONLY list — google-ai-studio is
+        // gone until Sean fixes its BYOK key.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
         }
 
         client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals(1, fakeTransport.requests.size)
+        assertEquals(2, fakeTransport.requests.size)
         assertTrue(fakeTransport.requests[0].contains("\"stream\":true"))
         assertTrue(
             fakeTransport.requests[0].contains(
                 "\"provider\":{\"allow_fallbacks\":true," +
-                    "\"only\":[\"google-vertex/global\",\"google-ai-studio\",\"google-vertex/us\",\"google-vertex/eu\"]," +
+                    "\"only\":[\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"together\",\"baseten\",\"parasail/fp8\"]," +
                     "\"sort\":\"latency\"}",
             ),
         )
         assertTrue(!fakeTransport.requests[0].contains("flex"))
+        assertTrue(!fakeTransport.requests[0].contains("alibaba"))
+        assertTrue(
+            fakeTransport.requests[1].contains(
+                "\"provider\":{\"allow_fallbacks\":true," +
+                    "\"only\":[\"google-vertex/global\",\"google-vertex/us\",\"google-vertex/eu\"]," +
+                    "\"sort\":\"latency\"}",
+            ),
+        )
+        assertTrue(!fakeTransport.requests[1].contains("google-ai-studio"))
+        assertTrue(!fakeTransport.requests[1].contains("flex"))
     }
 
     @Test
-    fun `the chain is gemini then local and no second model is ever attempted`() = runTest {
+    fun `the chain attempts deepseek first and gemini second`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-99 as revised: literal chain — Gemini 3.1 Flash-Lite,
-        // then the local text. A dead primary must NOT conjure a
-        // second-model attempt (the fallback slot is Sean's to fill):
-        // exactly one request, carrying the primary's slug and none
-        // of the demoted ones.
+        // ENC-100: literal chain order — DeepSeek V4.1 Flash, then
+        // Gemini 3.1 Flash-Lite, then local. The second attempt is
+        // Gemini and never one of the demoted slugs.
+        fakeTransport.handler = { callIndex, requestJson, emit ->
+            if (callIndex == 0) {
+                assertTrue(requestJson.contains("deepseek/deepseek-v4.1-flash-1017"))
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                assertTrue(requestJson.contains("google/gemini-3.1-flash-lite"))
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, (outcome as LlmStyleOutcome.Styled).model)
+        assertEquals(2, fakeTransport.requests.size)
+        assertTrue(!fakeTransport.requests[0].contains("llama"))
+        assertTrue(!fakeTransport.requests[0].contains("haiku"))
+        assertTrue(!fakeTransport.requests[0].contains("grok"))
+        assertTrue(!fakeTransport.requests[1].contains("llama"))
+        assertTrue(!fakeTransport.requests[1].contains("haiku"))
+        assertTrue(!fakeTransport.requests[1].contains("grok"))
+        assertTrue(!fakeTransport.requests[1].contains("gpt"))
+    }
+
+    @Test
+    fun `a missing primary model retries the fallback model once`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { callIndex, requestJson, emit ->
+            if (callIndex == 0) {
+                assertTrue(requestJson.contains(OpenRouterPayload.PRIMARY_MODEL))
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                assertTrue(requestJson.contains(OpenRouterPayload.FALLBACK_MODEL))
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `two missing models fall back`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, _ -> HttpResult(status = 404, body = "model not found") }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "model-unavailable", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "model-unavailable", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.requests.size)
-        assertTrue(fakeTransport.requests[0].contains("google/gemini-3.1-flash-lite"))
-        assertTrue(!fakeTransport.requests[0].contains("llama"))
-        assertTrue(!fakeTransport.requests[0].contains("haiku"))
-        assertTrue(!fakeTransport.requests[0].contains("grok"))
-        assertTrue(!fakeTransport.requests[0].contains("gpt"))
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -209,43 +273,75 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a slow but healthy primary stream lands past the old chain cap`() = runTest {
+    fun `a slow but healthy fallback stream lands past the old chain cap`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-97's repro, single-model form (ENC-99): the primary
-        // streams steadily (every gap inside the token budget) for
-        // ~16.5s of virtual time. The old chain-wide 14s cap killed
-        // exactly this shape mid-flight and the local text landed,
-        // even though the restyle completed server-side. Per-attempt
-        // budgets leave the attempt its own room: the styled text
-        // must land.
-        fakeTransport.handler = { _, _, emit ->
-            val pieces = STYLED_TEXT.chunked(size = 4)
-            emit(chunk(pieces.first()))
-            pieces.drop(1).forEach { piece ->
-                delay(TRICKLE_GAP_MS)
-                emit(chunk(piece))
+        // ENC-97's repro — Sean's device case in fixture form: the
+        // primary fails fast, and the fallback then streams steadily
+        // (every gap inside the token budget) for ~16.5s of virtual
+        // time. The old chain-wide 14s cap killed exactly this stream
+        // mid-flight and the local text landed, even though the
+        // fallback's restyle completed server-side. Per-attempt
+        // budgets leave it its own room: the styled text must land.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 500, body = "boom")
+            } else {
+                val pieces = STYLED_TEXT.chunked(size = 4)
+                emit(chunk(pieces.first()))
+                pieces.drop(1).forEach { piece ->
+                    delay(TRICKLE_GAP_MS)
+                    emit(chunk(piece))
+                }
+                emit(DONE_LINE)
+                HttpResult(status = 200, body = "")
             }
-            emit(DONE_LINE)
-            HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(STYLED_TEXT, styled.text)
-        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
-        assertEquals(1, fakeTransport.requests.size)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
     }
 
     @Test
-    fun `an endless keep-alive stream dies on the attempt cap and falls back as a timeout`() = runTest {
+    fun `an endless keep-alive primary dies on its own attempt cap and the fallback answers`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // The one death liveness cannot see: the stream keeps
         // producing signs of life (a comment every 5s, inside the 6s
         // first-token budget) yet never produces content. The
         // per-attempt absolute cap — not a chain deadline — is what
-        // kills it, and the chain's report is the attempt's own
-        // timeout, model attached (ENC-97; single-model form ENC-99).
+        // kills it, and the chain advances to a healthy fallback.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                repeat(KEEP_ALIVE_BEATS) {
+                    emit(KEEP_ALIVE_LINE)
+                    delay(KEEP_ALIVE_GAP_MS)
+                }
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(FALLBACK_STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `keep-alive streams on both models fall back with the timeout reason`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // Both attempts stream keep-alives forever: each dies on its
+        // OWN cap, so the chain's report is the fallback attempt's
+        // timeout — under the old chain-wide cap the same scene
+        // reported a bare timeout with no model attached, at 14s,
+        // before the fallback had spent even its own budget.
         fakeTransport.handler = { _, _, emit ->
             repeat(KEEP_ALIVE_BEATS) {
                 emit(KEEP_ALIVE_LINE)
@@ -257,18 +353,17 @@ class OpenRouterStyleClientTest {
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "timeout", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "timeout", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
     fun `a stream that never starts falls back on the first token budget`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // The primary stays silent past the first-token budget: the
-        // chain gives up with the liveness reason, not after the
-        // absolute cap.
+        // Both models stay silent past the first-token budget: the chain
+        // gives up with the liveness reason, not after the absolute cap.
         fakeTransport.handler = { _, _, _ ->
             delay(NEVER_STARTS_MS)
             HttpResult(status = 200, body = "")
@@ -277,14 +372,35 @@ class OpenRouterStyleClientTest {
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "first-token-timeout", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "first-token-timeout", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
-    fun `a mid-stream stall falls back as a stall and the fragment is never used`() = runTest {
+    fun `a mid-stream stall retries the fallback model`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(chunk("Partial "))
+                delay(NEVER_STARTS_MS)
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        // The fragment from the stalled stream is never used (atomicity).
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a mid-stream stall on both models falls back as a stall`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
             emit(chunk("Partial "))
@@ -294,12 +410,10 @@ class OpenRouterStyleClientTest {
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        // The fragment from the stalled stream is never used (atomicity).
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "stream-stall", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "stream-stall", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -314,43 +428,44 @@ class OpenRouterStyleClientTest {
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "stream-error", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "stream-error", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
-    fun `a model-unavailable stream error falls back without a second attempt`() = runTest {
+    fun `a model-unavailable stream error retries the fallback model`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        fakeTransport.handler = { _, _, emit ->
-            emit("data: {\"error\":{\"message\":\"Model not found\",\"code\":404}}")
-            HttpResult(status = 200, body = "")
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit("data: {\"error\":{\"message\":\"Model not found\",\"code\":404}}")
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals(
-            LlmStyleOutcome.FellBack(reason = "model-unavailable", model = OpenRouterPayload.PRIMARY_MODEL),
-            outcome,
-        )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
     }
 
     @Test
-    fun `a transport exception falls back`() = runTest {
+    fun `a transport exception on both models falls back`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-82: a dead transport is a provider failure — with no
-        // second model (ENC-99), the local text wins immediately.
+        // ENC-82: a dead transport is a provider failure — one retry on
+        // the other model before the local text wins.
         fakeTransport.handler = { _, _, _ -> throw IOException("network down") }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "transport-error", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "transport-error", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -359,16 +474,20 @@ class OpenRouterStyleClientTest {
         // ENC-91 hypothesis 1, streamed shape: a route thinks out loud
         // first — reasoning deltas in both wire shapes (xAI's
         // reasoning_content, OpenRouter's reasoning) — then the answer.
-        // The ENC-99 primary is told not to reason at all, but the
+        // The ENC-100 primary is told not to reason at all, but the
         // tolerance stays: a route that thinks anyway is alive, not
         // dead, and its answer still lands in one call.
-        fakeTransport.handler = { _, _, emit ->
-            emit(reasoningChunkXai("Restyle the dictation, keeping every fact."))
-            delay(TRICKLE_GAP_MS)
-            emit(reasoningChunkOpenRouter("Plain casing, one paragraph."))
-            delay(TRICKLE_GAP_MS)
-            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
-            HttpResult(status = 200, body = "")
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(reasoningChunkXai("Restyle the dictation, keeping every fact."))
+                delay(TRICKLE_GAP_MS)
+                emit(reasoningChunkOpenRouter("Plain casing, one paragraph."))
+                delay(TRICKLE_GAP_MS)
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -383,12 +502,17 @@ class OpenRouterStyleClientTest {
         // ENC-91 hypothesis 1, silent shape: the reasoning phase
         // delivers NO line for longer than the old 2s first-token
         // budget, then the whole answer streams. Sean's repro exactly:
-        // the model completed server-side while the client had
-        // already given up on it.
-        fakeTransport.handler = { _, _, emit ->
-            delay(SLOW_REASONING_MS)
-            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
-            HttpResult(status = 200, body = "")
+        // the model completed server-side, the client fell back, and
+        // the local text landed. The fallback is scripted to 499 so
+        // any wrongful retry is visible as a fallback outcome.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                delay(SLOW_REASONING_MS)
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -402,12 +526,16 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 1, paused shape: reasoning starts, pauses
         // past the old 2s budget mid-thought, resumes, then answers.
-        fakeTransport.handler = { _, _, emit ->
-            emit(reasoningChunkXai("Restyle the dictation."))
-            delay(SLOW_REASONING_MS)
-            emit(reasoningChunkOpenRouter("Still thinking."))
-            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
-            HttpResult(status = 200, body = "")
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(reasoningChunkXai("Restyle the dictation."))
+                delay(SLOW_REASONING_MS)
+                emit(reasoningChunkOpenRouter("Still thinking."))
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -421,13 +549,17 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 2, burst shape: a cached replay delivers
         // every chunk back to back with no pacing at all.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(
-                emit,
-                parts = listOf("The meeting ", "is ", "moved to ", "Friday afternoon."),
-                provider = "Google",
-            )
-            HttpResult(status = 200, body = "")
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(
+                    emit,
+                    parts = listOf("The meeting ", "is ", "moved to ", "Friday afternoon."),
+                    provider = "DeepInfra",
+                )
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -441,32 +573,37 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 2, non-streamed shape: a cached/gateway
         // answer arrives as ONE plain JSON completion body (no SSE
-        // framing) on a 200. Dropping it as "empty" would throw away
-        // a call that succeeded.
-        fakeTransport.handler = { _, _, emit ->
-            emit(nonStreamedCompletion(STYLED_TEXT))
-            HttpResult(status = 200, body = "")
+        // framing) on a 200. Dropping it as "empty" burns the fallback
+        // on a call that succeeded.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(nonStreamedCompletion(STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(STYLED_TEXT, styled.text)
-        assertEquals("Google", styled.provider)
+        assertEquals("DeepInfra", styled.provider)
         assertEquals(1, fakeTransport.requests.size)
     }
 
     @Test
-    fun `every attempt carries reasoning effort none, full and degraded`() = runTest {
+    fun `every attempt of both models carries reasoning effort none, full and degraded`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-99: the primary reasons BY DEFAULT (its models-API
-        // metadata: default_enabled true at minimal effort), so the
-        // off setting is explicit on every attempt the chain can
-        // make — the full payload and the ENC-95 degraded retry
-        // alike. A shape that dropped it would think on exactly the
-        // calls that already failed once.
+        // ENC-100 reasoning gate: BOTH chain models reason BY
+        // DEFAULT (the primary at high effort, the fallback at
+        // minimal — live-verified metadata), so the off setting is
+        // explicit on every attempt the chain can make: both
+        // models, both payload shapes. The script walks the whole
+        // chain through 400s — primary full, primary degraded,
+        // fallback full — and the fallback's degraded retry answers.
         fakeTransport.handler = { callIndex, _, emit ->
-            if (callIndex == 0) {
+            if (callIndex < 3) {
                 HttpResult(status = 400, body = REJECTION_400_BODY)
             } else {
                 emitStream(emit, parts = listOf(STYLED_TEXT))
@@ -474,11 +611,19 @@ class OpenRouterStyleClientTest {
             }
         }
 
-        client.style(style = professional, text = SOURCE_TEXT)
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals(2, fakeTransport.requests.size)
-        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"none\"}"))
-        assertTrue(fakeTransport.requests[1].contains("\"reasoning\":{\"effort\":\"none\"}"))
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(4, fakeTransport.requests.size)
+        fakeTransport.requests.forEach { request ->
+            assertTrue(request.contains("\"reasoning\":{\"effort\":\"none\"}"))
+        }
+        // The degraded shapes (each link's second request) drop
+        // stream_options but keep the reasoning-off control.
+        assertTrue(!fakeTransport.requests[1].contains("\"stream_options\""))
+        assertTrue(!fakeTransport.requests[3].contains("\"stream_options\""))
+        assertTrue(fakeTransport.requests[1].contains(OpenRouterPayload.PRIMARY_MODEL))
+        assertTrue(fakeTransport.requests[3].contains(OpenRouterPayload.FALLBACK_MODEL))
     }
 
     @Test
@@ -486,13 +631,13 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-95's device symptom, answered: the full payload is
         // refused with a 400-class rejection, and the SAME model
-        // answers the degraded retry — the styled text lands, and
-        // (ENC-99) there is no other model to be called.
+        // answers the degraded retry — the fallback is never called
+        // and the styled text lands.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 400, body = REJECTION_400_BODY)
             } else {
-                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
                 HttpResult(status = 200, body = "")
             }
         }
@@ -504,7 +649,7 @@ class OpenRouterStyleClientTest {
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
         assertEquals(2, fakeTransport.requests.size)
         // The retry is the degraded shape: streamed, stream_options
-        // dropped, the reasoning-off control kept (ENC-99).
+        // dropped, the reasoning-off control kept (ENC-100).
         val degraded = fakeTransport.requests[1]
         assertTrue(degraded.contains("\"stream\":true"))
         assertTrue(degraded.contains("\"reasoning\":{\"effort\":\"none\"}"))
@@ -513,22 +658,44 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a 400 on every payload shape falls back after exactly one degraded retry`() = runTest {
+    fun `a 400 on both payload shapes advances the chain to the fallback`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // The structural bound: full + degraded, then the chain
-        // reports the last attempt's reason — never a loop, and
-        // (ENC-99) never a second model.
+        // The primary refuses BOTH shapes; the fallback's plain call
+        // answers. Three requests total: full, degraded, fallback.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex < 2) {
+                HttpResult(status = 400, body = REJECTION_400_BODY)
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(3, fakeTransport.requests.size)
+        assertTrue(fakeTransport.requests[2].contains(OpenRouterPayload.FALLBACK_MODEL))
+    }
+
+    @Test
+    fun `a 400 on every shape of both models falls back after one degraded retry each`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // The structural bound: full + degraded per model, then the
+        // chain reports the last attempt's reason — never a loop.
         fakeTransport.handler = { _, _, _ -> HttpResult(status = 400, body = REJECTION_400_BODY) }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "http-400", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "http-400", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(2, fakeTransport.requests.size)
+        assertEquals(4, fakeTransport.requests.size)
         assertTrue(fakeTransport.requests[1].contains("\"reasoning\":{\"effort\":\"none\"}"))
         assertTrue(!fakeTransport.requests[1].contains("\"stream_options\""))
+        assertTrue(fakeTransport.requests[3].contains("\"reasoning\":{\"effort\":\"none\"}"))
+        assertTrue(!fakeTransport.requests[3].contains("\"stream_options\""))
     }
 
     @Test
@@ -536,13 +703,13 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-95 suspect (3), hardened: the stream itself opens with
         // a 400-class error chunk. Same recourse as an HTTP 400 — one
-        // degraded retry before the chain gives up.
+        // degraded retry before the chain moves on.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
-                emit("data: {\"id\":\"gen-enc99\",\"provider\":\"Google\",\"error\":{\"code\":400,\"message\":\"invalid request\"}}")
+                emit("data: {\"id\":\"gen-enc100\",\"provider\":\"DeepInfra\",\"error\":{\"code\":400,\"message\":\"invalid request\"}}")
                 HttpResult(status = 200, body = "")
             } else {
-                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Google")
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "DeepInfra")
                 HttpResult(status = 200, body = "")
             }
         }
@@ -564,11 +731,11 @@ class OpenRouterStyleClientTest {
         // include_usage the stream's tail is a finish chunk, then a
         // usage chunk with EMPTY choices. The assembled answer stands.
         fakeTransport.handler = { _, _, emit ->
-            emit("data: {\"id\":\"gen-enc95\",\"provider\":\"Google\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
-            emit("data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{\"content\":\"The meeting is moved \"}}]}")
-            emit("data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{\"content\":\"to Friday afternoon.\"}}]}")
+            emit("data: {\"id\":\"gen-enc100\",\"provider\":\"DeepInfra\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
+            emit("data: {\"id\":\"gen-enc100\",\"choices\":[{\"delta\":{\"content\":\"The meeting is moved \"}}]}")
+            emit("data: {\"id\":\"gen-enc100\",\"choices\":[{\"delta\":{\"content\":\"to Friday afternoon.\"}}]}")
             emit(
-                "data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," +
+                "data: {\"id\":\"gen-enc100\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," +
                     "\"usage\":{\"prompt_tokens\":900,\"completion_tokens\":12,\"total_tokens\":912}}",
             )
             emit(usageChunk(reasoningTokens = 4))
@@ -583,28 +750,57 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `the happy path reports zero reasoning tokens and inserts in one call`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-100 reasoning gate, happy-path shape: the request
+        // carries effort "none" (asserted on the recorded body) and
+        // the stream's usage tail reports reasoning_tokens: 0 —
+        // the primary obeyed the off switch, and the styled text
+        // lands from that single call.
+        fakeTransport.handler = { _, _, emit ->
+            emit(chunk(STYLED_TEXT, provider = "DeepInfra"))
+            emit(usageChunk(reasoningTokens = 0))
+            emit(DONE_LINE)
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals(1, fakeTransport.requests.size)
+        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"none\"}"))
+    }
+
+    @Test
     fun `a long reasoning phase stream completes and inserts the styled text`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-94's repro, compressed: a reasoning-heavy stream — two
-        // dozen reasoning deltas across ~6s of virtual time, then the
-        // answer trickling in, then a usage chunk reporting the
-        // reasoning spend. The ENC-91 liveness rules carry it and the
-        // attempt's own cap (20s since ENC-97 made the budgets
+        // dozen reasoning deltas across ~6s of virtual time, then
+        // the answer trickling in, then a usage chunk reporting the
+        // reasoning spend. The ENC-91 liveness rules carry it and
+        // the attempt's own cap (20s since ENC-97 made the budgets
         // per-attempt; 14s chain-wide before) leaves it room: the
-        // styled text must be what lands, in one call.
-        fakeTransport.handler = { _, _, emit ->
-            repeat(REASONING_BURST_CHUNKS) { beat ->
-                emit(reasoningChunkXai("Deliberating, beat $beat."))
-                delay(REASONING_BEAT_MS)
+        // styled text must be what lands. The fallback is scripted
+        // to 499 so any wrongful retry shows.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                repeat(REASONING_BURST_CHUNKS) { beat ->
+                    emit(reasoningChunkXai("Deliberating, beat $beat."))
+                    delay(REASONING_BEAT_MS)
+                }
+                emit(chunk("The meeting "))
+                delay(TRICKLE_GAP_MS)
+                emit(chunk("is moved "))
+                delay(TRICKLE_GAP_MS)
+                emit(chunk("to Friday afternoon."))
+                emit(usageChunk(reasoningTokens = 183))
+                emit(DONE_LINE)
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
             }
-            emit(chunk("The meeting "))
-            delay(TRICKLE_GAP_MS)
-            emit(chunk("is moved "))
-            delay(TRICKLE_GAP_MS)
-            emit(chunk("to Friday afternoon."))
-            emit(usageChunk(reasoningTokens = 183))
-            emit(DONE_LINE)
-            HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
@@ -617,16 +813,19 @@ class OpenRouterStyleClientTest {
     fun `the seneca tirade restyles and inserts with its profanity intact`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // The acceptance scenario in fixture form (ENC-94's scenario,
-        // ENC-99's primary): Sean's tirade test — long, first-person,
+        // ENC-100's primary): Sean's tirade test — long, first-person,
         // profanity-bearing — restyled by the primary in Seneca's
-        // voice, in the plain content-delta shape Gemini streams from
-        // an allow-listed Google endpoint. The hard tier (the
-        // profanity, the names) survives, the speaker stays the
-        // speaker (ENC-92), and the styled text is the outcome of a
-        // single call.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(TIRADE_STYLED), provider = "Google")
-            HttpResult(status = 200, body = "")
+        // voice, in the plain content-delta shape DeepSeek streams
+        // from an allow-listed US endpoint. The profanity survives,
+        // the speaker stays the speaker (ENC-92), and the styled
+        // text is the outcome of a single call.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(TIRADE_STYLED), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = seneca, text = TIRADE_SOURCE)
@@ -634,7 +833,7 @@ class OpenRouterStyleClientTest {
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(TIRADE_STYLED, styled.text)
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
-        assertEquals("Google", styled.provider)
+        assertEquals("DeepInfra", styled.provider)
         assertEquals(1, fakeTransport.requests.size)
     }
 
@@ -644,11 +843,15 @@ class OpenRouterStyleClientTest {
         // The battery's long-Aristotle datapoint (an inserted
         // paragraph break, 'colour' for 'color', elevated diction,
         // every content word preserved) end to end against the
-        // ENC-99 primary's recorded shape — plain Google-endpoint
+        // ENC-100 primary's recorded shape — plain US-endpoint
         // deltas, no reasoning phase — landing as ONE primary call.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(ARISTOTLE_STYLED), provider = "Google")
-            HttpResult(status = 200, body = "")
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(ARISTOTLE_STYLED), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
         }
 
         val outcome = client.style(style = aristotle, text = ARISTOTLE_SOURCE)
@@ -656,7 +859,7 @@ class OpenRouterStyleClientTest {
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(ARISTOTLE_STYLED, styled.text)
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
-        assertEquals("Google", styled.provider)
+        assertEquals("DeepInfra", styled.provider)
         assertEquals(1, fakeTransport.requests.size)
     }
 
@@ -673,18 +876,38 @@ class OpenRouterStyleClientTest {
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "empty-response", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "empty-response", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
-    fun `a refusal from the primary is never inserted`() = runTest {
+    fun `a refusal from the primary is never inserted and the fallback answers`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-82's catastrophic case: refusal-shaped output must be a
-        // failure, not a result — and with no second model (ENC-99)
-        // it is the chain's report after exactly one call.
+        // failure routed to the next model, not a result. The
+        // slimmed guard (ENC-100) keeps refusal detection untouched —
+        // this is still the chain's first promise.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf("I'm sorry, but I can't help with that."))
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a refusal from both models falls back as a refusal`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
             emitStream(emit, parts = listOf("I'm sorry, but I can't help with that."))
             HttpResult(status = 200, body = "")
@@ -693,41 +916,90 @@ class OpenRouterStyleClientTest {
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "refusal", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "refusal", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
     }
 
     @Test
-    fun `a fidelity loss on the primary falls back as fidelity`() = runTest {
+    fun `a wholesale replacement from the primary fails the floor and the fallback answers`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-82's Idiocracy datapoint, end to end: the primary's
-        // output silently drops the slur; the guard fails it, and
-        // with no second model (ENC-99) the local text is what the
-        // user keeps — the dropped word never ships under his name.
+        // ENC-98's failure shape in the ENC-100 chain (the slim
+        // guard's one fidelity catch): the primary ignores the
+        // grapes dictation and invents generic persona prose —
+        // ~0 content-word coverage — so the floor fails it and
+        // Gemini's faithful restyle is what lands.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(REPLACEMENT_STYLED), provider = "DeepInfra")
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(REPLACEMENT_FAITHFUL), provider = "Google")
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = seneca, text = REPLACEMENT_SOURCE)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(REPLACEMENT_FAITHFUL, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `a wholesale replacement from both models falls back as fidelity`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // Both links invent unrelated text: the chain's report is
+        // fidelity — which since ENC-100 means wholesale
+        // replacement only — and the local text is what remains.
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(IDIOCRACY_DROPPED))
+            emitStream(emit, parts = listOf(REPLACEMENT_STYLED))
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = seneca, text = REPLACEMENT_SOURCE)
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "fidelity", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `the idiocracy sentence with the slur dropped now inserts from the primary`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // CHANGED EXPECTATION (ENC-100 amendment): ENC-82 through
+        // ENC-99 pinned this exact datapoint as a fidelity failure
+        // — the primary dropped the slur and the fallback's
+        // faithful restyle landed. The slimmed guard removed the
+        // hard-token tier that caught it (its coverage is ~0.39,
+        // far over the wholesale floor), so the primary's output
+        // now inserts in one call. Sean's accepted trade, recorded
+        // on ENC-100: catching one dropped word is no longer the
+        // guard's job.
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf(IDIOCRACY_DROPPED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = IDIOCRACY_SOURCE)
 
-        assertEquals(
-            LlmStyleOutcome.FellBack(reason = "fidelity", model = OpenRouterPayload.PRIMARY_MODEL),
-            outcome,
-        )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(IDIOCRACY_DROPPED, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals(1, fakeTransport.requests.size)
     }
 
     @Test
     fun `a faithful restyle of the idiocracy line inserts from the primary`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // The same datapoint, answered faithfully: every word —
-        // including the slur (hard tier) — survives, so the styled
-        // text lands in one call.
+        // including the slur — survives, so the styled text lands
+        // in one call (unchanged by the slimming).
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(IDIOCRACY_PRESERVED), provider = "Google")
+            emitStream(emit, parts = listOf(IDIOCRACY_PRESERVED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -742,9 +1014,9 @@ class OpenRouterStyleClientTest {
     fun `the gerbil limerick passes the guard end to end`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // The canonical ENC-82 datapoint: profanity intact, one call —
-        // in ENC-99's primary shape (Google-endpoint plain deltas).
+        // in ENC-100's primary shape (US-endpoint plain deltas).
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(GERBIL_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(GERBIL_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -752,26 +1024,27 @@ class OpenRouterStyleClientTest {
 
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(GERBIL_STYLED, styled.text)
-        assertEquals("Google", styled.provider)
+        assertEquals("DeepInfra", styled.provider)
         assertEquals(1, fakeTransport.keylessCallCount)
     }
 
-    // ---- ENC-99 adversarial preservation battery -------------------
-    // The revised ticket makes these categories the PRIMARY's
-    // acceptance: Gemini's known hazard is trained refusals and
-    // sanitisation on explicit content, so each fixture scripts the
-    // primary's recorded shape (plain Google-endpoint deltas) doing
-    // the job faithfully — every profanity/slang token preserved, no
-    // masking, no euphemism, no added commentary — and the negative
-    // fixtures script the failure shapes to prove the guard still
-    // catches them. Sean's on-device retest is the live gate; these
-    // pin the pipeline's side of the contract.
+    // ---- Adversarial preservation battery -----------------------
+    // Filed by ENC-99 against Gemini, carried into ENC-100 against
+    // BOTH models: the primary's recorded shapes below (DeepInfra
+    // deltas), and the fallback fixtures after them keep ENC-99's
+    // Gemini pins in their new seat. Each positive fixture scripts
+    // a faithful restyle — every profanity/slang token preserved,
+    // no masking, no euphemism, no added commentary — landing in
+    // exactly one call. TWO expectation flips from the slimming
+    // are pinned at the end (masked/euphemised), called out in
+    // their comments. Sean's on-device retest is the live gate;
+    // these pin the pipeline's side of the contract.
 
     @Test
     fun `heavy profanity survives a restyle verbatim`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(PROFANITY_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(PROFANITY_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -786,7 +1059,7 @@ class OpenRouterStyleClientTest {
     fun `crude sexual slang survives a restyle verbatim`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(SLANG_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(SLANG_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -800,7 +1073,7 @@ class OpenRouterStyleClientTest {
     fun `a us partisan rant survives a restyle with its targets named`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(PARTISAN_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(PARTISAN_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -816,9 +1089,10 @@ class OpenRouterStyleClientTest {
         // The preservation check the research protocol names: a
         // model willing to quietly soften THIS sentence is a model
         // that edits the user. Tiananmen, 1989, Xi Jinping — all
-        // present in the recorded faithful shape.
+        // present in the recorded faithful shape, now served by
+        // the DeepSeek primary as well as (ENC-99) by Gemini.
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(TIANANMEN_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(TIANANMEN_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -832,7 +1106,7 @@ class OpenRouterStyleClientTest {
     fun `insult-laden dictation survives a restyle verbatim`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(INSULT_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(INSULT_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -846,7 +1120,7 @@ class OpenRouterStyleClientTest {
     fun `mixed slang and technical dictation survives a restyle`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(TECH_SLANG_STYLED), provider = "Google")
+            emitStream(emit, parts = listOf(TECH_SLANG_STYLED), provider = "DeepInfra")
             HttpResult(status = 200, body = "")
         }
 
@@ -857,67 +1131,48 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `an asterisk-masked restyle is a fidelity loss, never inserted`() = runTest {
+    fun `a primary failure lands the gemini restyle of the profanity battery intact`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // The sanitisation shape, scripted: the model "restyles" the
-        // profanity battery input but masks every hard-tier token.
-        // The masked words are not the words — the guard must fail
-        // it, and the user's own text is what remains.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(PROFANITY_MASKED), provider = "Google")
-            HttpResult(status = 200, body = "")
+        // ENC-99's Gemini adversarial pin, in its ENC-100 seat: the
+        // primary is down, and the fallback's recorded faithful
+        // shape — profanity verbatim from a Vertex endpoint — is
+        // what lands.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 500, body = "boom")
+            } else {
+                emitStream(emit, parts = listOf(PROFANITY_STYLED), provider = "Google")
+                HttpResult(status = 200, body = "")
+            }
         }
 
         val outcome = client.style(style = professional, text = PROFANITY_SOURCE)
 
-        assertEquals(
-            LlmStyleOutcome.FellBack(
-                reason = "fidelity",
-                model = OpenRouterPayload.PRIMARY_MODEL,
-                provider = "Google",
-            ),
-            outcome,
-        )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(PROFANITY_STYLED, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals("Google", styled.provider)
+        assertEquals(2, fakeTransport.requests.size)
     }
 
     @Test
-    fun `a euphemism-swapped restyle is a fidelity loss, never inserted`() = runTest {
+    fun `a gemini refusal on profanity-laden dictation falls back as a refusal`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // The other sanitisation shape: same sentence, profanity
-        // swapped for euphemisms ("freaking", "crap"). Softer words
-        // the user did not say are still words the user did not say.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(PROFANITY_EUPHEMISED), provider = "Google")
-            HttpResult(status = 200, body = "")
-        }
-
-        val outcome = client.style(style = professional, text = PROFANITY_SOURCE)
-
-        assertEquals(
-            LlmStyleOutcome.FellBack(
-                reason = "fidelity",
-                model = OpenRouterPayload.PRIMARY_MODEL,
-                provider = "Google",
-            ),
-            outcome,
-        )
-        assertEquals(1, fakeTransport.keylessCallCount)
-    }
-
-    @Test
-    fun `a refusal on profanity-laden dictation falls back as a refusal`() = runTest {
-        val client = newClient(StandardTestDispatcher(testScheduler))
-        // Gemini's trained-refusal hazard, scripted against the
-        // battery's hardest input: the refusal is a failure with its
-        // own reason — never text in the user's field.
-        fakeTransport.handler = { _, _, emit ->
-            emitStream(
-                emit,
-                parts = listOf("I'm sorry, but I can't help with content that contains profanity."),
-                provider = "Google",
-            )
-            HttpResult(status = 200, body = "")
+        // Gemini's trained-refusal hazard, scripted in its fallback
+        // seat: the primary is down, the fallback refuses the
+        // battery's hardest input, and the refusal is a failure with
+        // its own reason — never text in the user's field.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 500, body = "boom")
+            } else {
+                emitStream(
+                    emit,
+                    parts = listOf("I'm sorry, but I can't help with content that contains profanity."),
+                    provider = "Google",
+                )
+                HttpResult(status = 200, body = "")
+            }
         }
 
         val outcome = client.style(style = professional, text = PROFANITY_SOURCE)
@@ -925,11 +1180,54 @@ class OpenRouterStyleClientTest {
         assertEquals(
             LlmStyleOutcome.FellBack(
                 reason = "refusal",
-                model = OpenRouterPayload.PRIMARY_MODEL,
+                model = OpenRouterPayload.FALLBACK_MODEL,
                 provider = "Google",
             ),
             outcome,
         )
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `an asterisk-masked restyle now inserts since the slimming`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // CHANGED EXPECTATION (ENC-100 amendment): ENC-99 pinned
+        // this shape — the profanity battery input with every
+        // hard-tier token masked — as a fidelity loss that was
+        // never inserted. The slimmed guard keeps only the
+        // wholesale floor: the masked output retains ~0.5 content
+        // coverage (the sentence survives; only the profanity is
+        // masked), so it PASSES and inserts. Sean's accepted
+        // trade: sanitisation of individual words is no longer a
+        // guard catch; wholesale replacement and refusals are.
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf(PROFANITY_MASKED), provider = "DeepInfra")
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = PROFANITY_SOURCE)
+
+        assertEquals(PROFANITY_MASKED, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a euphemism-swapped restyle now inserts since the slimming`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // CHANGED EXPECTATION (ENC-100 amendment): the other
+        // ENC-99 sanitisation pin — profanity swapped for
+        // euphemisms ("freaking", "crap") — was a fidelity loss
+        // under the hard-token tier. Under the slim guard it keeps
+        // ~0.5 coverage and inserts, for the same recorded reason
+        // as the masked shape above.
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf(PROFANITY_EUPHEMISED), provider = "DeepInfra")
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = PROFANITY_SOURCE)
+
+        assertEquals(PROFANITY_EUPHEMISED, (outcome as LlmStyleOutcome.Styled).text)
         assertEquals(1, fakeTransport.keylessCallCount)
     }
 
@@ -949,7 +1247,7 @@ class OpenRouterStyleClientTest {
 
     /** A whole non-streamed chat-completion body as ONE raw line (no SSE framing) (ENC-91). */
     private fun nonStreamedCompletion(content: String): String =
-        "{\"id\":\"gen-enc91\",\"provider\":\"Google\",\"model\":\"google/gemini-3.1-flash-lite\"," +
+        "{\"id\":\"gen-enc100\",\"provider\":\"DeepInfra\",\"model\":\"deepseek/deepseek-v4.1-flash-1017\"," +
             "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":" +
             OpenRouterPayload.escape(content) + "},\"finish_reason\":\"stop\"}]}"
 
@@ -989,7 +1287,7 @@ class OpenRouterStyleClientTest {
         const val REASONING_BURST_CHUNKS: Int = 24
         const val REASONING_BEAT_MS: Long = 250L
 
-        /** The guard suite's long-Aristotle pair (ENC-82/83 datapoint), end to end in ENC-96. */
+        /** The guard suite's long-Aristotle pair (ENC-82/83 datapoint), end to end in ENC-100. */
         const val ARISTOTLE_SOURCE: String =
             "a man's character is revealed not by his grand declarations but by his small daily choices. " +
                 "anyone can be generous when the world is watching, but the color of his soul shows in how he " +
@@ -1016,22 +1314,47 @@ class OpenRouterStyleClientTest {
                 "something Seneca would say. I want to know that too. So here goes."
 
         /**
+         * The wholesale-replacement pair (ENC-98's device datapoint,
+         * pinned end-to-end by ENC-100): the dictation is about
+         * testing the style pass itself; the invention is generic
+         * Stoic prose sharing ~0 content words with it; the
+         * faithful restyle keeps every content word, grapes and all.
+         */
+        const val REPLACEMENT_SOURCE: String =
+            "alright let's say test this fucking shit using grok llama hopefully it turns " +
+                "all this fucking shit into a good fucking nice lovely sentence that seneca would have " +
+                "written back in one thousand bc or whatever the fuck when he's sitting and eating some " +
+                "grapes and shit in his royal fucking marble house"
+        const val REPLACEMENT_STYLED: String =
+            "I unleash a torrent of words, yet do they bring me peace. Can a mind at ease " +
+                "be troubled by the words it speaks. In the stillness of a quiet hour, even the " +
+                "philosopher kings found wisdom, not in the grandeur of their halls, but in the " +
+                "simplicity of their thoughts."
+        const val REPLACEMENT_FAITHFUL: String =
+            "Alright, let me test this fucking shit using Grok Llama. Hopefully it turns " +
+                "all this fucking shit into a good, fucking nice, lovely sentence that Seneca would have " +
+                "written back in 1000 BC, or whatever the fuck, when he's sitting and eating some " +
+                "grapes and shit in his royal fucking marble house."
+
+        /**
          * Representative 400 body for a request rejection, in
          * OpenRouter's error envelope (ENC-95 diagnosis fixture,
-         * provider metadata updated for the ENC-99 chain).
+         * provider metadata updated for the ENC-100 chain).
          */
         const val REJECTION_400_BODY: String =
             "{\"error\":{\"message\":\"invalid argument: unsupported parameter combination\"," +
-                "\"code\":400,\"type\":\"invalid_request_error\",\"metadata\":{\"provider_name\":\"Google\"}}}"
+                "\"code\":400,\"type\":\"invalid_request_error\",\"metadata\":{\"provider_name\":\"DeepInfra\"}}}"
 
         /** A guard-safe source/restyle pair: same content words, new casing. */
         const val SOURCE_TEXT: String = "the meeting is moved to friday afternoon"
         const val STYLED_TEXT: String = "The meeting is moved to Friday afternoon."
+        const val FALLBACK_STYLED_TEXT: String = "The meeting has been moved to Friday afternoon."
 
-        // ---- ENC-99 adversarial battery pairs: transcript-shaped
-        // sources with the faithful restyle each must produce. The
-        // styled side changes casing/punctuation ONLY — every word,
-        // and above all every hard-tier token, survives.
+        // ---- Adversarial battery pairs (ENC-99, carried into
+        // ENC-100): transcript-shaped sources with the faithful
+        // restyle each must produce. The styled side changes
+        // casing/punctuation ONLY — every word, and above all every
+        // profanity/slang token, survives.
 
         const val PROFANITY_SOURCE: String =
             "this fucking shit is fucking broken again and i'm fucking sick of this bullshit"
