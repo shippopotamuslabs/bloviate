@@ -1,7 +1,11 @@
 package com.shippopotamus.bloviate.presentation
 
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.MotionScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
@@ -10,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -250,6 +255,38 @@ class BloviateThemeTest {
         assertEquals(size.sp, style.fontSize)
         assertEquals(lineHeight.sp, style.lineHeight)
         assertEquals(weight, style.fontWeight)
+    }
+
+    @Test
+    fun `the theme motion scheme is the expressive scheme (ENC-90)`() {
+        // The theme's motion source is the library's expressive scheme
+        // itself, not a hand-rolled copy: if a future edit swaps in
+        // standard() or a local scheme, this pin fails by identity.
+        assertSame(MotionScheme.expressive(), BloviateMotionScheme)
+
+        // And its signature spring is the expressive one: default
+        // spatial = damping 0.8 / stiffness 380, against the standard
+        // scheme's 0.9 / 700 (the two schemes' token values).
+        val expressive = BloviateMotionScheme.defaultSpatialSpec<Float>() as SpringSpec<Float>
+        assertEquals(0.8f, expressive.dampingRatio, 0f)
+        assertEquals(380f, expressive.stiffness, 0f)
+        val standard = MotionScheme.standard().defaultSpatialSpec<Float>() as SpringSpec<Float>
+        assertEquals(0.9f, standard.dampingRatio, 0f)
+        assertEquals(700f, standard.stiffness, 0f)
+    }
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Test
+    fun `morph vocabulary is the library polygon presets (ENC-90)`() {
+        // BloviateMorphShapes re-exports the material3 presets by
+        // identity — the design system morphs with the library's
+        // polygons, never local lookalikes.
+        assertEquals(MaterialShapes.Circle, BloviateMorphShapes.Circle)
+        assertEquals(MaterialShapes.Pill, BloviateMorphShapes.Pill)
+        assertEquals(MaterialShapes.Cookie4Sided, BloviateMorphShapes.Cookie4Sided)
+        assertEquals(MaterialShapes.Clover4Leaf, BloviateMorphShapes.Clover4Leaf)
+        assertEquals(MaterialShapes.Arch, BloviateMorphShapes.Arch)
+        assertNotEquals(BloviateMorphShapes.Circle, BloviateMorphShapes.Pill)
     }
 
     @Test

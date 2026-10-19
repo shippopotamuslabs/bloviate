@@ -5,7 +5,14 @@ ksp = "2.3.6"
 hilt = "2.59.2"
 coreKtx = "1.18.0"
 activityCompose = "1.13.0"
-composeBom = "2026.05.01"
+composeBom = "2026.09.00"
+# ENC-90: the BOM still maps material3 to 1.4.0 (whose Expressive API is
+# internal); 1.5.0-beta01 is the newest milestone that exposes
+# MotionScheme / MaterialExpressiveTheme / MaterialShapes publicly, so
+# material3 is pinned explicitly here and overrides the BOM for that one
+# artifact. This pin deliberately DIVERGES from Enclave's catalog
+# (BOM 2026.05.01 / material3 1.4.0) — flagged for Sean on ENC-90.
+material3 = "1.5.0-beta01"
 lifecycleRuntimeKtx = "2.10.0"
 coroutinesVersion = "1.11.0"
 datastorePreferences = "1.2.1"
@@ -25,7 +32,7 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
-androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
