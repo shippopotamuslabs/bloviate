@@ -128,6 +128,91 @@ class StyleCatalogTest {
     }
 
     @Test
+    fun `talkie clips — a word cap, short declaratives, and the periodic swell forbidden`() {
+        // ENC-104: Sean's ear test found Talkie and The Colonel
+        // indistinguishable — both merely "old." The sharpening
+        // defines Talkie AGAINST the Colonel: sentence architecture,
+        // not vocabulary, is the differentiator, and the mandates
+        // are pinned as instruction content.
+        val talkie = StyleCatalog.byId("talkie")
+
+        assertTrue(
+            talkie.systemInstructions.contains("CLIP, never swell"),
+            "talkie lacks the clip mandate",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("no sentence runs past twelve words"),
+            "talkie lacks the sentence-length cap",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("NEVER write a periodic sentence"),
+            "talkie does not forbid the Colonel's periodic swell",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("press room"),
+            "talkie lacks the newsroom idiom directive",
+        )
+    }
+
+    @Test
+    fun `the colonel dilates — periodic sentences mandated and clipping forbidden`() {
+        // ENC-104's other half: the Colonel is defined against
+        // Talkie — every sentence a period, the main clause landing
+        // last, wire-service haste expressly forbidden.
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        assertTrue(
+            colonel.systemInstructions.contains("DILATE, never clip"),
+            "the colonel lacks the dilate mandate",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("the main clause arriving only at the end"),
+            "the colonel lacks the periodic-structure mandate",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("NEVER clip a thought into wire-service fragments"),
+            "the colonel does not forbid Talkie's clipped fragments",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("courtesy formulae"),
+            "the colonel lacks the courtesy-formulae directive",
+        )
+    }
+
+    @Test
+    fun `talkie and the colonel are minimal pairs over the same dictations`() {
+        // ENC-104: both era styles restyle the SAME source dictations
+        // so the fork between the registers is visible in the
+        // examples themselves — and the architecture difference is
+        // measurable in the outputs: Talkie's sentences all fit the
+        // cap, while every Colonel output carries at least one full
+        // period of twenty words or more.
+        val talkie = StyleCatalog.byId("talkie")
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        assertEquals(
+            talkie.fewShots.map { shot -> shot.raw },
+            colonel.fewShots.map { shot -> shot.raw },
+            "the era styles no longer share their source dictations",
+        )
+        talkie.fewShots.forEach { shot ->
+            val longest = sentencesOf(shot.styled).maxOf { sentence -> wordCount(sentence) }
+            assertTrue(longest <= 12, "talkie example sentence runs past the cap: ${shot.styled}")
+        }
+        colonel.fewShots.forEach { shot ->
+            val longest = sentencesOf(shot.styled).maxOf { sentence -> wordCount(sentence) }
+            assertTrue(longest >= 20, "the colonel example never swells to a period: ${shot.styled}")
+        }
+    }
+
+    /** Splits styled example text into its sentences for word-count measurement. */
+    private fun sentencesOf(text: String): List<String> =
+        text.split(Regex("[.!?]")).map { part -> part.trim() }.filter { part -> part.isNotEmpty() }
+
+    /** Words in one sentence, counted on whitespace. */
+    private fun wordCount(sentence: String): Int = sentence.split(Regex("\\s+")).size
+
+    @Test
     fun `every style id is unique`() {
         val ids = StyleCatalog.ALL.map { style -> style.id }
         assertEquals(ids.size, ids.toSet().size)
