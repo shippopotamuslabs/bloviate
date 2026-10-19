@@ -182,6 +182,33 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `the same transcript through all three philosophers carries each voice's anchors`() {
+        // ENC-105: the philosopher contrast rides the assembled
+        // prompts — one transcript through Seneca carries the
+        // Gummere anchor and the ban on system-building; through
+        // Marcus Aurelius, the Long anchor and the self-address
+        // permission; through Aristotle, the Jowett anchor and the
+        // ban on aphoristic moralizing. All three keep the
+        // demarcated shape.
+        listOf(
+            Triple("seneca", "We suffer more often in imagination than in reality", "NEVER build a system"),
+            Triple(
+                "marcus-aurelius",
+                "for the soul is dyed by the thoughts",
+                "his own soul",
+            ),
+            Triple("aristotle", "man is by nature a political animal", "NEVER moralize in aphorisms"),
+        ).forEach { (id, anchor, signature) ->
+            val style = StyleCatalog.byId(id)
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+
+            assertTrue(prompt.system.content.contains(anchor), "$id prompt lacks its quote anchor")
+            assertTrue(prompt.system.content.contains(signature), "$id prompt lacks its signature clause")
+            assertDemarcatedShape(prompt, style)
+        }
+    }
+
+    @Test
     fun `every style's user message is task plus demarcated input only`() {
         StyleCatalog.ALL.forEach { style ->
             val prompt = builder.build(style = style, transcript = TRANSCRIPT)
