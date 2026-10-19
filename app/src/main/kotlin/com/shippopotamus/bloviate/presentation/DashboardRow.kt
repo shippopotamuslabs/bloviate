@@ -21,27 +21,47 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
- * One dashboard row (ENC-75): an optional icon tile, a label, at most
+ * One dashboard row (ENC-75): a leading visual (an icon tile, or a
+ * [leading] slot — the Style list's radio buttons), a label, at most
  * one sub-line, and a trailing slot for the control that matches the
  * job (chip, switch, button). A row with an [onClick] is the control —
  * the whole row is the settings deep-link, marked by the chevron —
- * instead of a sentence plus a button that repeats it.
+ * instead of a sentence plus a button that repeats it. [below] renders
+ * extra content inside the row's card under the row itself (the
+ * selected style's sample). A disabled row dims and stops clicking.
  */
 @Composable
 fun DashboardRow(
     label: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    leading: @Composable (() -> Unit)? = null,
     sub: String? = null,
     onClick: (() -> Unit)? = null,
+    clickRole: Role = Role.Button,
+    enabled: Boolean = true,
+    contentDescription: String? = null,
     showChevron: Boolean = onClick != null,
     dividerAbove: Boolean = false,
     trailing: @Composable RowScope.() -> Unit = {},
+    below: @Composable (() -> Unit)? = null,
 ) {
+    val labelColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_CONTENT_ALPHA)
+    }
+    val subColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = DISABLED_CONTENT_ALPHA)
+    }
     Column(modifier = modifier.fillMaxWidth()) {
         if (dividerAbove) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -50,8 +70,15 @@ fun DashboardRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
+                    if (contentDescription != null) {
+                        Modifier.semantics { this.contentDescription = contentDescription }
+                    } else {
+                        Modifier
+                    },
+                )
+                .then(
                     if (onClick != null) {
-                        Modifier.clickable(role = Role.Button, onClick = onClick)
+                        Modifier.clickable(enabled = enabled, role = clickRole, onClick = onClick)
                     } else {
                         Modifier
                     },
@@ -59,7 +86,11 @@ fun DashboardRow(
                 .padding(horizontal = 13.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (icon != null) {
+            if (leading != null) {
+                Box(modifier = Modifier.padding(end = 11.dp)) {
+                    leading()
+                }
+            } else if (icon != null) {
                 Box(
                     modifier = Modifier
                         .padding(end = 11.dp)
@@ -82,12 +113,13 @@ fun DashboardRow(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.titleSmall,
+                    color = labelColor,
                 )
                 if (sub != null) {
                     Text(
                         text = sub,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = subColor,
                     )
                 }
             }
@@ -103,8 +135,13 @@ fun DashboardRow(
                 )
             }
         }
+        if (below != null) {
+            below()
+        }
     }
 }
+
+private const val DISABLED_CONTENT_ALPHA = 0.38f
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
 @Preview(name = "Row - Dark", showBackground = true)

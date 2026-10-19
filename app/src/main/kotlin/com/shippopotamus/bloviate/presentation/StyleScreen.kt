@@ -1,27 +1,25 @@
 package com.shippopotamus.bloviate.presentation
 
-import android.content.res.Configuration
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -56,15 +55,19 @@ fun StyleRoute(
 }
 
 /**
- * The Style tab (ENC-72 + ENC-73): the writing-style presets Bloviate
- * shapes dictation into, plus the AI-styles key card. Each row is a
- * radio-button selectable at least 48.dp tall; LLM rows stay
- * non-selectable until an OpenRouter key is saved — the note on the row
- * says so. The key field is a password field whose draft is transient;
- * only the encrypted key is ever stored.
+ * The Style tab (ENC-72 + ENC-73, dashboard form ENC-75/ENC-78): the
+ * header pill carries the AI connection state, the key card is one
+ * masked field + its action with a one-line explanation, and the
+ * styles are a radio LIST — name, one-line description, and an
+ * on-device/AI tag — with the sample text rendered only under the
+ * selected style. LLM rows stay non-selectable until an OpenRouter
+ * key is saved; the key card's line says why. The key field is a
+ * password field whose draft is transient; only the encrypted key is
+ * ever stored. Selection and key behavior are unchanged from the card
+ * layout this replaced.
  *
- * The column scrolls: the card plus nine rows must stay reachable on
- * short viewports.
+ * The column scrolls: the key card plus nine rows must stay reachable
+ * on short viewports.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +81,22 @@ fun StyleScreen(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(text = stringResource(R.string.tab_style)) })
+            TopAppBar(
+                title = { Text(text = stringResource(R.string.tab_style)) },
+                actions = {
+                    StatusPill(
+                        text = stringResource(
+                            if (uiState.hasApiKey) {
+                                R.string.style_pill_connected
+                            } else {
+                                R.string.style_pill_off
+                            },
+                        ),
+                        tone = if (uiState.hasApiKey) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+                        modifier = Modifier.padding(end = 16.dp),
+                    )
+                },
+            )
         },
         contentWindowInsets = WindowInsets(0),
         modifier = modifier,
@@ -90,8 +108,9 @@ fun StyleScreen(
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            DashboardSectionHeader(text = stringResource(R.string.style_section_key))
             AiKeyCard(
                 apiKeyDraft = uiState.apiKeyDraft,
                 hasApiKey = uiState.hasApiKey,
@@ -99,16 +118,34 @@ fun StyleScreen(
                 onSaveApiKeyClick = onSaveApiKeyClick,
                 onClearApiKeyClick = onClearApiKeyClick,
             )
-            uiState.options.forEach { option ->
-                StyleRow(
-                    option = option,
-                    onSelect = { onStyleSelected(option.id) },
-                )
+            DashboardSectionHeader(
+                text = stringResource(R.string.style_section_styles),
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            DashboardCard {
+                uiState.options.forEachIndexed { index, option ->
+                    StyleListRow(
+                        option = option,
+                        dividerAbove = index > 0,
+                        onSelect = { onStyleSelected(option.id) },
+                    )
+                }
             }
+            Text(
+                text = stringResource(R.string.style_footer),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
     }
 }
 
+/**
+ * The compact key card (ENC-78): a masked password field, its Save (or
+ * Replace, once a key exists) action, Clear when a key is stored, and
+ * one line of explanation that doubles as the reason AI rows are dim.
+ */
 @Composable
 private fun AiKeyCard(
     apiKeyDraft: String,
@@ -118,50 +155,59 @@ private fun AiKeyCard(
     onClearApiKeyClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
+    val keyLabel = stringResource(R.string.style_api_key_label)
+    DashboardCard(modifier = modifier) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = stringResource(R.string.style_ai_card_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.style_ai_card_body),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextField(
-                value = apiKeyDraft,
-                onValueChange = onApiKeyDraftChange,
-                label = { Text(text = stringResource(R.string.style_api_key_label)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
-            )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                OutlinedTextField(
+                    value = apiKeyDraft,
+                    onValueChange = onApiKeyDraftChange,
+                    placeholder = {
+                        Text(
+                            text = stringResource(
+                                if (hasApiKey) {
+                                    R.string.style_api_key_masked
+                                } else {
+                                    R.string.style_api_key_label
+                                },
+                            ),
+                        )
+                    },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = keyLabel },
+                )
                 Button(
                     onClick = onSaveApiKeyClick,
                     enabled = apiKeyDraft.isNotBlank(),
                 ) {
-                    Text(text = stringResource(R.string.style_api_key_save))
+                    Text(
+                        text = stringResource(
+                            if (hasApiKey) {
+                                R.string.style_api_key_replace
+                            } else {
+                                R.string.style_api_key_save
+                            },
+                        ),
+                    )
                 }
-                OutlinedButton(
-                    onClick = onClearApiKeyClick,
-                    enabled = hasApiKey,
-                ) {
-                    Text(text = stringResource(R.string.style_api_key_clear))
+                if (hasApiKey) {
+                    TextButton(onClick = onClearApiKeyClick) {
+                        Text(text = stringResource(R.string.style_api_key_clear))
+                    }
                 }
             }
             Text(
                 text = stringResource(
-                    if (hasApiKey) R.string.style_api_key_saved else R.string.style_api_key_missing,
+                    if (hasApiKey) R.string.style_key_line_saved else R.string.style_key_line_needed,
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -170,64 +216,64 @@ private fun AiKeyCard(
     }
 }
 
+/** One style in the radio list; the sample renders only under the selected row (ENC-78). */
 @Composable
-private fun StyleRow(
+private fun StyleListRow(
     option: StyleOptionUi,
+    dividerAbove: Boolean,
     onSelect: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val selectLabel = stringResource(R.string.style_row_select, option.displayName)
-    Card(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = ROW_MIN_HEIGHT)
-                .semantics { contentDescription = selectLabel }
-                .selectable(
-                    selected = option.isSelected,
-                    enabled = option.isEnabled,
-                    onClick = onSelect,
-                    role = Role.RadioButton,
-                )
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+    val tag = stringResource(
+        if (option.requiresAi) R.string.style_tag_ai else R.string.style_tag_on_device,
+    )
+    DashboardRow(
+        label = option.displayName,
+        sub = "${option.description} · $tag",
+        leading = {
             RadioButton(
                 selected = option.isSelected,
                 enabled = option.isEnabled,
                 onClick = null,
             )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = option.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = option.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = option.sample,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (option.requiresAi && !option.isEnabled) {
-                    Text(
-                        text = stringResource(R.string.style_needs_key_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
+        },
+        onClick = onSelect,
+        clickRole = Role.RadioButton,
+        enabled = option.isEnabled,
+        contentDescription = stringResource(R.string.style_row_select, option.displayName),
+        showChevron = false,
+        dividerAbove = dividerAbove,
+        below = if (option.isSelected) {
+            { StyleSample(sample = option.sample) }
+        } else {
+            null
+        },
+    )
 }
 
-private val ROW_MIN_HEIGHT = 48.dp
+/** The selected style's sample, inset under its row so the list pays for one sample, not nine. */
+@Composable
+private fun StyleSample(
+    sample: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 44.dp, end = 13.dp, bottom = 12.dp)
+            .background(
+                color = MaterialTheme.colorScheme.surface,
+                shape = MaterialTheme.shapes.medium,
+            )
+            .padding(horizontal = 11.dp, vertical = 9.dp),
+    ) {
+        Text(
+            text = sample,
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
 
 private fun previewUiState(hasApiKey: Boolean): StyleUiState =
     StyleUiState(
@@ -264,12 +310,7 @@ private fun previewUiState(hasApiKey: Boolean): StyleUiState =
     )
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Style populated - Light", showBackground = true)
-@Preview(
-    name = "Style populated - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Style populated - Dark", showBackground = true)
 @Composable
 private fun StyleScreenPopulatedPreview() {
     PreviewTheme {
@@ -284,12 +325,7 @@ private fun StyleScreenPopulatedPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Style with key - Light", showBackground = true)
-@Preview(
-    name = "Style with key - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Style with key - Dark", showBackground = true)
 @Composable
 private fun StyleScreenWithKeyPreview() {
     PreviewTheme {
@@ -304,12 +340,7 @@ private fun StyleScreenWithKeyPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Style empty - Light", showBackground = true)
-@Preview(
-    name = "Style empty - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Style empty - Dark", showBackground = true)
 @Composable
 private fun StyleScreenEmptyPreview() {
     PreviewTheme {
