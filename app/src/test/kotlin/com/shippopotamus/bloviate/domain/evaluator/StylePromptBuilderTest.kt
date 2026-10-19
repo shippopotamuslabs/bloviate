@@ -91,6 +91,39 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `the colonel prompt carries the southern register for casual and technical dictation`() {
+        // ENC-103's prompt fixtures through the real builder: the
+        // era style's definitional material (Southern register, the
+        // register-of-the-language directive, the boundary, the
+        // few-shot pairs) rides the system message for everyday and
+        // technical input alike, and both user messages keep the
+        // demarcated shape.
+        val colonel = StyleCatalog.byId("the-colonel")
+        val transcripts = listOf(
+            "remind me to call mom about sunday dinner",
+            "the nightly build broke on the auth module again",
+        )
+        transcripts.forEach { transcript ->
+            val prompt = builder.build(style = colonel, transcript = transcript)
+
+            assertTrue(
+                prompt.system.content.contains("nineteenth-century Southern"),
+                "the colonel system lacks the register",
+            )
+            assertTrue(
+                prompt.system.content.contains("racial vocabulary"),
+                "the colonel system lacks the boundary",
+            )
+            colonel.fewShots.forEach { shot ->
+                assertTrue(prompt.system.content.contains(shot.raw), "the colonel system lacks example input")
+                assertTrue(prompt.system.content.contains(shot.styled), "the colonel system lacks example output")
+            }
+            assertTrue(prompt.user.content.contains("<transcript>"), "the colonel user message lacks markers")
+            assertTrue(prompt.user.content.contains(transcript), "the colonel user message lacks the transcript")
+        }
+    }
+
+    @Test
     fun `every style's user message is task plus demarcated input only`() {
         StyleCatalog.ALL.forEach { style ->
             val prompt = builder.build(style = style, transcript = TRANSCRIPT)

@@ -7,8 +7,68 @@ import org.junit.jupiter.api.Test
 class StyleCatalogTest {
 
     @Test
-    fun `the catalog holds exactly nine styles`() {
-        assertEquals(9, StyleCatalog.ALL.size)
+    fun `the catalog holds exactly ten styles`() {
+        assertEquals(10, StyleCatalog.ALL.size)
+    }
+
+    @Test
+    fun `the colonel is an llm style in the southern aristocratic register`() {
+        // ENC-103: the era-family entry beside Talkie — the educated
+        // nineteenth-century Southern written voice as a prompt-layer
+        // register (default display name per the ticket: The Colonel).
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        assertEquals("The Colonel", colonel.displayName)
+        assertEquals(StyleKind.LLM, colonel.kind)
+        assertTrue(
+            colonel.systemInstructions.contains("nineteenth-century Southern"),
+            "the colonel names no register",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("transcript's own language"),
+            "the colonel lacks the register-of-the-language directive",
+        )
+    }
+
+    @Test
+    fun `the colonel boundary is pinned in its instructions`() {
+        // ENC-103's explicit boundary, pinned as instruction content:
+        // the style takes the period's syntax, diction, and courtesy
+        // ONLY — never its racial vocabulary or Lost Cause
+        // apologetics, on any input. It is also a voice, not a
+        // letter: no salutations or sign-offs.
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        assertTrue(
+            colonel.systemInstructions.contains("racial vocabulary"),
+            "the colonel lacks the racial-vocabulary prohibition",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("Lost Cause apologetics"),
+            "the colonel lacks the Lost Cause prohibition",
+        )
+        assertTrue(
+            colonel.systemInstructions.contains("no salutations"),
+            "the colonel does not forbid letter framing",
+        )
+    }
+
+    @Test
+    fun `the colonel few-shots restyle casual and technical dictation with facts intact`() {
+        // ENC-103's fixture pairs: a courteous everyday dictation
+        // (photographs, children, a fine visit) and a technical one
+        // (backup script, filled disk, two hours of logs) — every
+        // load-bearing fact survives the register.
+        val colonel = StyleCatalog.byId("the-colonel")
+
+        val casual = colonel.fewShots.first { shot -> shot.raw.contains("photos") }
+        assertTrue(casual.styled.contains("photographs"), "the colonel lost the photographs: ${casual.styled}")
+        assertTrue(casual.styled.contains("children"), "the colonel lost the children: ${casual.styled}")
+
+        val technical = colonel.fewShots.first { shot -> shot.raw.contains("backup script") }
+        assertTrue(technical.styled.contains("backup script"), "the colonel lost the script: ${technical.styled}")
+        assertTrue(technical.styled.contains("disk"), "the colonel lost the disk: ${technical.styled}")
+        assertTrue(technical.styled.contains("two hours of logs"), "the colonel lost the logs: ${technical.styled}")
     }
 
     @Test
