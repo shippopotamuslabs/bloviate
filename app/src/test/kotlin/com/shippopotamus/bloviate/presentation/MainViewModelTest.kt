@@ -1,6 +1,10 @@
 package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import com.shippopotamus.bloviate.domain.model.BubbleShape
+import com.shippopotamus.bloviate.domain.model.BubbleSize
+import com.shippopotamus.bloviate.domain.model.BubbleTint
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.DictationEngine
@@ -9,13 +13,16 @@ import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
+import com.shippopotamus.bloviate.domain.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
@@ -48,6 +55,7 @@ class MainViewModelTest {
     private val fakeModelStorePort = FakeModelStorePort()
     private val fakeParakeetModelStorePort = FakeParakeetModelStorePort()
     private val fakeEnginePreferencePort = FakeEnginePreferencePort()
+    private val fakeBubbleAppearancePort = FakeBubbleAppearancePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -65,6 +73,8 @@ class MainViewModelTest {
             ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
             observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
             selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
+            observeBubbleAppearance = ObserveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
+            saveBubbleAppearance = SaveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
         )
     }
 
@@ -353,6 +363,101 @@ class MainViewModelTest {
 
             assertEquals(DictationEngine.PARAKEET, fakeEnginePreferencePort.selectedEngine.value)
             assertEquals(1, fakeEnginePreferencePort.selectCallCount)
+        }
+
+    @Test
+    fun `bubble appearance starts at the default look in ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertEquals(BubbleAppearanceUi(), awaitItem().bubbleAppearance)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a published appearance maps to ui enums in ui state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeBubbleAppearancePort.publish(
+                    BubbleAppearance(
+                        opacity = 0.6f,
+                        size = BubbleSize.SMALL,
+                        shape = BubbleShape.ARCH,
+                        tint = BubbleTint.WARNING,
+                    ),
+                )
+
+                assertEquals(
+                    BubbleAppearanceUi(
+                        opacity = 0.6f,
+                        size = BubbleSizeUi.SMALL,
+                        shape = BubbleShapeUi.ARCH,
+                        tint = BubbleTintUi.AMBER,
+                    ),
+                    awaitItem().bubbleAppearance,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `opacity change persists only the opacity of the current appearance`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeBubbleAppearancePort.publish(
+                BubbleAppearance(size = BubbleSize.LARGE, shape = BubbleShape.COOKIE, tint = BubbleTint.INFO),
+            )
+
+            viewModel.onBubbleOpacityChange(0.5f)
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(
+                    BubbleAppearance(
+                        opacity = 0.5f,
+                        size = BubbleSize.LARGE,
+                        shape = BubbleShape.COOKIE,
+                        tint = BubbleTint.INFO,
+                    ),
+                ),
+                fakeBubbleAppearancePort.savedAppearances,
+            )
+        }
+
+    @Test
+    fun `opacity change below the floor is coerced before it persists`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.onBubbleOpacityChange(0.1f)
+            advanceUntilIdle()
+
+            assertEquals(
+                BubbleAppearance.MIN_OPACITY,
+                fakeBubbleAppearancePort.savedAppearances.single().opacity,
+            )
+        }
+
+    @Test
+    fun `size shape and tint changes persist mapped to their domain values`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.onBubbleSizeChange(BubbleSizeUi.LARGE)
+            advanceUntilIdle()
+            viewModel.onBubbleShapeChange(BubbleShapeUi.CLOVER)
+            advanceUntilIdle()
+            viewModel.onBubbleTintChange(BubbleTintUi.SKY)
+            advanceUntilIdle()
+
+            assertEquals(3, fakeBubbleAppearancePort.saveCallCount)
+            // The fake republishes each save, so the edits accumulate on
+            // the live preference — the last save carries all three.
+            assertEquals(
+                BubbleAppearance(
+                    size = BubbleSize.LARGE,
+                    shape = BubbleShape.CLOVER,
+                    tint = BubbleTint.INFO,
+                ),
+                fakeBubbleAppearancePort.savedAppearances.last(),
+            )
         }
 
     private companion object {
