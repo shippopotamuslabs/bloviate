@@ -257,15 +257,58 @@ class StyleCatalogTest {
         // the epistolary framing the personas taught the model. This
         // audit failed on Seneca (both pairs) and Marcus Aurelius
         // before their rewrites.
-        StyleCatalog.ALL.forEach { style ->
-            style.fewShots.forEach { shot ->
-                if (SECOND_PERSON.containsMatchIn(shot.styled)) {
-                    assertTrue(
-                        SECOND_PERSON.containsMatchIn(shot.raw),
-                        "${style.id} few-shot output addresses a 'you' its input never did: ${shot.styled}",
-                    )
+        //
+        // ENC-105 exemption — marcus-aurelius ONLY, by Sean's design
+        // decision on that ticket: the Meditations are self-address
+        // by genre, commands a man writes to his own soul in a
+        // private notebook. A reflexive "you" there is not address
+        // to a listener — the speaker remains both author and
+        // addressee, which is what ENC-92 exists to protect. The
+        // exemption is guarded by the dedicated Marcus test below;
+        // every other style, Seneca and Aristotle included, stays
+        // under the full audit.
+        StyleCatalog.ALL
+            .filter { style -> style.id != "marcus-aurelius" }
+            .forEach { style ->
+                style.fewShots.forEach { shot ->
+                    if (SECOND_PERSON.containsMatchIn(shot.styled)) {
+                        assertTrue(
+                            SECOND_PERSON.containsMatchIn(shot.raw),
+                            "${style.id} few-shot output addresses a 'you' its input never did: ${shot.styled}",
+                        )
+                    }
                 }
             }
+    }
+
+    @Test
+    fun `marcus aurelius self-address is reflexive only`() {
+        // ENC-105's guard on the exemption above: the permission is
+        // real (at least one example must actually demonstrate the
+        // self-command texture, or the permission is dead text), and
+        // it is bounded — the permission is pinned in the
+        // instructions as address to the speaker's own soul, never a
+        // listener, and every output that uses "you" must keep the
+        // speaker himself present in the same entry (first person or
+        // reflexive), so the address can only read as a man speaking
+        // to himself.
+        val marcus = StyleCatalog.byId("marcus-aurelius")
+
+        assertTrue(
+            marcus.systemInstructions.contains("his own soul"),
+            "marcus lacks the self-address permission's grounding",
+        )
+        assertTrue(
+            marcus.systemInstructions.contains("never a listener"),
+            "marcus lacks the self-address permission's boundary",
+        )
+        val selfAddressed = marcus.fewShots.filter { shot -> SECOND_PERSON.containsMatchIn(shot.styled) }
+        assertTrue(selfAddressed.isNotEmpty(), "no marcus example demonstrates self-address")
+        selfAddressed.forEach { shot ->
+            assertTrue(
+                FIRST_PERSON.containsMatchIn(shot.styled) || REFLEXIVE.containsMatchIn(shot.styled),
+                "marcus self-address lost the speaker himself: ${shot.styled}",
+            )
         }
     }
 
@@ -290,6 +333,136 @@ class StyleCatalogTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `seneca carries his anchors and refuses the other two voices`() {
+        // ENC-105: the anchors are verified public-domain translation
+        // text, pinned verbatim — Gummere's Epistles 13.4 clause, and
+        // Stewart's On the Shortness of Life sentence (the ticket's
+        // candidate wording for the second proved to be Basore's
+        // rendering, not a named translator's, so Stewart's own
+        // sentence stands in its place). The prohibitions name the
+        // other two philosophers' signatures.
+        val seneca = StyleCatalog.byId("seneca")
+
+        assertTrue(
+            seneca.systemInstructions.contains("We suffer more often in imagination than in reality"),
+            "seneca lost the Gummere anchor",
+        )
+        assertTrue(
+            seneca.systemInstructions.contains(
+                "We do not receive a short life, but we make it a short one",
+            ),
+            "seneca lost the Stewart anchor",
+        )
+        assertTrue(
+            seneca.systemInstructions.contains("NEVER build a system"),
+            "seneca does not refuse Aristotle's system-building",
+        )
+        assertTrue(
+            seneca.systemInstructions.contains("NEVER retreat into clipped notebook commands"),
+            "seneca does not refuse Marcus's notebook privacy",
+        )
+        assertTrue(
+            seneca.systemInstructions.contains("transcript's own language"),
+            "seneca lacks the register-of-the-language directive",
+        )
+    }
+
+    @Test
+    fun `marcus aurelius carries his anchors and refuses the other two voices`() {
+        // ENC-105: both anchors are George Long's 1862 text verbatim
+        // (Meditations V.16 and XII.17). The popular 'soul becomes
+        // dyed with the colour of its thoughts' is NOT Long's
+        // wording and must never stand here dressed as his.
+        val marcus = StyleCatalog.byId("marcus-aurelius")
+
+        assertTrue(
+            marcus.systemInstructions.contains("for the soul is dyed by the thoughts"),
+            "marcus lost the Long dye anchor",
+        )
+        assertTrue(
+            marcus.systemInstructions.contains(
+                "If it is not right, do not do it; if it is not true, do not say it",
+            ),
+            "marcus lost the Long right-and-true anchor",
+        )
+        assertTrue(
+            !marcus.systemInstructions.contains("colour of its thoughts"),
+            "a non-Long paraphrase is standing in the marcus instructions as a quotation",
+        )
+        assertTrue(
+            marcus.systemInstructions.contains("NEVER write a letter"),
+            "marcus does not refuse Seneca's letter performance",
+        )
+        assertTrue(
+            marcus.systemInstructions.contains("NEVER define, distinguish kinds"),
+            "marcus does not refuse Aristotle's scaffolding",
+        )
+        assertTrue(
+            marcus.systemInstructions.contains("transcript's own language"),
+            "marcus lacks the register-of-the-language directive",
+        )
+    }
+
+    @Test
+    fun `aristotle carries his anchors and refuses the other two voices`() {
+        // ENC-105: both anchors are Jowett's Politics I.2 verbatim.
+        // The negative pin is the ticket's quote rule made testable:
+        // Will Durant's summary ('we are what we repeatedly do')
+        // is not Aristotle's text and must never appear.
+        val aristotle = StyleCatalog.byId("aristotle")
+
+        assertTrue(
+            aristotle.systemInstructions.contains("man is by nature a political animal"),
+            "aristotle lost the Jowett political-animal anchor",
+        )
+        assertTrue(
+            aristotle.systemInstructions.contains("makes nothing in vain"),
+            "aristotle lost the Jowett nothing-in-vain anchor",
+        )
+        assertTrue(
+            !aristotle.systemInstructions.contains("repeatedly do"),
+            "the Durant paraphrase is standing in the aristotle instructions",
+        )
+        assertTrue(
+            aristotle.systemInstructions.contains("NEVER moralize in aphorisms"),
+            "aristotle does not refuse Seneca's aphoristic heat",
+        )
+        assertTrue(
+            aristotle.systemInstructions.contains("NEVER command the self in terse notebook fragments"),
+            "aristotle does not refuse Marcus's notebook fragments",
+        )
+        assertTrue(
+            aristotle.systemInstructions.contains("transcript's own language"),
+            "aristotle lacks the register-of-the-language directive",
+        )
+    }
+
+    @Test
+    fun `the three philosophers are minimal triples over the same dictations`() {
+        // ENC-105: Seneca, Marcus Aurelius, and Aristotle each restyle
+        // the SAME four source dictations, so the three textures —
+        // letter, notebook, lecture — are visible side by side in
+        // the examples, not merely asserted in the instructions.
+        val seneca = StyleCatalog.byId("seneca")
+        val marcus = StyleCatalog.byId("marcus-aurelius")
+        val aristotle = StyleCatalog.byId("aristotle")
+
+        listOf(seneca, marcus, aristotle).forEach { style ->
+            assertTrue(style.fewShots.size >= 3, "${style.id} has fewer than three few-shots")
+        }
+        assertEquals(
+            seneca.fewShots.map { shot -> shot.raw },
+            marcus.fewShots.map { shot -> shot.raw },
+            "seneca and marcus no longer share their source dictations",
+        )
+        assertEquals(
+            seneca.fewShots.map { shot -> shot.raw },
+            aristotle.fewShots.map { shot -> shot.raw },
+            "seneca and aristotle no longer share their source dictations",
+        )
     }
 
     @Test
@@ -320,5 +493,9 @@ class StyleCatalogTest {
         /** First-person pronouns — the speaker's own voice, which a restyle must preserve (ENC-92). */
         val FIRST_PERSON: Regex =
             Regex("""\b(i|i'm|i've|i'll|i'd|my|me|mine|we|our|ours|us)\b""", RegexOption.IGNORE_CASE)
+
+        /** Reflexives — the speaker turned back on himself, Marcus's notebook posture (ENC-105). */
+        val REFLEXIVE: Regex =
+            Regex("""\b(myself|yourself|himself|itself|oneself)\b""", RegexOption.IGNORE_CASE)
     }
 }
