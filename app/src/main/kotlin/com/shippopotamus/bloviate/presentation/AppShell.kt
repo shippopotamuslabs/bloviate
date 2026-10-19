@@ -93,7 +93,7 @@ fun AppShell(
                 MainTab.DICTIONARY -> dictionaryContent()
             }
         }
-        NavigationBar {
+        NavigationBar(containerColor = BloviateColors.extended.bgSubtle) {
             MainTab.entries.forEach { tab ->
                 val label = stringResource(tab.labelRes())
                 NavigationBarItem(
