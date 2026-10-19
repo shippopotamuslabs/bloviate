@@ -113,7 +113,7 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | Error | Danger-token flash/shake (theme semantic color, §1) |
 
 - RMS/waveform updates arrive via deferred lambda reads (`CODE_STYLE_RULES.md` §4.5) — the bubble must not recompose its whole tree per audio frame.
-- The processing pill **hugs its label** (ENC-89): Transcribing/Polishing carry no waveform and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording bar's wide skeleton. Width changes between states settle on a calm no-bounce spring; the Listening bar and the Done/Error bubbles keep the geometry above, unchanged.
+- The processing pill **hugs its label** (ENC-89): Transcribing/Polishing carry no waveform and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording bar's wide skeleton. Width-change motion is per-transition (ENC-93): the recording-start expansion (bubble → Listening) snaps on a high-stiffness no-bounce spring, complete inside ~0.5 s; every other width change — into the processing pill, to the Done/Error bubbles, back to idle — settles on the calm no-bounce spring. The Listening bar and the Done/Error bubbles keep the geometry above, unchanged.
 - Touch targets ≥ 48.dp. The bubble must remain fully on-screen after drag, rotation, and fold/unfold.
 - Dismiss (drag to bottom) is a visual state too: the bubble shrinks toward the dismiss zone while dragging.
 
