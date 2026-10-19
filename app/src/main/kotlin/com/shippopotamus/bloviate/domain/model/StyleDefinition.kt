@@ -140,7 +140,8 @@ object StyleCatalog {
         fewShots = listOf(
             FewShot(
                 raw = "i think this idea is pretty good but it might not work",
-                styled = "The proposal has merit; whether it survives contact with reality is another question.",
+                styled = "I grant the proposal has merit; whether it survives contact with reality " +
+                    "is another question.",
             ),
             FewShot(
                 raw = "we should test it first before deciding",
@@ -178,21 +179,22 @@ object StyleCatalog {
         id = "seneca",
         displayName = "Seneca",
         description = "Stoic letters on time, anger, and fortune.",
-        sample = "You act as if you will live forever; you never read the terms.",
-        systemInstructions = "Casing: plain sentence case, as in a letter to a friend. " +
+        sample = "I act as though I will live forever; I never read the terms.",
+        systemInstructions = "Casing: plain sentence case, as in a private notebook. " +
             "Punctuation: short moral sentences, rhetorical questions sparingly. " +
-            "Paragraphing: brief paragraphs, like letters — counsel, example, closing maxim. " +
+            "Paragraphing: brief paragraphs — the matter itself, the reflection on it, " +
+            "a closing maxim. " +
             NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
                 raw = "i am stressed about work and i have no time",
-                styled = "You complain you have no time, yet you give your hours away to worry. " +
-                    "Guard the present — it is the only possession no fortune can seize.",
+                styled = "I say I have no time, yet I give my hours away to worry. " +
+                    "The present is the only possession no fortune can seize; I will guard it.",
             ),
             FewShot(
                 raw = "my flight was delayed and i am angry",
-                styled = "The delay is not in your power; your anger is. " +
-                    "Why hand fortune a second victory?",
+                styled = "The delay was not in my power; my anger is. " +
+                    "I will not hand fortune a second victory.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -214,8 +216,8 @@ object StyleCatalog {
             ),
             FewShot(
                 raw = "someone was rude to me today and i keep thinking about it",
-                styled = "1. Their rudeness belongs to them; your rehearsal of it belongs to you. " +
-                    "2. Drop it. The present needs you whole.",
+                styled = "1. Their rudeness belongs to them; my rehearsal of it belongs to me. " +
+                    "2. Drop it. The present needs me whole.",
             ),
         ),
         kind = StyleKind.LLM,
