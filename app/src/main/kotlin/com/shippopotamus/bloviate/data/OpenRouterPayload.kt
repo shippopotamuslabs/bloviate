@@ -11,8 +11,10 @@ import com.shippopotamus.bloviate.domain.evaluator.PromptMessage
  * escaper plus a minimal string-value extractor keeps every branch of
  * this file honestly unit-testable. What was ported from Enclave's
  * OpenRouter shape: the endpoint path, Bearer auth, and the
- * model/messages payload. What changed: no OpenAI SDK, no tools, no
- * streaming — one single-shot `messages` array with a low temperature.
+ * model/messages payload. What changed: no OpenAI SDK, no tools — one
+ * `messages` array with a low temperature, consumed as an SSE stream
+ * since ENC-81 (ENC-73's single-shot response extractor went with the
+ * single-shot client it served).
  */
 object OpenRouterPayload {
 
@@ -59,7 +61,8 @@ object OpenRouterPayload {
      * Builds the chat-completions request body for [model] and [prompt].
      * When [providerOrder] is given, a `provider` routing block is
      * appended (ENC-80): try those provider slugs in order,
-     * `allow_fallbacks` on, minus any [providerIgnore] slugs.
+     * `allow_fallbacks` on, minus any [providerIgnore] slugs. [stream]
+     * asks for the SSE form (ENC-81); the client always sets it.
      */
     fun buildChatRequest(
         model: String,
@@ -69,20 +72,33 @@ object OpenRouterPayload {
         maxTokens: Int = MAX_TOKENS,
         providerOrder: List<String>? = null,
         providerIgnore: List<String> = emptyList(),
+        stream: Boolean = false,
     ): String =
         "{\"model\":" + escape(model) +
             ",\"temperature\":" + temperature +
             ",\"max_tokens\":" + maxTokens +
             ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]" +
+            (if (stream) ",\"stream\":true" else "") +
             providerJson(providerOrder, providerIgnore) + "}"
 
-    /** Extracts `choices[0].message.content` from a response body, or null. */
-    fun extractAssistantContent(body: String): String? {
-        val choicesIndex = findKey(body, "choices", 0) ?: return null
-        val messageIndex = findKey(body, "message", choicesIndex) ?: return null
-        val contentIndex = findKey(body, "content", messageIndex) ?: return null
-        return readStringValue(body, contentIndex)
+    /**
+     * Extracts `choices[0].delta.content` from one streamed chunk (the
+     * JSON after an SSE `data:` prefix), or null when the chunk carries
+     * no text (role-only openers, usage-only closers) (ENC-81).
+     */
+    fun extractStreamDelta(data: String): String? {
+        val choicesIndex = findKey(data, "choices", 0) ?: return null
+        val deltaIndex = findKey(data, "delta", choicesIndex) ?: return null
+        val contentIndex = findKey(data, "content", deltaIndex) ?: return null
+        return readStringValue(data, contentIndex)
     }
+
+    /**
+     * Whether one streamed chunk is an error payload rather than a
+     * completion chunk — OpenRouter can commit a 200 stream and still
+     * deliver `{"error": ...}` mid-stream (ENC-81).
+     */
+    fun isStreamError(data: String): Boolean = findKey(data, "error", 0) != null
 
     /**
      * Extracts the top-level `provider` OpenRouter stamps on a response
