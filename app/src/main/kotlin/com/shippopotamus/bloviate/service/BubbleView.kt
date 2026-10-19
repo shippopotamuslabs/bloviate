@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.service
 
-import android.content.res.Configuration
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,7 +12,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
@@ -26,8 +24,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +59,8 @@ import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
+import com.shippopotamus.bloviate.presentation.BloviateColors
+import com.shippopotamus.bloviate.presentation.BloviateTheme
 import kotlin.math.hypot
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -525,13 +523,14 @@ private fun ShimmerText(
 @Composable
 private fun DoneBubble(modifier: Modifier = Modifier) {
     val description = stringResource(R.string.bubble_done_description)
+    val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
             .size(BUBBLE_SIZE)
             .semantics { contentDescription = description },
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
+        color = semantic.success,
+        contentColor = semantic.onSuccess,
         shadowElevation = BUBBLE_ELEVATION,
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -547,13 +546,14 @@ private fun DoneBubble(modifier: Modifier = Modifier) {
 @Composable
 private fun ErrorBubble(modifier: Modifier = Modifier) {
     val description = stringResource(R.string.bubble_error_description)
+    val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
             .size(BUBBLE_SIZE)
             .semantics { contentDescription = description },
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.error,
-        contentColor = MaterialTheme.colorScheme.onError,
+        color = semantic.danger,
+        contentColor = semantic.onDanger,
         shadowElevation = BUBBLE_ELEVATION,
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -710,12 +710,7 @@ private fun finishBarGesture(
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Idle - Light", showBackground = true)
-@Preview(
-    name = "Idle - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Idle", showBackground = true)
 @Composable
 private fun BubbleContentIdlePreview() {
     PreviewTheme {
@@ -728,12 +723,7 @@ private fun BubbleContentIdlePreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Dismiss zone - Light", showBackground = true)
-@Preview(
-    name = "Dismiss zone - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Dismiss zone", showBackground = true)
 @Composable
 private fun BubbleContentDismissZonePreview() {
     PreviewTheme {
@@ -746,12 +736,7 @@ private fun BubbleContentDismissZonePreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Recording - Light", showBackground = true)
-@Preview(
-    name = "Recording - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Recording", showBackground = true)
 @Composable
 private fun BubbleContentRecordingPreview() {
     PreviewTheme {
@@ -764,12 +749,7 @@ private fun BubbleContentRecordingPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Transcribing - Light", showBackground = true)
-@Preview(
-    name = "Transcribing - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Transcribing", showBackground = true)
 @Composable
 private fun BubbleContentTranscribingPreview() {
     PreviewTheme {
@@ -782,12 +762,7 @@ private fun BubbleContentTranscribingPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Polishing - Light", showBackground = true)
-@Preview(
-    name = "Polishing - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Polishing", showBackground = true)
 @Composable
 private fun BubbleContentPolishingPreview() {
     PreviewTheme {
@@ -800,12 +775,7 @@ private fun BubbleContentPolishingPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Done - Light", showBackground = true)
-@Preview(
-    name = "Done - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Done", showBackground = true)
 @Composable
 private fun BubbleContentDonePreview() {
     PreviewTheme {
@@ -818,12 +788,7 @@ private fun BubbleContentDonePreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Error - Light", showBackground = true)
-@Preview(
-    name = "Error - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Error", showBackground = true)
 @Composable
 private fun BubbleContentErrorPreview() {
     PreviewTheme {
@@ -840,8 +805,5 @@ private val PREVIEW_LEVELS: List<Float> =
 
 @Composable
 private fun PreviewTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-        content = content,
-    )
+    BloviateTheme(content = content)
 }

@@ -15,19 +15,20 @@ import androidx.compose.ui.unit.dp
 /**
  * Semantic tone for status surfaces across the dashboard screens
  * (ENC-75): a status is a word on a colored chip, never a sentence.
- * Tones map onto theme roles so screens never pick colors themselves.
+ * Tones resolve to the canonical palette's semantic colors (ENC-85) so
+ * screens never pick colors themselves.
  */
 enum class StatusTone {
-    /** Working / granted / ready — the green. */
+    /** Working / granted / ready — the success green. */
     POSITIVE,
 
     /** Informational, nothing to do — the gray. */
     NEUTRAL,
 
-    /** Blocked or failed; the user's next action lives here. */
+    /** Blocked until the user acts; the next action lives here — warning amber. */
     ATTENTION,
 
-    /** Brand-tinted informational (e.g. "applied everywhere"). */
+    /** Informational brand note (e.g. "applied everywhere") — info sky. */
     ACCENT,
 }
 
@@ -35,25 +36,27 @@ enum class StatusTone {
 internal data class StatusColors(val container: Color, val content: Color)
 
 @Composable
-internal fun StatusTone.colors(): StatusColors =
-    when (this) {
+internal fun StatusTone.colors(): StatusColors {
+    val semantic = BloviateColors.extended.semantic
+    return when (this) {
         StatusTone.POSITIVE -> StatusColors(
-            container = MaterialTheme.colorScheme.tertiaryContainer,
-            content = MaterialTheme.colorScheme.onTertiaryContainer,
+            container = semantic.successContainer,
+            content = semantic.success,
         )
         StatusTone.NEUTRAL -> StatusColors(
             container = MaterialTheme.colorScheme.surfaceVariant,
             content = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         StatusTone.ATTENTION -> StatusColors(
-            container = MaterialTheme.colorScheme.errorContainer,
-            content = MaterialTheme.colorScheme.onErrorContainer,
+            container = semantic.warningContainer,
+            content = semantic.warning,
         )
         StatusTone.ACCENT -> StatusColors(
-            container = MaterialTheme.colorScheme.primaryContainer,
-            content = MaterialTheme.colorScheme.onPrimaryContainer,
+            container = semantic.infoContainer,
+            content = semantic.info,
         )
     }
+}
 
 /** A compact status word in a rounded chip — the dashboard's unit of state (ENC-75). */
 @Composable
