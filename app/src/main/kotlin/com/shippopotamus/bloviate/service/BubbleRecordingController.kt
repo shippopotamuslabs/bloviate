@@ -382,7 +382,8 @@ class BubbleRecordingController(
             }
             Log.d(
                 TAG,
-                "style id=${styled.styleId} llmMs=${styled.llmMs ?: "-"} fellBack=${styled.fellBack}",
+                "style id=${styled.styleId} llmMs=${styled.llmMs ?: "-"} fellBack=${styled.fellBack}" +
+                    " reason=${styled.fellBackReason ?: "-"} styledChars=${styled.text.length}",
             )
             val cleaned = styled.text
             if (cleaned.isBlank()) {
