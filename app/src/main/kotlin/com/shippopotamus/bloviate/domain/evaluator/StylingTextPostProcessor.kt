@@ -19,6 +19,10 @@ data class StyleProcessResult(
     val fellBack: Boolean,
     /** Why the LLM pass fell back (ENC-83 telemetry); null when it did not run or succeeded. */
     val fellBackReason: String? = null,
+    /** The model that answered the LLM pass (ENC-80 telemetry); null when it did not run. */
+    val model: String? = null,
+    /** The OpenRouter upstream that served the pass (ENC-80 telemetry); null when unknown. */
+    val provider: String? = null,
 )
 
 /**
@@ -68,6 +72,8 @@ class StylingTextPostProcessor @Inject constructor(
                 styleId = style.id,
                 llmMs = outcome.llmMs,
                 fellBack = false,
+                model = outcome.model,
+                provider = outcome.provider,
             )
             is LlmStyleOutcome.FellBack -> StyleProcessResult(
                 text = localText,
@@ -75,6 +81,8 @@ class StylingTextPostProcessor @Inject constructor(
                 llmMs = null,
                 fellBack = true,
                 fellBackReason = outcome.reason,
+                model = outcome.model,
+                provider = outcome.provider,
             )
         }
     }
