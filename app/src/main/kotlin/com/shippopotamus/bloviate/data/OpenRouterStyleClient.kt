@@ -62,6 +62,18 @@ import java.net.HttpURLConnection
  * thinks before it speaks, and a budget that cannot tell thinking
  * from death kills healthy calls — the server completes them, the
  * client has already fallen back.
+ *
+ * Reasoning control (ENC-94): ENC-91 taught the client to tolerate
+ * Grok's thinking; ENC-94 stops the thinking from being the problem.
+ * Every request carries OpenRouter's unified `reasoning` controls at
+ * effort low with a hard token cap (see
+ * [OpenRouterPayload.REASONING_EFFORT] for why "off" is not honored
+ * by Grok 4.7 and "exclude" saves no time), so a restyle's generation
+ * is content-dominated and the healthy path lands in seconds. The
+ * chain cap is re-tuned to that constrained profile, and the usage
+ * chunk's reasoning-token count is logged with each attempt's
+ * outcome, so a future blowout is visible in telemetry, not just in
+ * OpenRouter's dashboard.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -212,6 +224,7 @@ class OpenRouterStyleClient(
         return finish(
             content = assembly.content,
             provider = assembly.provider,
+            reasoningTokens = assembly.reasoningTokens,
             startedMs = startedMs,
             model = model,
             sourceText = sourceText,
@@ -237,6 +250,7 @@ class OpenRouterStyleClient(
     private suspend fun consumeLines(lines: Channel<String>): StreamAssembly {
         val content = StringBuilder()
         var provider: String? = null
+        var reasoningTokens: Int? = null
         var sawContent = false
         var sawReasoning = false
         while (true) {
@@ -250,7 +264,7 @@ class OpenRouterStyleClient(
                     if (sawContent) REASON_STREAM_STALL else REASON_FIRST_TOKEN_TIMEOUT,
                 )
             if (received.isClosed) {
-                return StreamAssembly(content = content.toString(), provider = provider)
+                return StreamAssembly(content = content.toString(), provider = provider, reasoningTokens = reasoningTokens)
             }
             val line = received.getOrThrow()
             val data = sseData(line)
@@ -258,16 +272,33 @@ class OpenRouterStyleClient(
                 val wholeBody = OpenRouterPayload.extractMessageContent(line)
                 if (wholeBody != null) {
                     provider = OpenRouterPayload.extractProvider(line) ?: provider
-                    return StreamAssembly(content = wholeBody, provider = provider, doneReceived = true)
+                    reasoningTokens = OpenRouterPayload.extractReasoningTokens(line) ?: reasoningTokens
+                    return StreamAssembly(
+                        content = wholeBody,
+                        provider = provider,
+                        doneReceived = true,
+                        reasoningTokens = reasoningTokens,
+                    )
                 }
                 continue
             }
             if (data == DONE_MARKER) {
-                return StreamAssembly(content = content.toString(), provider = provider, doneReceived = true)
+                return StreamAssembly(
+                    content = content.toString(),
+                    provider = provider,
+                    doneReceived = true,
+                    reasoningTokens = reasoningTokens,
+                )
             }
             provider = OpenRouterPayload.extractProvider(data) ?: provider
+            reasoningTokens = OpenRouterPayload.extractReasoningTokens(data) ?: reasoningTokens
             if (OpenRouterPayload.isStreamError(data)) {
-                return StreamAssembly(content = content.toString(), provider = provider, errorData = data)
+                return StreamAssembly(
+                    content = content.toString(),
+                    provider = provider,
+                    errorData = data,
+                    reasoningTokens = reasoningTokens,
+                )
             }
             if (OpenRouterPayload.extractReasoningDelta(data) != null) {
                 sawReasoning = true
@@ -314,13 +345,17 @@ class OpenRouterStyleClient(
     private fun finish(
         content: String,
         provider: String?,
+        reasoningTokens: Int?,
         startedMs: Long,
         model: String,
         sourceText: String,
     ): AttemptResult {
+        // ENC-94 telemetry: the reasoning spend rides every verdict's
+        // log line ("-" when the response reported no usage).
+        val reasoningLabel = reasoningTokens?.toString() ?: "-"
         val cleaned = cleaner.clean(content)
         if (cleaned.isBlank()) {
-            Log.d(TAG, "style attempt model=$model outcome=$REASON_EMPTY_RESPONSE")
+            Log.d(TAG, "style attempt model=$model outcome=$REASON_EMPTY_RESPONSE reasoningTokens=$reasoningLabel")
             return AttemptResult.Retry(reason = REASON_EMPTY_RESPONSE, provider = provider)
         }
         return when (StyleOutputGuard.classify(source = sourceText, styled = cleaned)) {
@@ -331,15 +366,19 @@ class OpenRouterStyleClient(
                     model = model,
                     provider = provider,
                 )
-                Log.d(TAG, "style attempt model=$model provider=${outcome.providerLabel()} outcome=${outcome.logLabel()}")
+                Log.d(
+                    TAG,
+                    "style attempt model=$model provider=${outcome.providerLabel()} " +
+                        "outcome=${outcome.logLabel()} reasoningTokens=$reasoningLabel",
+                )
                 AttemptResult.Done(outcome)
             }
             StyleOutputGuard.Verdict.REFUSAL -> {
-                Log.d(TAG, "style attempt model=$model outcome=$REASON_REFUSAL")
+                Log.d(TAG, "style attempt model=$model outcome=$REASON_REFUSAL reasoningTokens=$reasoningLabel")
                 AttemptResult.Retry(reason = REASON_REFUSAL, provider = provider)
             }
             StyleOutputGuard.Verdict.FIDELITY_LOSS -> {
-                Log.d(TAG, "style attempt model=$model outcome=$REASON_FIDELITY")
+                Log.d(TAG, "style attempt model=$model outcome=$REASON_FIDELITY reasoningTokens=$reasoningLabel")
                 AttemptResult.Retry(reason = REASON_FIDELITY, provider = provider)
             }
         }
@@ -371,6 +410,8 @@ class OpenRouterStyleClient(
         val provider: String?,
         val doneReceived: Boolean = false,
         val errorData: String? = null,
+        /** Reasoning tokens the response's usage reported, when it reported any (ENC-94). */
+        val reasoningTokens: Int? = null,
     )
 
     /** A liveness budget expired mid-stream; [reason] is the telemetry code. */
@@ -386,7 +427,7 @@ class OpenRouterStyleClient(
          * reasoning model's time-to-first-token routinely exceeds it
          * on a phone — so the healthy attempt was declared dead while
          * the server completed it. 6s still fails a truly dead route
-         * fast against the 20s chain cap.
+         * fast against the chain cap.
          */
         const val FIRST_TOKEN_TIMEOUT_MS: Long = 6_000L
 
@@ -401,8 +442,22 @@ class OpenRouterStyleClient(
         /** Time a stream may go silent between tokens before it is declared dead (ENC-81). */
         const val TOKEN_GAP_TIMEOUT_MS: Long = 2_000L
 
-        /** Generous absolute backstop for the whole chain — only a pathological stream reaches it. */
-        const val ABSOLUTE_CAP_MS: Long = 20_000L
+        /**
+         * Absolute backstop for the whole chain, re-tuned in ENC-94
+         * to the reasoning-constrained profile (the 20s ENC-81 value
+         * was sized for unconstrained generation — and still lost to
+         * a 41s Grok generation). The constrained healthy path: ~0.5s
+         * routing/connect, reasoning capped at
+         * [OpenRouterPayload.REASONING_MAX_TOKENS] (in practice near
+         * zero at low effort on a surface transform), then content at
+         * the ~150 tok/s rate observed in the ENC-83/91 evidence —
+         * a long ~700-token restyle lands in ~5–6s end to end. The
+         * slowest legitimate chain is two full liveness deaths
+         * (2 × [FIRST_TOKEN_TIMEOUT_MS] = 12s), so 14s leaves headroom
+         * over that while a pathological stream still dies young.
+         * Only a pathological stream reaches it.
+         */
+        const val ABSOLUTE_CAP_MS: Long = 14_000L
 
         const val REASON_NO_KEY: String = "no-key"
         const val REASON_TIMEOUT: String = "timeout"

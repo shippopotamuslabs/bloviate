@@ -54,6 +54,19 @@ class StyleHttpTransportTimeoutTest {
     }
 
     @Test
+    fun `the chain cap fits two full first-token budgets with headroom`() {
+        // ENC-94: the cap is sized from the constrained profile, and
+        // the slowest legitimate chain is two full liveness deaths —
+        // the cap must clear both, or the fallback's own death gets
+        // reported as a chain timeout instead of its real reason.
+        assertTrue(
+            OpenRouterStyleClient.ABSOLUTE_CAP_MS > 2 * OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS,
+            "chain cap ${OpenRouterStyleClient.ABSOLUTE_CAP_MS}ms would swallow " +
+                "the second attempt's ${OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS}ms first-token death",
+        )
+    }
+
+    @Test
     fun `the connect timeout stays the shorter backstop`() {
         assertTrue(
             HttpURLConnectionStyleTransport.CONNECT_TIMEOUT_MS <
