@@ -15,10 +15,7 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import com.shippopotamus.bloviate.presentation.BloviateTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
@@ -333,9 +330,9 @@ class BubbleOverlayService : Service() {
             inDismissZone = inDismissZone,
         )
         view.setContent {
-            MaterialTheme(
-                colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-            ) {
+            // The overlay wears the same canonical palette as the app
+            // (ENC-85): one fixed dark scheme, no system-theme branch.
+            BloviateTheme {
                 BubbleContent(
                     barState = barStateSnapshot.value,
                     waveformLevels = controller.waveform::levels,
