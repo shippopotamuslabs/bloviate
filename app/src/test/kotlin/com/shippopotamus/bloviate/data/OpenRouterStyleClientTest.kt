@@ -138,6 +138,27 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `the chain attempts grok latest first and haiku second`() = runTest {
+        // ENC-84: literal chain order — Grok alias, then Haiku, then local.
+        fakeTransport.handler = { callIndex, requestJson ->
+            if (callIndex == 0) {
+                assertTrue(requestJson.contains("~x-ai/grok-latest"))
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                assertTrue(requestJson.contains("anthropic/claude-haiku-5.5"))
+                HttpResult(status = 200, body = assistantBody("Haiku polish."))
+            }
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals("Haiku polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.requests.size)
+        assertTrue(fakeTransport.requests[0].contains("~x-ai/grok-latest"))
+        assertTrue(fakeTransport.requests[1].contains("anthropic/claude-haiku-5.5"))
+    }
+
+    @Test
     fun `two missing models fall back`() = runTest {
         fakeTransport.handler = { _, _ -> HttpResult(status = 404, body = "model not found") }
 
