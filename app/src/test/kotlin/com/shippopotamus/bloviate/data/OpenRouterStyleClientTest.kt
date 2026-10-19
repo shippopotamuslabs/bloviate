@@ -7,6 +7,8 @@ import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeStyleHttpTransport
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -19,20 +21,25 @@ class OpenRouterStyleClientTest {
     private val fakeTransport = FakeStyleHttpTransport()
     private val fakeKeys = FakeApiKeyPort(initialKey = "test-key")
     private var nowMs = 1_000L
-    private val client = OpenRouterStyleClient(
+
+    /** The producer side gets a test dispatcher so stream timing is virtual and deterministic. */
+    private fun newClient(producerDispatcher: CoroutineDispatcher) = OpenRouterStyleClient(
         transport = fakeTransport,
         prompts = StylePromptBuilder(),
         cleaner = LlmResponseCleaner(),
         apiKeys = fakeKeys,
         clock = { nowMs },
+        producerDispatcher = producerDispatcher,
     )
 
     @Test
-    fun `success parses the answer and reports the elapsed time`() = runTest {
-        fakeTransport.handler = { _, _ ->
+    fun `success assembles the chunked answer and reports the elapsed time`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
             // The network takes 800ms on the injected clock.
             nowMs = 1_800L
-            HttpResult(status = 200, body = assistantBody("Polished text."))
+            emitStream(emit, parts = listOf("Polished ", "text."))
+            HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = "raw words")
@@ -43,9 +50,11 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a preamble in the answer is stripped before returning`() = runTest {
-        fakeTransport.handler = { _, _ ->
-            HttpResult(status = 200, body = assistantBody("Here is the rewrite:\\nPolished text."))
+    fun `a preamble in the assembled answer is stripped before returning`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf("Here is the rewrite:\nPolished text."))
+            HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = "raw words")
@@ -55,6 +64,7 @@ class OpenRouterStyleClientTest {
 
     @Test
     fun `no key falls back without any http call`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
         fakeKeys.setKey(null)
 
         val outcome = client.style(style = professional, text = "raw words")
@@ -65,6 +75,8 @@ class OpenRouterStyleClientTest {
 
     @Test
     fun `blank text passes through without any http call`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+
         val outcome = client.style(style = professional, text = "   ")
 
         assertEquals(LlmStyleOutcome.Styled(text = "   ", llmMs = 0L), outcome)
@@ -73,7 +85,8 @@ class OpenRouterStyleClientTest {
 
     @Test
     fun `a server error falls back with its status`() = runTest {
-        fakeTransport.handler = { _, _ -> HttpResult(status = 500, body = "boom") }
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, _ -> HttpResult(status = 500, body = "boom") }
 
         val outcome = client.style(style = professional, text = "raw words")
 
@@ -85,10 +98,12 @@ class OpenRouterStyleClientTest {
 
     @Test
     fun `the responding provider is surfaced on success`() = runTest {
-        // ENC-80: OpenRouter stamps the serving upstream on the response;
-        // telemetry carries it so instability is visible from logcat.
-        fakeTransport.handler = { _, _ ->
-            HttpResult(status = 200, body = assistantBody("Polished text.", provider = "xAI"))
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-80: streamed chunks carry the serving upstream; telemetry
+        // surfaces it so instability is visible from logcat.
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf("Polished text."), provider = "xAI")
+            HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = "raw words")
@@ -100,7 +115,8 @@ class OpenRouterStyleClientTest {
 
     @Test
     fun `the responding provider is surfaced on an http failure`() = runTest {
-        fakeTransport.handler = { _, _ ->
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, _ ->
             HttpResult(status = 500, body = "{\"provider\":\"Claude Platform on AWS\",\"error\":{}}")
         }
 
@@ -112,19 +128,21 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `each attempt pins its provider routing`() = runTest {
-        // ENC-80: primary pins the xAI family; the Haiku retry prefers
-        // Anthropic first-party and ignores Claude Platform on AWS.
-        fakeTransport.handler = { callIndex, _ ->
+    fun `each attempt pins its provider routing and requests the stream`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-80 pins + ENC-81 streaming, asserted on the recorded bodies.
+        fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
             } else {
-                HttpResult(status = 200, body = assistantBody("Fallback polish."))
+                emitStream(emit, parts = listOf("Fallback polish."))
+                HttpResult(status = 200, body = "")
             }
         }
 
         client.style(style = professional, text = "raw words")
 
+        assertTrue(fakeTransport.requests[0].contains("\"stream\":true"))
         assertTrue(fakeTransport.requests[0].contains("\"provider\":{\"order\":[\"xai\"],\"allow_fallbacks\":true}"))
         assertTrue(
             fakeTransport.requests[1].contains(
@@ -134,72 +152,17 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a slow call inside the hard cap still succeeds`() = runTest {
-        // ENC-83 regression: real OpenRouter generations take 3.3-4.0s
-        // server-side. A call that lands inside the client's 4s cap must
-        // succeed — the old failure was the transport's 2.5s socket read
-        // timeout pre-empting this cap (pinned in StyleHttpTransportTimeoutTest).
-        fakeTransport.handler = { _, _ ->
-            delay(SLOW_IN_BUDGET_MS)
-            HttpResult(status = 200, body = assistantBody("Slow polish."))
-        }
-
-        val outcome = client.style(style = professional, text = "raw words")
-
-        assertEquals("Slow polish.", (outcome as LlmStyleOutcome.Styled).text)
-    }
-
-    @Test
-    fun `a hung call falls back on the hard timeout`() = runTest {
-        fakeTransport.handler = { _, _ ->
-            delay(HUNG_CALL_MS)
-            HttpResult(status = 200, body = assistantBody("Too late."))
-        }
-
-        val outcome = client.style(style = professional, text = "raw words")
-
-        assertEquals(LlmStyleOutcome.FellBack(reason = "timeout"), outcome)
-    }
-
-    @Test
-    fun `a transport exception falls back`() = runTest {
-        fakeTransport.handler = { _, _ -> throw IOException("network down") }
-
-        val outcome = client.style(style = professional, text = "raw words")
-
-        assertEquals(LlmStyleOutcome.FellBack(reason = "transport-error"), outcome)
-    }
-
-    @Test
-    fun `a missing primary model retries the fallback model once`() = runTest {
-        fakeTransport.handler = { callIndex, requestJson ->
-            if (callIndex == 0) {
-                // The first request must name the primary model...
-                assertTrue(requestJson.contains(OpenRouterPayload.PRIMARY_MODEL))
-                HttpResult(status = 404, body = "model not found")
-            } else {
-                // ...and the single retry must name the fallback.
-                assertTrue(requestJson.contains(OpenRouterPayload.FALLBACK_MODEL))
-                HttpResult(status = 200, body = assistantBody("Fallback polish."))
-            }
-        }
-
-        val outcome = client.style(style = professional, text = "raw words")
-
-        assertEquals("Fallback polish.", (outcome as LlmStyleOutcome.Styled).text)
-        assertEquals(2, fakeTransport.keylessCallCount)
-    }
-
-    @Test
     fun `the chain attempts grok latest first and haiku second`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-84: literal chain order — Grok alias, then Haiku, then local.
-        fakeTransport.handler = { callIndex, requestJson ->
+        fakeTransport.handler = { callIndex, requestJson, emit ->
             if (callIndex == 0) {
                 assertTrue(requestJson.contains("~x-ai/grok-latest"))
                 HttpResult(status = 404, body = "model not found")
             } else {
                 assertTrue(requestJson.contains("anthropic/claude-haiku-5.5"))
-                HttpResult(status = 200, body = assistantBody("Haiku polish."))
+                emitStream(emit, parts = listOf("Haiku polish."))
+                HttpResult(status = 200, body = "")
             }
         }
 
@@ -212,8 +175,29 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `a missing primary model retries the fallback model once`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { callIndex, requestJson, emit ->
+            if (callIndex == 0) {
+                assertTrue(requestJson.contains(OpenRouterPayload.PRIMARY_MODEL))
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                assertTrue(requestJson.contains(OpenRouterPayload.FALLBACK_MODEL))
+                emitStream(emit, parts = listOf("Fallback polish."))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals("Fallback polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
     fun `two missing models fall back`() = runTest {
-        fakeTransport.handler = { _, _ -> HttpResult(status = 404, body = "model not found") }
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, _ -> HttpResult(status = 404, body = "model not found") }
 
         val outcome = client.style(style = professional, text = "raw words")
 
@@ -225,20 +209,141 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `an unparseable success body falls back`() = runTest {
-        fakeTransport.handler = { _, _ -> HttpResult(status = 200, body = "{\"error\":true}") }
+    fun `a long stream with steady tokens succeeds past the old total cap`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-81's money test (and ENC-83's regression in streamed form):
+        // tokens keep arriving inside the gap budget for ~6s of virtual
+        // time — past the old 4s total cap AND the old 2.5s socket
+        // budget — and the call must succeed. Liveness, not total time.
+        fakeTransport.handler = { _, _, emit ->
+            emit(chunk("Long "))
+            repeat(3) {
+                delay(TRICKLE_GAP_MS)
+                emit(chunk("polish "))
+            }
+            delay(TRICKLE_GAP_MS)
+            emit(chunk("done."))
+            emit(DONE_LINE)
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals("Long polish polish polish done.", (outcome as LlmStyleOutcome.Styled).text)
+    }
+
+    @Test
+    fun `a stream that never starts falls back on the first token budget`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // Both models stay silent past the first-token budget: the chain
+        // gives up with the liveness reason, not after the absolute cap.
+        fakeTransport.handler = { _, _, _ ->
+            delay(NEVER_STARTS_MS)
+            HttpResult(status = 200, body = "")
+        }
 
         val outcome = client.style(style = professional, text = "raw words")
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "bad-response", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "first-token-timeout", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a mid-stream stall retries the fallback model`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(chunk("Partial "))
+                delay(NEVER_STARTS_MS)
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf("Recovered polish."))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        // The fragment from the stalled stream is never used (atomicity).
+        assertEquals("Recovered polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a mid-stream stall on both models falls back as a stall`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
+            emit(chunk("Partial "))
+            delay(NEVER_STARTS_MS)
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "stream-stall", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
     }
 
     @Test
-    fun `an empty answer after cleaning falls back`() = runTest {
-        fakeTransport.handler = { _, _ -> HttpResult(status = 200, body = assistantBody("```\\n```")) }
+    fun `an error payload mid-stream is a failure, never content`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
+            emit(chunk("Partial "))
+            emit("data: {\"error\":{\"message\":\"provider exploded\",\"code\":500}}")
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "stream-error", model = OpenRouterPayload.PRIMARY_MODEL),
+            outcome,
+        )
+        assertEquals(1, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a model-unavailable stream error retries the fallback model`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit("data: {\"error\":{\"message\":\"Model not found\",\"code\":404}}")
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf("Fallback polish."))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals("Fallback polish.", (outcome as LlmStyleOutcome.Styled).text)
+    }
+
+    @Test
+    fun `a transport exception falls back`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, _ -> throw IOException("network down") }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals(LlmStyleOutcome.FellBack(reason = "transport-error"), outcome)
+    }
+
+    @Test
+    fun `a stream with no content falls back as an empty response`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // A 200 stream that delivers no tokens at all (the streamed form
+        // of the old unparseable-body case) is an empty response.
+        fakeTransport.handler = { _, _, emit ->
+            emit(DONE_LINE)
+            HttpResult(status = 200, body = "")
+        }
 
         val outcome = client.style(style = professional, text = "raw words")
 
@@ -248,14 +353,28 @@ class OpenRouterStyleClientTest {
         )
     }
 
-    private fun assistantBody(content: String, provider: String? = null): String {
+    /** One SSE chunk line carrying [content] (and optionally the serving [provider]). */
+    private fun chunk(content: String, provider: String? = null): String {
         val providerField = if (provider == null) "" else "\"provider\":\"" + provider + "\","
-        return "{" + providerField +
-            "\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"}}]}"
+        return "data: {" + providerField +
+            "\"choices\":[{\"delta\":{\"content\":" + OpenRouterPayload.escape(content) + "}}]}"
+    }
+
+    /** Emits [parts] as chunks, then the [DONE] terminator. */
+    private suspend fun emitStream(
+        emit: suspend (String) -> Unit,
+        parts: List<String>,
+        provider: String? = null,
+    ) {
+        parts.forEachIndexed { index, part ->
+            emit(chunk(part, provider = if (index == 0) provider else null))
+        }
+        emit(DONE_LINE)
     }
 
     private companion object {
-        const val HUNG_CALL_MS: Long = 30_000L
-        const val SLOW_IN_BUDGET_MS: Long = 3_500L
+        const val DONE_LINE: String = "data: [DONE]"
+        const val TRICKLE_GAP_MS: Long = 1_500L
+        const val NEVER_STARTS_MS: Long = 30_000L
     }
 }
