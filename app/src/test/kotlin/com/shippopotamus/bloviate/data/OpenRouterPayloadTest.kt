@@ -13,31 +13,60 @@ class OpenRouterPayloadTest {
     private val user = PromptMessage(role = "user", content = "Say hi.")
 
     @Test
-    fun `the style chain is llama 3 3 then haiku 5 5 then local`() {
-        // ENC-96 (Sean, 2026-10-19): pinning the literal strings here
-        // is what makes an accidental slug edit a test failure instead
-        // of a silent behavior change.
-        assertEquals("meta-llama/llama-3.3-70b-instruct", OpenRouterPayload.PRIMARY_MODEL)
-        assertEquals("anthropic/claude-haiku-5.5", OpenRouterPayload.FALLBACK_MODEL)
+    fun `the style chain is gemini 3 1 flash lite then local`() {
+        // ENC-99 as revised (Sean, 2026-10-19): pinning the literal
+        // string here is what makes an accidental slug edit a test
+        // failure instead of a silent behavior change. There is no
+        // second model to pin: the fallback slot is deliberately
+        // empty pending Sean's call, so the chain is this slug,
+        // then the local text.
+        assertEquals("google/gemini-3.1-flash-lite", OpenRouterPayload.PRIMARY_MODEL)
     }
 
     @Test
-    fun `the demoted grok alias is retained for a future engine choice`() {
-        // ENC-96: Grok left the default chain over reasoning latency;
-        // its slug stays pinned so the demotion is a deliberate,
-        // visible state — not a deletion a revival would have to
-        // reconstruct from history.
+    fun `the demoted models are retained for a future engine choice`() {
+        // ENC-96/99: each demoted slug stays pinned so the demotion
+        // is a deliberate, visible state — not a deletion a revival
+        // would have to reconstruct from history. Grok (reasoning
+        // latency, ENC-96), Llama (ignored the transcript, ENC-99),
+        // Haiku (over-refusal / sanitisation, ENC-99).
         assertEquals("~x-ai/grok-latest", OpenRouterPayload.GROK_MODEL)
+        assertEquals("meta-llama/llama-3.3-70b-instruct", OpenRouterPayload.LLAMA_MODEL)
+        assertEquals("anthropic/claude-haiku-5.5", OpenRouterPayload.HAIKU_MODEL)
     }
 
     @Test
-    fun `the primary provider order is the fast silicon pool with groq at the head`() {
-        // ENC-96: slugs are the OpenRouter providers API's canonical
-        // values, verified live at implementation time — Groq first
-        // (Sean's pick), then SambaNova, Together, DeepInfra.
+    fun `the primary provider pool is the standard gemini endpoints latency sorted`() {
+        // ENC-99: endpoint tags are the OpenRouter endpoints API's
+        // values, verified live at implementation time (all at 100%
+        // 30-day uptime). The Flex tags (google-vertex/global/flex,
+        // google-ai-studio/flex) and the /priority tags are absent
+        // on purpose — an allow-list admits only what it names.
         assertEquals(
-            listOf("groq", "sambanova", "together", "deepinfra"),
-            OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
+            listOf("google-vertex/global", "google-ai-studio", "google-vertex/us", "google-vertex/eu"),
+            OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
+        )
+        assertEquals("latency", OpenRouterPayload.PRIMARY_PROVIDER_SORT)
+    }
+
+    @Test
+    fun `a request with an only list and a sort carries both in the provider block`() {
+        // ENC-99: the primary's exact wire shape — allow-list plus
+        // latency sort, fallbacks on within the list.
+        val request = OpenRouterPayload.buildChatRequest(
+            model = OpenRouterPayload.PRIMARY_MODEL,
+            system = system,
+            user = user,
+            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
+            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+        )
+
+        assertTrue(
+            request.contains(
+                "\"provider\":{\"allow_fallbacks\":true," +
+                    "\"only\":[\"google-vertex/global\",\"google-ai-studio\",\"google-vertex/us\",\"google-vertex/eu\"]," +
+                    "\"sort\":\"latency\"}",
+            ),
         )
     }
 
@@ -137,25 +166,29 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `the reasoning control pins to effort low`() {
-        // ENC-94/95: the shipped control value, pinned literally for
-        // the same reason as the model slugs — a silent edit here
-        // changes every style call's latency profile. Effort LOW
-        // because the alias's current model (Grok 4.7) does not honor
-        // "none" (Sean's ruling, ENC-94).
-        assertEquals("low", OpenRouterPayload.REASONING_EFFORT)
+    fun `the reasoning control pins to effort none`() {
+        // ENC-99: the shipped control value, pinned literally for the
+        // same reason as the model slugs — a silent edit here changes
+        // every style call's latency profile. "none" because the
+        // ENC-99 primary's own metadata lists it in supported_efforts
+        // with reasoning not mandatory (live-verified); ENC-94's
+        // effort "low" was the strongest control the then-primary
+        // (Grok 4.7) would honor, and it still thought ~1,000 tokens
+        // a call.
+        assertEquals("none", OpenRouterPayload.REASONING_EFFORT)
     }
 
     @Test
     fun `a request carries no reasoning control by default`() {
-        // ENC-96: the primary is a non-reasoning model, so the bare
-        // builder shape — what the chain's primary attempt sends —
-        // carries no reasoning block at all.
+        // The BUILDER's bare shape: no effort given, no block. The
+        // chain never sends this shape — its link passes the effort
+        // explicitly on every attempt (ENC-99).
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
-            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
+            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
+            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
         )
 
         assertFalse(request.contains("\"reasoning\""))
@@ -163,15 +196,16 @@ class OpenRouterPayloadTest {
 
     @Test
     fun `a request carries the reasoning control when an effort is given`() {
-        // The opt-in a future reasoning-model link would use (ENC-94/95).
+        // ENC-99: the chain's full-attempt shape — the primary with
+        // reasoning explicitly off.
         val request = OpenRouterPayload.buildChatRequest(
-            model = OpenRouterPayload.GROK_MODEL,
+            model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
             reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
         )
 
-        assertTrue(request.contains("\"reasoning\":{\"effort\":\"low\"}"))
+        assertTrue(request.contains("\"reasoning\":{\"effort\":\"none\"}"))
     }
 
     @Test
@@ -182,33 +216,36 @@ class OpenRouterPayloadTest {
         // 400-class errors on device. Whatever else changes, the two
         // must never ride together again.
         val request = OpenRouterPayload.buildChatRequest(
-            model = OpenRouterPayload.GROK_MODEL,
+            model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
             stream = true,
             reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
         )
 
-        assertFalse(request.contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\""))
+        assertFalse(request.contains("\"reasoning\":{\"effort\":\"none\",\"max_tokens\""))
         assertFalse(request.contains(",\"max_tokens\":512}"))
     }
 
     @Test
-    fun `a degraded request drops the reasoning block and stream options but still streams`() {
-        // ENC-95: the degraded retry's payload shape — the bare
-        // streamed request, with nothing optional left to reject.
+    fun `a degraded request drops stream options but keeps the reasoning control and still streams`() {
+        // ENC-99's degraded shape (ENC-95's mechanism, revised): the
+        // retry drops stream_options — the one purely-optional block —
+        // but KEEPS reasoning effort none. Dropping it would silently
+        // re-enable the primary's default reasoning on exactly the
+        // calls that already failed once.
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
             stream = true,
-            reasoningEffort = null,
+            reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
             includeUsage = false,
         )
 
         assertTrue(request.contains("\"stream\":true"))
         assertFalse(request.contains("\"stream_options\""))
-        assertFalse(request.contains("\"reasoning\""))
+        assertTrue(request.contains("\"reasoning\":{\"effort\":\"none\"}"))
     }
 
     @Test
