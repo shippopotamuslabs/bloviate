@@ -17,7 +17,7 @@ import com.shippopotamus.bloviate.domain.evaluator.PromptMessage
 object OpenRouterPayload {
 
     const val ENDPOINT_PATH: String = "https://openrouter.ai/api/v1/chat/completions"
-    const val PRIMARY_MODEL: String = "anthropic/claude-haiku-4.5"
+    const val PRIMARY_MODEL: String = "anthropic/claude-haiku-5.5"
     const val FALLBACK_MODEL: String = "google/gemini-2.5-flash-lite"
     const val TEMPERATURE: Double = 0.3
     const val MAX_TOKENS: Int = 1024
