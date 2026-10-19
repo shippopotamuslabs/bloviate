@@ -1,5 +1,5 @@
 # UI_DESIGN_SPEC.md
-**Bloviate – UI Design Contract v1.2**
+**Bloviate – UI Design Contract v1.3**
 (Adapted from Enclave `UI_DESIGN_SPEC.md` v2.6 — its theme-token, preview, and rigor rules; Enclave's product-specific theme families and chat shapes do not apply here.)
 
 > **v1.1 amendment (2026-10-19, ENC-75, under the user's explicit direction):**
@@ -19,6 +19,19 @@
 > longer follows the system theme), and the semantic colors are theme
 > tokens — the former hard-coded-error-color exception is retired.
 
+> **v1.3 amendment (2026-10-19, ENC-86, under the user's explicit
+> direction — his Contract Waiver for this edit):** the app's spacing,
+> shapes, typography, elevation, component defaults, and motion now
+> follow the **Shippopotamus Compose Gospel**, declared canonical for
+> Bloviate / Stratum / Enclave by the user on 2026-10-19. The full
+> Compose Gospel is embedded in §6 so this contract is self-contained
+> (§1 carries the Palette Gospel in full): together they are the whole
+> design law for this repo, enforceable by whoever works here, with no
+> external document to lose. The user directed both gospels verbatim:
+> "update all repository UI style contracts to contain all of this
+> information so we never lose it and it gets enforced no matter where
+> I work on things."
+
 UI contract for Bloviate's two surfaces: the in-app screens (onboarding, settings, model manager) and the floating bubble. Always enforce together with `ARCHITECTURE_RULES.md` (which defines the structural Scaffold/navigation patterns and the overlay service rules).
 
 ---
@@ -28,6 +41,8 @@ UI contract for Bloviate's two surfaces: the in-app screens (onboarding, setting
 | Always | Never |
 |--------|-------|
 | Use the app theme + Material 3 semantic color roles everywhere. | Hard-code hex colors outside the theme definition. |
+| Draw every padding/gap/margin in screens and shared components from `BloviateSpacing`, and shapes/type styles from the theme (§6). | Write raw `dp` spacing literals or off-rhythm values (5, 7, 10, 15, …) in presentation code. |
+| Keep every interactive element at ≥ 48dp touch target (`minimumInteractiveComponentSize()` on custom interactives) (§6). | Use Light (300) text weight on dark, or drop shadows for dark-mode elevation. |
 | Include `@Preview` for shared components covering the **Dark** theme's states. | Inject real ViewModels or Hilt dependencies into `@Preview` functions. |
 | Use lambda-based deferred state reads (e.g., `Modifier.offset { ... }`, `() -> Float` for RMS/progress) for high-frequency state. | Tie recompositions directly to rapidly emitting state values (audio frames, download bytes) in root composables. |
 | Keep motion functional only (press feedback, state transitions). | Add decorative/cinematic motion, scroll-jacking, or marketing-landing patterns. |
@@ -36,6 +51,7 @@ UI contract for Bloviate's two surfaces: the in-app screens (onboarding, setting
 ## 1. Design Language & Theme
 
 - Material 3; **one fixed dark color scheme for the whole app** — dark-only (v1.1 amendment, ENC-75): no light scheme, no dynamic color, screens never branch on theme internals. Hex values live only in the theme definition.
+- Spacing, shapes, typography, elevation, component defaults, and motion follow the **Compose Gospel**, embedded in full in §6 (v1.3, ENC-86): the `BloviateSpacing` object is the only spacing source in screens and shared components, and the theme carries the gospel type and shape scales. The M3 Expressive motion scheme is **staged** — in the pinned material3 1.4.0 it exists in the artifact but is internal, not public API (see the adoption notes in §6.2 and §6.7); adopting it waits on a deliberate cross-repo version bump.
 - The bubble overlay wears the same fixed scheme (v1.2, ENC-85): it renders over other apps but no longer follows the system theme — one canonical palette for screens and overlay alike.
 
 ### Canonical palette — the Shippopotamus Palette Gospel (v1.2, ENC-85)
@@ -81,6 +97,7 @@ Foregrounds on bright gospel surfaces (accent, semantics) are bg-base — comput
 - Sections are small-caps headers over one grouped card of rows (icon tile + label + one sub-line + the control), not one card per control.
 - Onboarding is a gate list (overlay permission, accessibility, microphone, model download), each row showing state as a chip + a deep-link action; nothing is skippable silently.
 - Model manager rows show: engine/model name, size, downloaded state. The recommended default (per the plan's ship-both design) is badged, not preselected silently.
+- Component geometry follows the §6 defaults: cards 12dp tonal, text fields 56dp, chips 32dp, switch 52×32 track with 24dp thumb, navigation bar 80dp with a 32dp pill active indicator, list rows at the gospel heights.
 
 ## 3. Bubble Overlay UI
 
@@ -96,6 +113,7 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | Error | Danger-token flash/shake (theme semantic color, §1) |
 
 - RMS/waveform updates arrive via deferred lambda reads (`CODE_STYLE_RULES.md` §4.5) — the bubble must not recompose its whole tree per audio frame.
+- The processing pill **hugs its label** (ENC-89): Transcribing/Polishing carry no waveform and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording bar's wide skeleton. Width changes between states settle on a calm no-bounce spring; the Listening bar and the Done/Error bubbles keep the geometry above, unchanged.
 - Touch targets ≥ 48.dp. The bubble must remain fully on-screen after drag, rotation, and fold/unfold.
 - Dismiss (drag to bottom) is a visual state too: the bubble shrinks toward the dismiss zone while dragging.
 
@@ -112,5 +130,103 @@ Preview composables must NOT reference Hilt or real ViewModels. Use fake present
 ## 5. Accessibility
 
 - All interactive elements must have `contentDescription` + appropriate semantic `role`.
+- 48×48dp minimum touch target for **every** interactive element is law (§6); custom interactives carry `minimumInteractiveComponentSize()` so the hit area expands even when the visual is smaller.
 - Use `sp` units for text. System font scaling must be respected.
 - TalkBack must work across all in-app screens. (The bubble itself is an overlay control; its actions must also be reachable from the app's main screen for users who cannot use the overlay.)
+
+## 6. The Compose Gospel — Canonical UI System (v1.3, ENC-86)
+
+Declared canonical for Bloviate / Stratum / Enclave by the user, 2026-10-19 (Material 3 + M3 Expressive, Android 16 QPR1). Embedded here **in full** under the user's direction (see the v1.3 amendment note): this section plus §1's palette are the complete design law for this repo. Where this section's generic component list mentions a component Bloviate does not use, the spec still stands as the default when that component is introduced.
+
+**Why this works:**
+1. 8dp grid + 4dp micro: consistent spacing per Material; everything aligns, no random 5dp/7dp. Layouts feel calm and scannable.
+2. 48dp touch targets are law: `Modifier.minimumInteractiveComponentSize()` on custom interactives — even if the visible size is smaller, the hit area auto-expands to 48dp. Accessibility + fat-finger research, not preference.
+3. Elevation is tint, not shadow, in dark: shadows become invisible on dark; convey elevation with surface tint — a subtle tonal wash. Inverse rhythm: raised is slightly LIGHTER than base in dark mode.
+4. Shape system = hierarchy: nested radius = outer radius − padding (28dp card with 12dp padding holds 16dp corners). Buttons use capsule (radius = half height); cards use fixed radii. Don't invent radii.
+5. M3 Expressive is the baseline: morphable shapes (squircle, pill, cookie, clover), spring physics as the default motion scheme, emphasized typography with bigger/heavier display. Shipping old 2023 M3 looks dated.
+
+### 6.1 Spacing & layout
+
+- Base unit: 4dp. Major grid: 8dp — all screen margins, section gaps, card padding are multiples of 8. Micro grid: 4dp — internal icon-to-text, chip gaps.
+- Screen margin: 16dp mobile, 24dp tablet. Content max-width: 600dp centered on tablet.
+- Vertical rhythm: 8 / 16 / 24 / 32 / 48 / 64. **Never** use 5, 7, 10, 15, etc.
+- Implementation: the `BloviateSpacing` object (s4, s8, s12, s16, s24, s32, s48, s64) is the ONLY spacing source in app screens and shared dashboard components. Raw `dp` literals for padding/gaps/margins in presentation code are contract violations. Non-spacing geometry (icon glyph sizes, border/stroke widths, the overlay's waveform measurements) is component-local geometry, not spacing, and is exempt — it is documented where it lives.
+
+### 6.2 Shapes
+
+| Token | Radius | Use |
+|-------|--------|-----|
+| extraSmall | 4dp | Text field top, chips' small containers, small containers |
+| small | 8dp | Default for cards/menus at low emphasis; status chips |
+| medium | 12dp | Cards, dialogs, sheets at medium emphasis |
+| large | 16dp | Large cards, FAB, medium-emphasis interactive/expandable |
+| extraLarge | 28dp | Bottom sheets, large dialogs, hero containers; the recording bar |
+| full (pill) | 100% | Buttons, FABs, toggle track, active nav indicator, status pill |
+
+- Nested rule: child radius = parent radius − padding (e.g. 28dp sheet + 12dp padding = 16dp inner card).
+- Expressive shapes (Cookie4Sided, Clover, Squircle, Arch) are for loaders, FAB morph, and button press morph; buttons morph pill → 16dp + scale 0.96 on press with high-stiffness springs. *Adoption note (ENC-86): the pinned material3 1.4.0 (Compose BOM 2026.05.01) ships the Expressive classes (`MotionScheme`, `MaterialExpressiveTheme`, the polygon shapes) inside the artifact but marks them **internal** in its Kotlin metadata — they are not public API in this version, so both the Expressive motion scheme and the morphable shapes are **staged** until a deliberate version bump (a cross-repo decision: this repo's pins align with Enclave's catalog). No Bloviate component calls for the polygons yet.*
+
+### 6.3 Typography
+
+Font: Shipopotamus Sans; fallback Roboto Flex / Google Sans Flex variable. *Adoption note (ENC-86): no Shipopotamus Sans asset exists yet, so the theme leaves the family unset — the platform default sans carries the scale below; the brand font lands in the theme definition only, when it ships.*
+
+| Style | Size / line height | Weight | Notes |
+|-------|--------------------|--------|-------|
+| displayLarge | 57sp / 64sp | 400 | Hero only; letter-spacing −0.25 |
+| displayMedium | 45sp / 52sp | 400 | |
+| displaySmall | 36sp / 44sp | 400 | |
+| headlineLarge | 32sp / 40sp | 400 | |
+| headlineMedium | 28sp / 36sp | 400 | |
+| headlineSmall | 24sp / 32sp | 400 | |
+| titleLarge | 22sp / 28sp | 500 SemiBold (600) | Card titles, top bar; emphasized in Expressive |
+| titleMedium | 16sp / 24sp | 500 Medium | List titles, buttons |
+| titleSmall | 14sp / 20sp | 500 Medium | |
+| labelLarge | 14sp / 20sp | 500 Medium | **Button labels — all buttons use labelLarge** |
+| labelMedium | 12sp / 16sp | 500 Medium | |
+| labelSmall | 11sp / 16sp | 500 Medium | |
+| bodyLarge | 16sp / 24sp | 400 | Main reading |
+| bodyMedium | 14sp / 20sp | 400 | Secondary reading; default text-field input |
+| bodySmall | 12sp / 16sp | 400 | Captions, supporting text; letter-spacing +0.15 |
+
+- Dark-mode astigmatism rule: **never weight 300 (Light) on dark**. Body is 400–500, emphasis 600.
+- The full scale is pinned in the theme (`BloviateTypography`) and asserted by unit tests; components consume `MaterialTheme.typography`, never ad-hoc `TextStyle`s.
+
+### 6.4 Elevation (dark)
+
+Do NOT use drop shadows in dark. Tonal elevation, mapped to the palette's surface ladder (§1):
+
+| Elevation | Surface | Tint |
+|-----------|---------|------|
+| 0dp | bg-base #0D0E11 | no tint |
+| 1dp | surface-1 #181A20 | 5% primary tint overlay |
+| 3dp | surface-2 #1F222A | 8% tint — cards on hover/focus |
+| 6dp | surface-3 #272A33 | 11% tint — bottom sheets, dialogs |
+
+Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` tokens; `surfaceTint` = accent. (The bubble overlay's `Surface` elevation is window treatment over other apps, governed by §3, not by this table.)
+
+### 6.5 Component specs (the defaults)
+
+- **Buttons** — Height 40dp; shape full pill; label = labelLarge; padding 24dp text-only / 16dp with icon leading; icon 18dp; gap 8dp. Emphasis order high→low: Filled → Tonal → Elevated → Outlined → Text. Filled: container accent (#7A7CFF) with the bg-base foreground (ENC-85's computed higher contrast: 5.66:1 vs white's 3.41:1); primary CTA uses the Large 56dp height. Tonal: container accent-muted (accent @ 15%), foreground text-primary. Elevated: surface-1 + 1dp tonal elevation. Outlined: 1dp border-default, no fill. Text: 12dp horizontal padding, no container. Icon button: 40×40 + 8dp padding, icon 24dp. Segmented / ToggleButton: height 40dp, padding 24dp, selected uses the tonal container. Press state: corner morph 50% → 16dp + scale 0.96 + ripple, on springs.
+- **FAB** — Small 40dp, medium 56dp, large 96dp (Expressive). Shape large 16dp or full for extended. Container accent, icon 24dp. Extended FAB: height 56dp, labelLarge + 16dp icon gap.
+- **Text fields** — Default container height 56dp; padding 8dp vertical, 16dp horizontal without icons / 12dp with icons; icon-to-text gap 16dp; supporting-text top gap 4dp; counter gap 16dp. Filled: container surface-2, shape extraSmall top only (4dp top radius, 0 bottom), active indicator 2dp accent, inactive 1dp border. Outlined: container transparent, outline 1dp border-default, focused 2dp accent, shape extraSmall 4dp all corners, label padding 4dp left/right. Input text bodyLarge; label floats bodySmall → labelSmall; supporting text bodySmall. Never pure-white label — text-secondary. (Stock M3 fields already enforce the 56dp container, the indicator widths, and the bodyLarge input style; the theme's type scale supplies the rest.)
+- **Cards** — Elevated: surface-1 + 1dp tonal elevation. Filled: surface-2 flat. Outlined: transparent + 1dp border-default. Shape medium 12dp default, large 16dp for hero cards. Content padding 16dp. On click: ripple + elevate to 3dp. Nested content: inner radius = 12dp − 8dp padding = 4dp.
+- **Chips** — All 32dp height, label labelLarge, padding horizontal 16dp, icon gap 8dp. Assist: shape small 8dp, outline 1dp. Filter: shape small, check icon 18dp, selected = tonal container. Input: avatar 24dp + label + close 18dp. Suggestion: tonal container.
+- **Switch / toggle** — Track 32dp high × 52dp wide, shape full pill; thumb 24dp; inactive track = border-default color; active track = accent; touch target auto-expands to 48dp. (Stock M3 `Switch` implements this geometry, including the 24dp checked thumb.) Colors are **theme-owned** (`bloviateSwitchColors()`, ENC-88) — stock M3 switch colors on this scheme are banned: they paired an outline-colored thumb with a surfaceVariant track at 1.17:1 and the OFF knob vanished. The gospel pairings: OFF = text-primary thumb (11.7:1 on the track) on the border-default track, rimmed text-tertiary (≥5:1 against both the card surface and bg-base); ON = accent track with the bg-base thumb (5.66:1, the §1 on-accent decision).
+- **Checkbox / radio** — 20dp visible, 48dp touch target auto-expanded. Shape small 4dp for checkbox, full for radio. Active = accent.
+- **Slider** — Track 4dp height; active track accent; inactive border-default; thumb 20dp; halo 40dp on press; touch target 48dp height.
+- **Bottom sheet / dialog** — Bottom sheet: shape extraLarge 28dp top only, container surface-3 at 6dp elevation + 11% tint, drag handle 32×4dp in text-faint, scrim = the palette's bg-scrim. Dialog: shape extraLarge 28dp, container surface-3, padding 24dp, button-row gap 8dp, title titleLarge.
+- **Navigation** — Navigation bar (mobile): height 80dp, 3–5 items, active indicator 32dp height, full pill shape, icon 24dp, label labelMedium. Container = bg-subtle. Navigation rail (tablet): width 80dp, same active indicator. TopAppBar small: 64dp height, titleLarge; medium 112dp; large 152dp (Expressive uses bigger, heavier display type for large).
+- **List item** — One-line 56dp, two-line 72dp, three-line 88dp. Leading icon 24dp, padding 16dp, gap 16dp. Title titleMedium; subtitle bodyMedium in text-secondary.
+
+### 6.6 Accessibility & motion (non-negotiable)
+
+- Touch: 48×48dp minimum for EVERY interactive element. Use `Modifier.minimumInteractiveComponentSize()` on custom interactives (e.g. dashboard rows); radio/checkbox hit areas expand to 48×48 even when the visible control is smaller. This is Material behavior parity.
+- Text: mobile default bodyLarge 16sp is the readable floor with the weights above.
+- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: staged in the pinned version — see the §6.2 adoption note; until the bump, stock M3 components animate with their built-in springs/ripple and no custom motion language is invented locally.*
+- Haptics: light click on toggle/switch, medium on FAB press, via `HapticFeedback`.
+
+### 6.7 Theme wiring (how §6 reaches code)
+
+- `BloviateTheme` (a `MaterialTheme`) provides: the §1 color scheme, the §6.2 shape scale (`BloviateShapes.Scale`, plus `BloviateShapes.Pill`), and the §6.3 type scale (`BloviateTypography`). When the Expressive bump lands, this function switches to `MaterialExpressiveTheme` with `MotionScheme.expressive()` — the swap is local to the theme definition by design.
+- Stock M3 components inherit the gospel defaults from the theme (button 40dp pill + labelLarge, field 56dp, card 12dp tonal, chip geometry where M3 chips are used, switch 52×32/24, navigation bar 80dp + pill indicator + labelMedium). Custom components (dashboard rows/cards, status chip/pill) implement their §6.5 specs directly and draw spacing only from `BloviateSpacing`.
+- The bubble overlay (§3) wears the same theme: it consumes the type scale and the shape scale (the recording bar's corner is extraLarge) and the spacing scale where an equivalent exists; its window geometry (bubble/bar sizes, waveform measurements, gesture slots) is overlay-specific and stays defined in the overlay code.

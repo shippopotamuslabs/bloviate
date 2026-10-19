@@ -30,7 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.R
@@ -90,7 +89,7 @@ fun DictionaryScreen(
                     StatusPill(
                         text = stringResource(R.string.dictionary_pill),
                         tone = StatusTone.ACCENT,
-                        modifier = Modifier.padding(end = 16.dp),
+                        modifier = Modifier.padding(end = BloviateSpacing.s16),
                     )
                 },
             )
@@ -104,8 +103,8 @@ fun DictionaryScreen(
                 .padding(innerPadding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
             DashboardSectionHeader(
                 text = stringResource(R.string.dictionary_words_title),
@@ -121,7 +120,6 @@ fun DictionaryScreen(
             DashboardSectionHeader(
                 text = stringResource(R.string.dictionary_corrections_title),
                 trailingText = uiState.corrections.size.toString(),
-                modifier = Modifier.padding(top = 10.dp),
             )
             CorrectionsCard(
                 uiState = uiState,
@@ -167,12 +165,12 @@ private fun WordsCard(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Column(
-            modifier = Modifier.padding(13.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
             ) {
                 val fieldLabel = stringResource(R.string.dictionary_word_field_label)
                 OutlinedTextField(
@@ -236,12 +234,12 @@ private fun CorrectionsCard(
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Column(
-            modifier = Modifier.padding(13.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
             ) {
                 val heardAsLabel = stringResource(R.string.dictionary_heard_as_label)
                 OutlinedTextField(
@@ -288,7 +286,7 @@ private fun EmptyNote(
         text = text,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(13.dp),
+        modifier = modifier.padding(BloviateSpacing.s16),
     )
 }
 
@@ -302,7 +300,7 @@ private fun DictionaryFooter(
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 4.dp),
+        modifier = modifier.padding(horizontal = BloviateSpacing.s4),
     )
 }
 

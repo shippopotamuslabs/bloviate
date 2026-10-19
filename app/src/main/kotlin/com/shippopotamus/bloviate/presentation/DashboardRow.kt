@@ -16,6 +16,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,12 @@ import androidx.compose.ui.unit.dp
  * instead of a sentence plus a button that repeats it. [below] renders
  * extra content inside the row's card under the row itself (the
  * selected style's sample). A disabled row dims and stops clicking.
+ *
+ * Spacing comes only from [BloviateSpacing] (Compose Gospel, ENC-86):
+ * s16 horizontal / s12 vertical padding, s12 leading gap. A clickable
+ * row is a custom interactive, so it carries
+ * [minimumInteractiveComponentSize] — the 48dp touch-target law applies
+ * even when the row's content is shorter than 48dp.
  */
 @Composable
 fun DashboardRow(
@@ -70,6 +77,13 @@ fun DashboardRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(
+                    if (onClick != null) {
+                        Modifier.minimumInteractiveComponentSize()
+                    } else {
+                        Modifier
+                    },
+                )
+                .then(
                     if (contentDescription != null) {
                         Modifier.semantics { this.contentDescription = contentDescription }
                     } else {
@@ -83,17 +97,17 @@ fun DashboardRow(
                         Modifier
                     },
                 )
-                .padding(horizontal = 13.dp, vertical = 12.dp),
+                .padding(horizontal = BloviateSpacing.s16, vertical = BloviateSpacing.s12),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (leading != null) {
-                Box(modifier = Modifier.padding(end = 11.dp)) {
+                Box(modifier = Modifier.padding(end = BloviateSpacing.s12)) {
                     leading()
                 }
             } else if (icon != null) {
                 Box(
                     modifier = Modifier
-                        .padding(end = 11.dp)
+                        .padding(end = BloviateSpacing.s12)
                         .size(32.dp)
                         .background(
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -130,7 +144,7 @@ fun DashboardRow(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .padding(start = 4.dp)
+                        .padding(start = BloviateSpacing.s4)
                         .size(18.dp),
                 )
             }
@@ -148,7 +162,7 @@ private const val DISABLED_CONTENT_ALPHA = 0.38f
 @Composable
 private fun DashboardRowPreview() {
     BloviateTheme {
-        DashboardCard(modifier = Modifier.padding(16.dp)) {
+        DashboardCard(modifier = Modifier.padding(BloviateSpacing.s16)) {
             DashboardRow(
                 label = "Text-field detection",
                 icon = Icons.Filled.Visibility,

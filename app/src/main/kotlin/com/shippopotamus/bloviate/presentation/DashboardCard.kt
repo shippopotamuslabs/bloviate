@@ -11,13 +11,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 
 /**
  * A grouped dashboard card (ENC-75): one card per section, rows inside
  * separated by [DashboardRow]'s dividers instead of a card per control
  * with its own paragraph. Container color is the theme's low surface so
- * cards sit one step above the screen background.
+ * cards sit one step above the screen background. Shape is the theme's
+ * medium radius — 12dp per the Compose Gospel (ENC-86) — via the M3
+ * Card default, so the gospel scale reaches the card from the theme.
  */
 @Composable
 fun DashboardCard(
@@ -38,8 +39,8 @@ fun DashboardCard(
 @Composable
 private fun DashboardCardPreview() {
     BloviateTheme {
-        DashboardCard(modifier = Modifier.padding(16.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        DashboardCard(modifier = Modifier.padding(BloviateSpacing.s16)) {
+            Column(modifier = Modifier.padding(BloviateSpacing.s16)) {
                 Text(text = "Grouped rows live here.")
             }
         }
