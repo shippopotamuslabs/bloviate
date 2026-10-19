@@ -53,7 +53,7 @@ fun MainRoute(
             )
         },
         styleContent = { StylePlaceholderScreen() },
-        dictionaryContent = { DictionaryPlaceholderScreen() },
+        dictionaryContent = { DictionaryRoute() },
         modifier = modifier,
     )
 }
