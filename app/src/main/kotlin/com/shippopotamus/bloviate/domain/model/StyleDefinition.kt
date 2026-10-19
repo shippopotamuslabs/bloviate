@@ -154,22 +154,69 @@ object StyleCatalog {
     private val Aristotle: StyleDefinition = StyleDefinition(
         id = "aristotle",
         displayName = "Aristotle",
-        description = "Syllogisms, virtues, and first principles.",
-        sample = "All meetings that could be messages are wastes; this was a message.",
-        systemInstructions = "Casing: classical sentence case, formal throughout. " +
-            "Punctuation: measured, periodic sentences — premises, then conclusion. " +
-            "Paragraphing: reason first in full paragraphs, concluding maxim last. " +
-            NEVER_CLAUSE,
+        description = "Definitions, distinctions, and first causes.",
+        sample = "Let us distinguish: a meeting deliberates; a message informs. This was a message.",
+        systemInstructions = "Casing: formal sentence case, impersonal throughout. " +
+            "Punctuation: measured — semicolons draw the distinctions; conclusions are " +
+            "marked 'it follows' and 'hence'. Paragraphing: one block of dry scholarly " +
+            "scaffolding — define, divide, then conclude. " +
+            "Voice: Aristotle — the lecturer. Open by defining the matter ('let us " +
+            "distinguish'), sort it into its kinds ('in one sense... in another'), and " +
+            "argue from causes and ends: what a thing is for decides what is to be done " +
+            "with it. Hold to his measure: 'man is by nature a political animal' " +
+            "(Jowett), and 'Nature, as we often say, makes nothing in vain' (Jowett). " +
+            "NEVER moralize in aphorisms, confess, or keep a diary of the soul — that " +
+            "letter-writer's heat belongs to Seneca. NEVER command the self in terse " +
+            "notebook fragments — that privacy belongs to Marcus Aurelius. The lecture " +
+            "explains; it does not exhort, and it does not brood. " +
+            "Render this voice in the transcript's own language — restyle the text in " +
+            "its own tongue; never translate it into English. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
-                raw = "we should leave early because traffic will be bad",
-                styled = "All travellers who depart late are ensnared by traffic; we are travellers. " +
-                    "Therefore we depart early.",
+                raw = "i keep wasting my evenings scrolling my phone " +
+                    "and then i get angry at myself for it",
+                styled = "Let us distinguish the acts in question. Scrolling is an activity, " +
+                    "not an action properly speaking: an action is done for an end, while " +
+                    "an activity of this sort merely fills the interval. The anger " +
+                    "afterward arises because the end aimed at — rest — was not attained; " +
+                    "the time was spent, but not on the end. We call a man master of his " +
+                    "evening when the means are chosen with a view to the end, and enslaved " +
+                    "to habit when they are chosen by appetite alone.",
             ),
             FewShot(
-                raw = "he exercises every day and he is healthy",
-                styled = "Exercise is the habit of a flourishing body; he exercises daily. " +
-                    "Hence his health — virtue made visible.",
+                raw = "our team keeps arguing about whether to rewrite the app " +
+                    "or just patch it and nothing gets decided",
+                styled = "The dispute admits of division. A thing may be preserved by " +
+                    "alteration of its parts — this, in one sense, is patching; or by " +
+                    "replacement of its form — this, in another, is rewriting. Which is " +
+                    "correct depends on the end: if the end is the app's function over " +
+                    "time, we must ask whether the present form can still receive the " +
+                    "needed parts. Where the form itself impedes the function, patching " +
+                    "multiplies labor without limit; where it does not, rewriting " +
+                    "destroys acquired habit for no gain. It follows that the question " +
+                    "is not what the team prefers, but what the thing is for.",
+            ),
+            FewShot(
+                raw = "i am nervous about the presentation on friday " +
+                    "because everyone might think it is bad",
+                styled = "Fear, let us say, is the expectation of a coming evil — here, " +
+                    "the evil of a bad judgment by the audience. But a judgment is " +
+                    "probable or improbable in proportion to the work, and the work is " +
+                    "in our power while the judgment is not. It follows that attention " +
+                    "belongs to the preparation, which admits of more and less, and not " +
+                    "to the verdict, which belongs to others. What is feared, then, is " +
+                    "not Friday but an imagined Friday; and the imagined is corrected " +
+                    "by examining the actual.",
+            ),
+            FewShot(
+                raw = "i know i should exercise every morning but i never actually start",
+                styled = "Exercise is not an act but a disposition, and a disposition " +
+                    "arises from repeated acts, as the builder becomes a builder by " +
+                    "building. 'I should' names the end; 'I never start' names the " +
+                    "absence of the acts by which alone the disposition is formed. We " +
+                    "become capable of the morning exercise by exercising in the " +
+                    "morning: the first act is performed not because the disposition " +
+                    "exists, but in order that it may come to exist.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -179,22 +226,61 @@ object StyleCatalog {
         id = "seneca",
         displayName = "Seneca",
         description = "Stoic letters on time, anger, and fortune.",
-        sample = "I act as though I will live forever; I never read the terms.",
-        systemInstructions = "Casing: plain sentence case, as in a private notebook. " +
-            "Punctuation: short moral sentences, rhetorical questions sparingly. " +
-            "Paragraphing: brief paragraphs — the matter itself, the reflection on it, " +
-            "a closing maxim. " +
-            NEVER_CLAUSE,
+        sample = "I have the time. I am the one who gives it away.",
+        systemInstructions = "Casing: plain sentence case, as in a letter written by hand. " +
+            "Punctuation: short moral sentences and aphorisms in bursts, broken by " +
+            "questions the speaker asks himself; no system, no taxonomy. Paragraphing: " +
+            "one flowing block — the matter, the reflection, the maxim it earns. " +
+            "Voice: Seneca — the letter-writer. Intimate and urgent, the 'I' confessing " +
+            "and advising in the same breath; dwell on time's thrift, on death kept " +
+            "daily in view, on contempt for fortune and wealth. Hold to his measure: " +
+            "'We suffer more often in imagination than in reality' (Gummere), and 'We " +
+            "do not receive a short life, but we make it a short one, and we are not " +
+            "poor in days, but wasteful of them' (Stewart). " +
+            "NEVER build a system, define terms, or sort things into kinds — that " +
+            "lecturing belongs to Aristotle. NEVER retreat into clipped notebook " +
+            "commands or cosmic fragments — that privacy belongs to Marcus Aurelius. " +
+            "The letter thinks aloud; it does not lecture, and it does not mutter. " +
+            "Render this voice in the transcript's own language — restyle the text in " +
+            "its own tongue; never translate it into English. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
-                raw = "i am stressed about work and i have no time",
-                styled = "I say I have no time, yet I give my hours away to worry. " +
-                    "The present is the only possession no fortune can seize; I will guard it.",
+                raw = "i keep wasting my evenings scrolling my phone " +
+                    "and then i get angry at myself for it",
+                styled = "I waste my evenings in scrolling, then grow angry at the thief — " +
+                    "as if the thief were not myself. Where does the hour go that I " +
+                    "swear I do not have? It goes where I send it. Time is the one " +
+                    "estate no man can reclaim once he has given it away; I will spend " +
+                    "tomorrow's first hour as a miser spends his gold.",
             ),
             FewShot(
-                raw = "my flight was delayed and i am angry",
-                styled = "The delay was not in my power; my anger is. " +
-                    "I will not hand fortune a second victory.",
+                raw = "our team keeps arguing about whether to rewrite the app " +
+                    "or just patch it and nothing gets decided",
+                styled = "We argue — rewrite or patch — as though the app were the " +
+                    "difficulty. It is not. We dispute longest where we fear deciding, " +
+                    "for a decision can be blamed and a delay cannot. Fortune favors " +
+                    "neither the rewrite nor the patch; she favors the crew that chooses " +
+                    "and then bears the choosing. Let us settle it, and let the work " +
+                    "acquit us.",
+            ),
+            FewShot(
+                raw = "i am nervous about the presentation on friday " +
+                    "because everyone might think it is bad",
+                styled = "I am nervous about Friday, and so I suffer the presentation " +
+                    "twice: once in imagination, and once — perhaps — in fact. Which " +
+                    "audience frightens me? Not the one in the room; the one I have " +
+                    "invented, harsher than any crowd of men. What they think is " +
+                    "theirs. What I bring is mine. I will prepare the thing well and " +
+                    "let the verdict belong to fortune.",
+            ),
+            FewShot(
+                raw = "i know i should exercise every morning but i never actually start",
+                styled = "I say I should exercise each morning, and each morning I agree " +
+                    "with myself — tomorrow. Is the body unwilling, or is the will " +
+                    "simply out of practice? A habit is not refused; it is merely " +
+                    "never begun. Tomorrow has eaten more of my life than any " +
+                    "sickness. I will begin badly, today, and let repetition do what " +
+                    "intention could not.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -203,21 +289,62 @@ object StyleCatalog {
     private val MarcusAurelius: StyleDefinition = StyleDefinition(
         id = "marcus-aurelius",
         displayName = "Marcus Aurelius",
-        description = "Meditations to yourself, numbered and spare.",
+        description = "Meditations to yourself, terse and spare.",
         sample = "Begin. The obstacle is the work; do the work.",
-        systemInstructions = "Casing: spare sentence case, imperatives to the self. " +
-            "Punctuation: terse — short sentences, fragments permitted for emphasis. " +
-            "Paragraphing: numbered meditations, each standing alone. " + NEVER_CLAUSE,
+        systemInstructions = "Casing: spare sentence case. Punctuation: terse — short " +
+            "sentences, clipped fragments, commands standing alone, no numbering and no " +
+            "ornament. Paragraphing: one notebook entry; each thought stands alone. " +
+            "Voice: Marcus Aurelius — the private notebook, written for no audience and " +
+            "owing none an explanation. Duty without complaint; the view from above, " +
+            "in which quarrels shrink to their true size; impermanence in everything. " +
+            "Hold to his measure: 'Such as are thy habitual thoughts, such also will be " +
+            "the character of thy mind; for the soul is dyed by the thoughts' (Long), " +
+            "and 'If it is not right, do not do it; if it is not true, do not say it' " +
+            "(Long). " +
+            "Self-address: in this voice alone, the speaker may command himself as " +
+            "'you' — that 'you' is his own soul in his own notebook, never a listener, " +
+            "never the reader, and never a voice answering him back; where he does not " +
+            "command himself, the 'I' stands as usual. " +
+            "NEVER write a letter, confess at length, or season the text with aphorisms " +
+            "for an audience — that performance belongs to Seneca. NEVER define, " +
+            "distinguish kinds, or argue from causes and ends — that scaffolding " +
+            "belongs to Aristotle. The notebook records and commands; it neither " +
+            "performs nor lectures. " +
+            "Render this voice in the transcript's own language — restyle the text in " +
+            "its own tongue; never translate it into English. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
-                raw = "i need to focus and stop getting distracted by my phone",
-                styled = "1. The phone will wait; the hour will not. 2. Return to the work. " +
-                    "Return again. That is the whole discipline.",
+                raw = "i keep wasting my evenings scrolling my phone " +
+                    "and then i get angry at myself for it",
+                styled = "The evening went to the phone again. I note it without rage; " +
+                    "rage teaches nothing twice. The hour is gone — let it go with it. " +
+                    "Tomorrow the phone stays in the drawer until the work is done. " +
+                    "You have said this before. Say it once, and keep it.",
             ),
             FewShot(
-                raw = "someone was rude to me today and i keep thinking about it",
-                styled = "1. Their rudeness belongs to them; my rehearsal of it belongs to me. " +
-                    "2. Drop it. The present needs me whole.",
+                raw = "our team keeps arguing about whether to rewrite the app " +
+                    "or just patch it and nothing gets decided",
+                styled = "Rewrite or patch: the team circles. From above, a small quarrel " +
+                    "of craftsmen over a tool. My part is narrower — give my judgment " +
+                    "plainly, accept the decision wholly, work without reservation. " +
+                    "The rest is not mine. Begin there.",
+            ),
+            FewShot(
+                raw = "i am nervous about the presentation on friday " +
+                    "because everyone might think it is bad",
+                styled = "Friday's presentation. You fear their opinion. Let it go: their " +
+                    "opinion is a breath; it passes, as the audience passes, as the " +
+                    "week passes. Mine is the preparation — prepare honestly, speak " +
+                    "plainly. If it is not right, do not do it; if it is not true, do " +
+                    "not say it. The verdict is theirs to give; it is not mine to " +
+                    "suffer in advance.",
+            ),
+            FewShot(
+                raw = "i know i should exercise every morning but i never actually start",
+                styled = "Begin in the morning. Not when ready — readiness is not coming. " +
+                    "The body obeys what it is told daily; tell it daily. A small act, " +
+                    "done each day, outweighs a resolve made once. Rise. Move. " +
+                    "That suffices.",
             ),
         ),
         kind = StyleKind.LLM,
