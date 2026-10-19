@@ -5,8 +5,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.toShape
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -25,6 +30,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.graphics.shapes.RoundedPolygon
 
 /**
  * The Shippopotamus canonical palette — the "Palette Gospel", declared
@@ -265,6 +271,44 @@ object BloviateShapes {
 }
 
 /**
+ * The morphable polygon vocabulary (ENC-90): the M3 Expressive shape
+ * system ([MaterialShapes]) adopted alongside the motion scheme. These
+ * are the polygons the Compose Gospel names (§6.2: expressive shapes
+ * are for loaders, FAB morphs, and button press morphs) plus the two
+ * the design system already wears — [Circle] (the bubble) and [Pill]
+ * (buttons, the recording bar, the switch track). A polygon converts
+ * to a static Compose [Shape] with [asShape]; a true morph between
+ * two polygons animates via `androidx.graphics.shapes.Morph` and
+ * material3's `Morph.toPath`, driven by the theme's motion scheme.
+ *
+ * Gospel boundary: these are a *capability* layer beside the corner
+ * scale, not new visual tokens — [BloviateShapes.Scale] and [Pill]
+ * keep their exact ENC-86 values, and no screen restyles itself with
+ * a polygon until a component spec calls for one. Bloviate has no FAB
+ * and no polygon loader today; stock buttons already inherit the
+ * library's pressed-shape morph under the expressive theme, so this
+ * vocabulary waits for the first component that needs to morph by
+ * hand (the bubble ↔ bar transition remains the overlay's own
+ * ENC-93 springs by design — see `BubbleView`).
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+object BloviateMorphShapes {
+    val Circle: RoundedPolygon = MaterialShapes.Circle
+    val Pill: RoundedPolygon = MaterialShapes.Pill
+    val Cookie4Sided: RoundedPolygon = MaterialShapes.Cookie4Sided
+    val Clover4Leaf: RoundedPolygon = MaterialShapes.Clover4Leaf
+    val Arch: RoundedPolygon = MaterialShapes.Arch
+
+    /**
+     * This polygon as a static Compose [Shape]. Composable because
+     * material3's conversion is: in 1.5.0-beta01 `RoundedPolygon.toShape()`
+     * remembers the converted path across compositions.
+     */
+    @Composable
+    fun RoundedPolygon.asShape(): Shape = toShape()
+}
+
+/**
  * The gospel's type scale (ENC-86), the full M3 ramp with the gospel's
  * two deliberate deviations from stock M3 pinned: [Typography.titleLarge]
  * is SemiBold (emphasized titles/top bars — stock M3 is Regular) and
@@ -393,25 +437,37 @@ fun bloviateSwitchColors(): SwitchColors = SwitchDefaults.colors(
  * same on every device. ENC-86 adds the Compose Gospel system on top:
  * the gospel type scale and shape scale, wired here.
  *
- * Staged (ENC-86, flagged for Sean): the M3 Expressive surface —
- * `MotionScheme.expressive()`, `MaterialExpressiveTheme`, and the
- * morphable polygon shapes. The classes exist inside the pinned
- * material3 1.4.0 artifact but are **internal** in its Kotlin metadata
- * (the compiler rejects them: "it is internal in file"), so they are
- * not public API in the pinned version and cannot be adopted without
- * a version bump — and this repo's pins are aligned with Enclave's
- * catalog on purpose, so the bump is a cross-repo decision. When the
- * bump lands, the expressive motion scheme slots in here and nowhere
- * else; stock components already animate on springs where M3
- * implements it.
+ * The M3 Expressive surface is adopted (ENC-90): [BloviateTheme] is a
+ * [MaterialExpressiveTheme] whose motion source is
+ * [BloviateMotionScheme] (`MotionScheme.expressive()`), and the
+ * morphable polygon shapes live in [BloviateMorphShapes]. Version
+ * facts, recorded for the next bump: the latest *stable* material3
+ * (1.4.0) still marks this API internal, so the catalog pins the
+ * newest milestone that exposes it publicly — material3
+ * **1.5.0-beta01** — explicitly, because the latest Compose BOM
+ * (2026.09.00) still maps material3 to 1.4.0. That pin deliberately
+ * diverges from Enclave's catalog (BOM 2026.05.01 / material3 1.4.0);
+ * the divergence is flagged on ENC-90 for Sean's ratification, and
+ * Enclave's own bump is a separate follow-up. What the scheme drives:
+ * every stock component that reads `MaterialTheme.motionScheme`, plus
+ * the library's pressed-shape button morphs. What it does NOT touch:
+ * the gospel's visual tokens (palette, corner scale, type scale are
+ * byte-identical to ENC-85/86) and the bubble overlay's per-transition
+ * springs, which are overlay-owned under ENC-93 and stay exactly as
+ * pinned there.
  */
+
+/** The theme's motion source (ENC-90): the M3 Expressive scheme. */
+internal val BloviateMotionScheme: MotionScheme = MotionScheme.expressive()
+
 @Composable
 fun BloviateTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalBloviateExtendedColors provides GospelExtendedColors,
     ) {
-        MaterialTheme(
+        MaterialExpressiveTheme(
             colorScheme = BloviateDarkColorScheme,
+            motionScheme = BloviateMotionScheme,
             shapes = BloviateShapes.Scale,
             typography = BloviateTypography,
             content = content,
