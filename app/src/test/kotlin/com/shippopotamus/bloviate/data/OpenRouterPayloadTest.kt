@@ -37,6 +37,65 @@ class OpenRouterPayloadTest {
     }
 
     @Test
+    fun `request without a pin carries no provider block`() {
+        val request = OpenRouterPayload.buildChatRequest(
+            model = "m",
+            system = system,
+            user = user,
+        )
+
+        assertFalse(request.contains("\"provider\""))
+    }
+
+    @Test
+    fun `request with a pin carries the provider routing block`() {
+        val request = OpenRouterPayload.buildChatRequest(
+            model = "m",
+            system = system,
+            user = user,
+            providerOrder = listOf("xai"),
+        )
+
+        assertTrue(request.contains("\"provider\":{\"order\":[\"xai\"],\"allow_fallbacks\":true}"))
+    }
+
+    @Test
+    fun `request with an ignore list carries it in the provider block`() {
+        val request = OpenRouterPayload.buildChatRequest(
+            model = "m",
+            system = system,
+            user = user,
+            providerOrder = listOf("anthropic"),
+            providerIgnore = listOf("claude-on-aws"),
+        )
+
+        assertTrue(
+            request.contains(
+                "\"provider\":{\"order\":[\"anthropic\"],\"allow_fallbacks\":true,\"ignore\":[\"claude-on-aws\"]}",
+            ),
+        )
+    }
+
+    @Test
+    fun `the responding provider is extracted from a response body`() {
+        val body = "{\"id\":\"gen-1\",\"provider\":\"xAI\",\"choices\":[]}"
+
+        assertEquals("xAI", OpenRouterPayload.extractProvider(body))
+    }
+
+    @Test
+    fun `a provider decoy inside a string value does not resolve`() {
+        val body = "{\"error\":{\"message\":\"no \\\"provider\\\" field here\"}}"
+
+        assertNull(OpenRouterPayload.extractProvider(body))
+    }
+
+    @Test
+    fun `a body without a provider reads as none`() {
+        assertNull(OpenRouterPayload.extractProvider("{\"choices\":[]}"))
+    }
+
+    @Test
     fun `request escapes quotes and newlines in content`() {
         val tricky = PromptMessage(role = "user", content = "He said \"hi\"\nnew line.")
         val request = OpenRouterPayload.buildChatRequest(

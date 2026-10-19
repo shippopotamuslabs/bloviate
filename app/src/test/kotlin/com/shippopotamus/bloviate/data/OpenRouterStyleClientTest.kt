@@ -77,7 +77,60 @@ class OpenRouterStyleClientTest {
 
         val outcome = client.style(style = professional, text = "raw words")
 
-        assertEquals(LlmStyleOutcome.FellBack(reason = "http-500"), outcome)
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "http-500", model = OpenRouterPayload.PRIMARY_MODEL),
+            outcome,
+        )
+    }
+
+    @Test
+    fun `the responding provider is surfaced on success`() = runTest {
+        // ENC-80: OpenRouter stamps the serving upstream on the response;
+        // telemetry carries it so instability is visible from logcat.
+        fakeTransport.handler = { _, _ ->
+            HttpResult(status = 200, body = assistantBody("Polished text.", provider = "xAI"))
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals("xAI", styled.provider)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+    }
+
+    @Test
+    fun `the responding provider is surfaced on an http failure`() = runTest {
+        fakeTransport.handler = { _, _ ->
+            HttpResult(status = 500, body = "{\"provider\":\"Claude Platform on AWS\",\"error\":{}}")
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        val fellBack = outcome as LlmStyleOutcome.FellBack
+        assertEquals("http-500", fellBack.reason)
+        assertEquals("Claude Platform on AWS", fellBack.provider)
+    }
+
+    @Test
+    fun `each attempt pins its provider routing`() = runTest {
+        // ENC-80: primary pins the xAI family; the Haiku retry prefers
+        // Anthropic first-party and ignores Claude Platform on AWS.
+        fakeTransport.handler = { callIndex, _ ->
+            if (callIndex == 0) {
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                HttpResult(status = 200, body = assistantBody("Fallback polish."))
+            }
+        }
+
+        client.style(style = professional, text = "raw words")
+
+        assertTrue(fakeTransport.requests[0].contains("\"provider\":{\"order\":[\"xai\"],\"allow_fallbacks\":true}"))
+        assertTrue(
+            fakeTransport.requests[1].contains(
+                "\"provider\":{\"order\":[\"anthropic\"],\"allow_fallbacks\":true,\"ignore\":[\"claude-on-aws\"]}",
+            ),
+        )
     }
 
     @Test
@@ -164,7 +217,10 @@ class OpenRouterStyleClientTest {
 
         val outcome = client.style(style = professional, text = "raw words")
 
-        assertEquals(LlmStyleOutcome.FellBack(reason = "model-unavailable"), outcome)
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "model-unavailable", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
         assertEquals(2, fakeTransport.keylessCallCount)
     }
 
@@ -174,7 +230,10 @@ class OpenRouterStyleClientTest {
 
         val outcome = client.style(style = professional, text = "raw words")
 
-        assertEquals(LlmStyleOutcome.FellBack(reason = "bad-response"), outcome)
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "bad-response", model = OpenRouterPayload.PRIMARY_MODEL),
+            outcome,
+        )
     }
 
     @Test
@@ -183,11 +242,17 @@ class OpenRouterStyleClientTest {
 
         val outcome = client.style(style = professional, text = "raw words")
 
-        assertEquals(LlmStyleOutcome.FellBack(reason = "empty-response"), outcome)
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "empty-response", model = OpenRouterPayload.PRIMARY_MODEL),
+            outcome,
+        )
     }
 
-    private fun assistantBody(content: String): String =
-        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"}}]}"
+    private fun assistantBody(content: String, provider: String? = null): String {
+        val providerField = if (provider == null) "" else "\"provider\":\"" + provider + "\","
+        return "{" + providerField +
+            "\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"" + content + "\"}}]}"
+    }
 
     private companion object {
         const val HUNG_CALL_MS: Long = 30_000L

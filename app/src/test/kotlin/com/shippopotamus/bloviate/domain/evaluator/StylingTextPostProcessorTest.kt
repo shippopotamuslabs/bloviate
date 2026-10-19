@@ -73,6 +73,37 @@ class StylingTextPostProcessorTest {
     }
 
     @Test
+    fun `model and provider telemetry ride along on success and on fallback`() = runTest {
+        // ENC-80: the BubbleOverlay telemetry line reads these off the
+        // result, so both outcome shapes must carry them through.
+        fakeStyles.setSelected("professional")
+        fakeKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(
+            text = "Polished words.",
+            llmMs = 900L,
+            model = "~x-ai/grok-latest",
+            provider = "xAI",
+        )
+
+        val styled = processor.process("raw words")
+
+        assertEquals("~x-ai/grok-latest", styled.model)
+        assertEquals("xAI", styled.provider)
+
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(
+            reason = "http-500",
+            model = "~x-ai/grok-latest",
+            provider = "Claude Platform on AWS",
+        )
+
+        val fellBack = processor.process("raw words")
+
+        assertTrue(fellBack.fellBack)
+        assertEquals("~x-ai/grok-latest", fellBack.model)
+        assertEquals("Claude Platform on AWS", fellBack.provider)
+    }
+
+    @Test
     fun `an llm miss returns the local text marked as fallen back`() = runTest {
         fakeStyles.setSelected("professional")
         fakeKeys.setKey("test-key")
