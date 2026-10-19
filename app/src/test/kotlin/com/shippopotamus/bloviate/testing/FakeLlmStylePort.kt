@@ -3,6 +3,7 @@ package com.shippopotamus.bloviate.testing
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.domain.port.LlmStylePort
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * Hand-written fake of [LlmStylePort]. [outcome] scripts the result;
@@ -21,8 +22,12 @@ class FakeLlmStylePort(
     /** Number of [style] calls so far. */
     val callCount: Int get() = mutableInputs.size
 
+    /** When set, [style] suspends on this gate before returning — for in-flight stage tests. */
+    var gate: CompletableDeferred<Unit>? = null
+
     override suspend fun style(style: StyleDefinition, text: String): LlmStyleOutcome {
         mutableInputs += style.id to text
+        gate?.await()
         return outcome
     }
 }

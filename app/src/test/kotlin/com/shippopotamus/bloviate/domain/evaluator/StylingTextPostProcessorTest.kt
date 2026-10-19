@@ -1,8 +1,10 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
 import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.domain.port.SendStage
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
+import com.shippopotamus.bloviate.testing.FakeSendProgressPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.FakeTextPostProcessor
 import kotlinx.coroutines.test.runTest
@@ -81,6 +83,53 @@ class StylingTextPostProcessorTest {
         assertEquals("professional", result.styleId)
         assertNull(result.llmMs)
         assertTrue(result.fellBack)
+    }
+
+    @Test
+    fun `progress hears about the polishing stage when the llm pass runs`() = runTest {
+        fakeStyles.setSelected("professional")
+        fakeKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 900L)
+        val progress = FakeSendProgressPort()
+
+        processor.process("raw words", progress = progress)
+
+        assertEquals(listOf(SendStage.POLISHING), progress.stages)
+    }
+
+    @Test
+    fun `progress hears about the polishing stage even when the pass falls back`() = runTest {
+        // The stage genuinely ran — the bar said "Polishing" while the
+        // call was in flight; the fallback only decides the final text.
+        fakeStyles.setSelected("professional")
+        fakeKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "timeout")
+        val progress = FakeSendProgressPort()
+
+        processor.process("raw words", progress = progress)
+
+        assertEquals(listOf(SendStage.POLISHING), progress.stages)
+    }
+
+    @Test
+    fun `progress stays silent for a mechanical style`() = runTest {
+        fakeStyles.setSelected("lowercase-casual")
+        fakeKeys.setKey("test-key")
+        val progress = FakeSendProgressPort()
+
+        processor.process("raw words", progress = progress)
+
+        assertTrue(progress.stages.isEmpty())
+    }
+
+    @Test
+    fun `progress stays silent for an llm style without a key`() = runTest {
+        fakeStyles.setSelected("professional")
+        val progress = FakeSendProgressPort()
+
+        processor.process("raw words", progress = progress)
+
+        assertTrue(progress.stages.isEmpty())
     }
 
     @Test

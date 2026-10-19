@@ -32,7 +32,8 @@
     <string name="bubble_recording_description">Recording dictation</string>
     <string name="bubble_cancel_description">Cancel recording</string>
     <string name="bubble_send_description">Stop and transcribe</string>
-    <string name="bubble_transcribing_description">Transcribing dictation</string>
+    <string name="bubble_stage_transcribing">Transcribing</string>
+    <string name="bubble_stage_polishing">Polishing</string>
     <string name="bubble_done_description">Dictation transcribed</string>
     <string name="bubble_error_description">Dictation failed</string>
     <string name="mic_card_title">Microphone</string>

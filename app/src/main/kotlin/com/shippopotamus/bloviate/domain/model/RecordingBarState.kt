@@ -27,8 +27,21 @@ sealed interface RecordingBarState {
      */
     data class Recording(val elapsedMs: Long, val frame: Long = 0L) : RecordingBarState
 
-    /** The utterance is being transcribed; indeterminate progress, no fake percentages. */
+    /**
+     * Stage 1 of the send pipeline: the utterance is being transcribed
+     * on-device. The bar shows the stage's name as small shimmering text
+     * (ENC-76) — no spinner, no fake percentages.
+     */
     data object Transcribing : RecordingBarState
+
+    /**
+     * Stage 2 of the send pipeline: the LLM style pass (ENC-73) is
+     * running. Entered only when the pass actually runs — an LLM style
+     * selected and a key stored; local-only sends go from [Transcribing]
+     * straight to [Done]/[Error]. Same shimmering stage text as
+     * [Transcribing], different word (ENC-76).
+     */
+    data object Polishing : RecordingBarState
 
     /** Transcription succeeded; the brief check affordance before returning to [Idle]. */
     data object Done : RecordingBarState

@@ -4,6 +4,7 @@ import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
+import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
@@ -38,6 +39,9 @@ class BubbleRecordingControllerTest {
     private val fakeEnginePreference = FakeEnginePreferencePort()
     private val fakeWhisperStore = FakeModelStorePort()
     private val fakeParakeetStore = FakeParakeetModelStorePort()
+    private val fakeStylePreference = FakeStylePreferencePort()
+    private val fakeLlm = FakeLlmStylePort()
+    private val fakeApiKeys = FakeApiKeyPort()
 
     private fun createController(scope: CoroutineScope): BubbleRecordingController =
         BubbleRecordingController(
@@ -45,9 +49,9 @@ class BubbleRecordingControllerTest {
             transcriptionEngine = fakeEngine,
             stylingProcessor = StylingTextPostProcessor(
                 local = fakePostProcessor,
-                stylePreference = FakeStylePreferencePort(),
-                llm = FakeLlmStylePort(),
-                apiKeys = FakeApiKeyPort(),
+                stylePreference = fakeStylePreference,
+                llm = fakeLlm,
+                apiKeys = fakeApiKeys,
             ),
             transcriptSink = fakeSink,
             enginePreference = fakeEnginePreference,
@@ -533,6 +537,128 @@ class BubbleRecordingControllerTest {
         runCurrent()
         assertEquals(2, fakeSession.startCallCount)
         assertEquals(1, fakeEngine.transcribeCallCount)
+    }
+
+    @Test
+    fun `send with an ai style armed shows transcribing then polishing then done`() = runTest {
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeApiKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 900L)
+        val gate = CompletableDeferred<Unit>()
+        fakeLlm.gate = gate
+
+        controller.onSendTap()
+        runCurrent()
+
+        // The LLM call is in flight: the bar must name the stage it is in.
+        assertEquals(RecordingBarState.Polishing, controller.barState.value)
+        assertEquals(1, fakeLlm.callCount)
+        assertTrue(fakeSink.transcripts.isEmpty())
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(listOf("Polished words."), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+        val stages = emissions.filter {
+            it == RecordingBarState.Transcribing ||
+                it == RecordingBarState.Polishing ||
+                it == RecordingBarState.Done
+        }
+        assertEquals(
+            listOf(
+                RecordingBarState.Transcribing,
+                RecordingBarState.Polishing,
+                RecordingBarState.Done,
+            ),
+            stages,
+        )
+    }
+
+    @Test
+    fun `send with a local style never shows polishing`() = runTest {
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+        // Even with a key stored, the default style is mechanical.
+        fakeApiKeys.setKey("test-key")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertTrue(emissions.contains(RecordingBarState.Transcribing))
+        assertTrue(!emissions.contains(RecordingBarState.Polishing), "got $emissions")
+        assertEquals(0, fakeLlm.callCount)
+    }
+
+    @Test
+    fun `send with an ai style but no key never shows polishing`() = runTest {
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertTrue(!emissions.contains(RecordingBarState.Polishing), "got $emissions")
+        assertEquals(0, fakeLlm.callCount)
+    }
+
+    @Test
+    fun `an insertion failure after polishing shows error`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeApiKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 10L)
+        fakeSink.nextResult = InsertionResult.Failed("paste exploded")
+        val gate = CompletableDeferred<Unit>()
+        fakeLlm.gate = gate
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Polishing, controller.barState.value)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        // The failure landed from the polishing stage: the error state is
+        // reachable after the label flipped, and the styled text was the
+        // text the sink refused.
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+        assertEquals(listOf("Polished words."), fakeSink.transcripts)
+    }
+
+    @Test
+    fun `host hidden during polishing discards the transcript`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeApiKeys.setKey("test-key")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 10L)
+        val gate = CompletableDeferred<Unit>()
+        fakeLlm.gate = gate
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Polishing, controller.barState.value)
+        assertEquals(1, fakeLlm.callCount)
+
+        controller.onHostHidden()
+        runCurrent()
+
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+        assertTrue(fakeSink.transcripts.isEmpty())
+        gate.complete(Unit)
     }
 
     @Test
