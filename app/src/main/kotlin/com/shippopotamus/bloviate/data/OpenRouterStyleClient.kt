@@ -3,6 +3,7 @@ package com.shippopotamus.bloviate.data
 import android.os.SystemClock
 import android.util.Log
 import com.shippopotamus.bloviate.domain.evaluator.LlmResponseCleaner
+import com.shippopotamus.bloviate.domain.evaluator.StyleOutputGuard
 import com.shippopotamus.bloviate.domain.evaluator.StylePrompt
 import com.shippopotamus.bloviate.domain.evaluator.StylePromptBuilder
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
@@ -33,11 +34,20 @@ import java.net.HttpURLConnection
  * never carry response text.
  *
  * Model chain (ENC-84): [OpenRouterPayload.PRIMARY_MODEL] (the floating
- * `~x-ai/grok-latest` alias) first; on a model-unavailable answer or a
- * liveness failure, one retry on [OpenRouterPayload.FALLBACK_MODEL]
- * (Haiku 5.5); after that the caller keeps the local text. Each attempt
- * pins its OpenRouter provider routing (ENC-80) and logs its `model=` /
- * `provider=` so dogfood telemetry shows which link actually answered.
+ * `~x-ai/grok-latest` alias) first; on ANY attempt failure, one retry
+ * on [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that the
+ * caller keeps the local text. Each attempt pins its OpenRouter
+ * provider routing (ENC-80) and logs its `model=` / `provider=` so
+ * dogfood telemetry shows which link actually answered.
+ *
+ * Output guard (ENC-82): every attempt's cleaned output passes
+ * [StyleOutputGuard] before it may become a result. A refusal-shaped
+ * response is a failure (reason `refusal`), never inserted; a response
+ * that silently drops protected content (names, numbers, the profanity
+ * class) or most content words fails as `fidelity`. Both join every
+ * other failure class — HTTP errors, transport failures, liveness
+ * deaths, stream errors, empty responses — in retrying once on the
+ * other model; the final fallback reports the last attempt's reason.
  *
  * Streaming (ENC-81): the response is consumed as an SSE stream, but
  * insertion semantics do not change — chunks are assembled in memory,
@@ -76,9 +86,9 @@ class OpenRouterStyleClient(
             // One absolute backstop for the whole chain; the per-attempt
             // liveness budgets inside do the real judging (ENC-81).
             withTimeout(ABSOLUTE_CAP_MS) {
-                when (val first = attemptPrimary(key = key, prompt = prompt, startedMs = startedMs)) {
+                when (val first = attemptPrimary(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)) {
                     is AttemptResult.Done -> first.outcome
-                    is AttemptResult.Retry -> retryOutcome(key = key, prompt = prompt, startedMs = startedMs)
+                    is AttemptResult.Retry -> retryOutcome(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
@@ -94,7 +104,12 @@ class OpenRouterStyleClient(
         }
     }
 
-    private suspend fun retryOutcome(key: String, prompt: StylePrompt, startedMs: Long): LlmStyleOutcome =
+    private suspend fun retryOutcome(
+        key: String,
+        prompt: StylePrompt,
+        sourceText: String,
+        startedMs: Long,
+    ): LlmStyleOutcome =
         when (
             val second = attempt(
                 key = key,
@@ -102,6 +117,7 @@ class OpenRouterStyleClient(
                 providerOrder = OpenRouterPayload.FALLBACK_PROVIDER_ORDER,
                 providerIgnore = OpenRouterPayload.FALLBACK_PROVIDER_IGNORE,
                 prompt = prompt,
+                sourceText = sourceText,
                 startedMs = startedMs,
             )
         ) {
@@ -113,21 +129,27 @@ class OpenRouterStyleClient(
             )
         }
 
-    private suspend fun attemptPrimary(key: String, prompt: StylePrompt, startedMs: Long): AttemptResult =
+    private suspend fun attemptPrimary(
+        key: String,
+        prompt: StylePrompt,
+        sourceText: String,
+        startedMs: Long,
+    ): AttemptResult =
         attempt(
             key = key,
             model = OpenRouterPayload.PRIMARY_MODEL,
             providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
             providerIgnore = emptyList(),
             prompt = prompt,
+            sourceText = sourceText,
             startedMs = startedMs,
         )
 
     /**
-     * One model attempt, streamed. [AttemptResult.Retry] means the
-     * failure class is worth the other model's one try (model
-     * unavailable, liveness death, retryable stream error); anything
-     * else — success or a definitive failure — is [AttemptResult.Done].
+     * One model attempt, streamed. Success is [AttemptResult.Done];
+     * EVERY failure class is [AttemptResult.Retry] — worth the other
+     * model's one try (ENC-82). The chain gives up only when the
+     * fallback attempt also fails, reporting its reason.
      */
     private suspend fun attempt(
         key: String,
@@ -135,6 +157,7 @@ class OpenRouterStyleClient(
         providerOrder: List<String>?,
         providerIgnore: List<String>,
         prompt: StylePrompt,
+        sourceText: String,
         startedMs: Long,
     ): AttemptResult {
         val request = OpenRouterPayload.buildChatRequest(
@@ -164,18 +187,31 @@ class OpenRouterStyleClient(
             call.cancel()
             return streamErrorResult(data = assembly.errorData, model = model)
         }
-        val result = if (assembly.doneReceived) {
-            // [DONE] only ever terminates a 2xx stream; the producer may
-            // still be draining the socket, so don't wait on it.
-            call.cancel()
-            HttpResult(status = HttpURLConnection.HTTP_OK, body = "")
-        } else {
-            call.await()
+        val result = try {
+            if (assembly.doneReceived) {
+                // [DONE] only ever terminates a 2xx stream; the producer may
+                // still be draining the socket, so don't wait on it.
+                call.cancel()
+                HttpResult(status = HttpURLConnection.HTTP_OK, body = "")
+            } else {
+                call.await()
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (exception: Exception) {
+            // The producer died mid-stream (socket, IO): a provider
+            // failure like any other — worth the other model's try.
+            Log.d(TAG, "style attempt model=$model outcome=$REASON_TRANSPORT_ERROR detail=${exception.javaClass.simpleName}")
+            return AttemptResult.Retry(reason = REASON_TRANSPORT_ERROR)
         }
         if (result.status != HttpURLConnection.HTTP_OK) return httpFailureResult(result = result, model = model)
-        val outcome = finish(content = assembly.content, provider = assembly.provider, startedMs = startedMs, model = model)
-        Log.d(TAG, "style attempt model=$model provider=${outcome.providerLabel()} outcome=${outcome.logLabel()}")
-        return AttemptResult.Done(outcome)
+        return finish(
+            content = assembly.content,
+            provider = assembly.provider,
+            startedMs = startedMs,
+            model = model,
+            sourceText = sourceText,
+        )
     }
 
     /**
@@ -225,9 +261,7 @@ class OpenRouterStyleClient(
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE, provider = provider)
         }
         Log.d(TAG, "style attempt model=$model outcome=$REASON_STREAM_ERROR")
-        return AttemptResult.Done(
-            LlmStyleOutcome.FellBack(reason = REASON_STREAM_ERROR, model = model, provider = provider),
-        )
+        return AttemptResult.Retry(reason = REASON_STREAM_ERROR, provider = provider)
     }
 
     private fun httpFailureResult(result: HttpResult, model: String): AttemptResult {
@@ -236,26 +270,49 @@ class OpenRouterStyleClient(
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE)
         }
         Log.d(TAG, "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status}")
-        return AttemptResult.Done(
-            LlmStyleOutcome.FellBack(
-                reason = REASON_HTTP_PREFIX + result.status,
-                model = model,
-                provider = OpenRouterPayload.extractProvider(result.body),
-            ),
+        return AttemptResult.Retry(
+            reason = REASON_HTTP_PREFIX + result.status,
+            provider = OpenRouterPayload.extractProvider(result.body),
         )
     }
 
-    private fun finish(content: String, provider: String?, startedMs: Long, model: String): LlmStyleOutcome {
+    /**
+     * Cleans one attempt's assembled content and puts it through the
+     * ENC-82 guard: only a guarded pass may become [AttemptResult.Done]
+     * with a styled outcome; refusal and fidelity verdicts retry.
+     */
+    private fun finish(
+        content: String,
+        provider: String?,
+        startedMs: Long,
+        model: String,
+        sourceText: String,
+    ): AttemptResult {
         val cleaned = cleaner.clean(content)
         if (cleaned.isBlank()) {
-            return LlmStyleOutcome.FellBack(reason = REASON_EMPTY_RESPONSE, model = model, provider = provider)
+            Log.d(TAG, "style attempt model=$model outcome=$REASON_EMPTY_RESPONSE")
+            return AttemptResult.Retry(reason = REASON_EMPTY_RESPONSE, provider = provider)
         }
-        return LlmStyleOutcome.Styled(
-            text = cleaned,
-            llmMs = clock() - startedMs,
-            model = model,
-            provider = provider,
-        )
+        return when (StyleOutputGuard.classify(source = sourceText, styled = cleaned)) {
+            StyleOutputGuard.Verdict.PASS -> {
+                val outcome = LlmStyleOutcome.Styled(
+                    text = cleaned,
+                    llmMs = clock() - startedMs,
+                    model = model,
+                    provider = provider,
+                )
+                Log.d(TAG, "style attempt model=$model provider=${outcome.providerLabel()} outcome=${outcome.logLabel()}")
+                AttemptResult.Done(outcome)
+            }
+            StyleOutputGuard.Verdict.REFUSAL -> {
+                Log.d(TAG, "style attempt model=$model outcome=$REASON_REFUSAL")
+                AttemptResult.Retry(reason = REASON_REFUSAL, provider = provider)
+            }
+            StyleOutputGuard.Verdict.FIDELITY_LOSS -> {
+                Log.d(TAG, "style attempt model=$model outcome=$REASON_FIDELITY")
+                AttemptResult.Retry(reason = REASON_FIDELITY, provider = provider)
+            }
+        }
     }
 
     /** Short telemetry label for an outcome; never carries response text. */
@@ -310,6 +367,12 @@ class OpenRouterStyleClient(
         const val REASON_STREAM_ERROR: String = "stream-error"
         const val REASON_HTTP_PREFIX: String = "http-"
         const val REASON_EMPTY_RESPONSE: String = "empty-response"
+
+        /** The model's output was refusal-shaped (ENC-82) — a failure, never a result. */
+        const val REASON_REFUSAL: String = "refusal"
+
+        /** The model's output silently dropped protected content (ENC-82). */
+        const val REASON_FIDELITY: String = "fidelity"
 
         const val DATA_PREFIX: String = "data:"
         const val DONE_MARKER: String = "[DONE]"
