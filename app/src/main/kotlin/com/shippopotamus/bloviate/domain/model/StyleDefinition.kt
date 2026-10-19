@@ -250,15 +250,19 @@ object StyleCatalog {
     private val Talkie: StyleDefinition = StyleDefinition(
         id = "talkie",
         displayName = "Talkie",
-        description = "Bright, assured 1920s newspaper English.",
-        sample = "I shall send the letter by the evening post; the matter is quite settled.",
+        description = "Bright, clipped 1920s newspaper English.",
+        sample = "Wire just in. The vote is Thursday. I am for it, and so is the town.",
         systemInstructions = "Casing: crisp 1920s newspaper sentence case — capitals where a " +
-            "quality daily of 1925 would put them, no more. Punctuation: the period's habits — " +
-            "semicolons and em dashes welcome, sentences balanced and a shade longer than " +
-            "today's, each one finished cleanly. Paragraphing: one assured paragraph, brisk " +
-            "throughout. Register: educated 1920s prose — the voice of a good newspaper of " +
-            "the era, assured and intelligent, formal one notch above modern casual, period " +
-            "idiom ('rather', 'quite', 'splendid') used sparingly and never as costume. " +
+            "quality daily of 1925 would put them, no more. Punctuation: plain — full stops " +
+            "do the work, commas are rationed, and the semicolon is left to the other fellow. " +
+            "Sentence architecture: CLIP, never swell. Every sentence is short, declarative, " +
+            "and finished before it can gather finery — no sentence runs past twelve words, " +
+            "facts stand one to a line in a wire-service row, and NEVER write a periodic " +
+            "sentence that holds its meaning back for a grand arrival; that swell belongs " +
+            "to the veranda, not the newsroom. Paragraphing: one brisk paragraph, no " +
+            "lingering. Register: educated 1920s American newspaper prose — bright, " +
+            "assured, plain-spoken, the slang of the press room rather than the salon, " +
+            "period idiom ('rather', 'quite', 'splendid') sprinkled, never poured. " +
             "Render the 1920s register of the transcript's own language — restyle the text " +
             "in its own tongue in that language's period voice; never translate it into " +
             "English. Period flavor touches FORM ONLY — diction, rhythm, idiom: a modern " +
@@ -267,19 +271,22 @@ object StyleCatalog {
             "ever appear. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
-                raw = "i just got a new phone and honestly the battery is amazing, it lasts all day",
-                styled = "I have lately got a new phone, and the battery is quite a marvel — " +
-                    "it lasts the whole day through.",
+                raw = "i took some photos of the kids at the park with my new phone " +
+                    "and the battery lasted all day",
+                styled = "I took photos of the kids at the park. My new phone did the work. " +
+                    "The battery lasted all day.",
             ),
             FewShot(
-                raw = "the server deploy failed because the database migration timed out at step three",
-                styled = "The deployment failed at the third step, the database migration " +
-                    "having run past its allotted time; the fault is plain, and rather tiresome.",
+                raw = "the backup script failed at step three, the database migration " +
+                    "filled the disk and we lost two hours of logs",
+                styled = "The backup script failed at the third step. " +
+                    "The database migration filled the disk. Two hours of logs are gone.",
             ),
             FewShot(
-                raw = "i think we should leave the party early, the music is terrible and i'm bored",
-                styled = "I am for leaving the party early; the music is quite dreadful, " +
-                    "and I am thoroughly bored.",
+                raw = "i disagree with the plan, the cost is too high " +
+                    "and the timeline is unrealistic",
+                styled = "I disagree with the plan. The cost is too high. " +
+                    "The timeline is pure fantasy.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -292,35 +299,45 @@ object StyleCatalog {
         description = "Courtly, periodic, unhurried — the old Southern written voice.",
         sample = "I am most grateful for the news, and I shall attend to the matter in due course.",
         systemInstructions = "Casing: formal sentence case throughout, nothing clipped or " +
-            "casual. Punctuation: periodic sentences built on balanced clauses, semicolons " +
-            "and colons doing the joinery, each sentence allowed its full measure. " +
-            "Paragraphing: one measured paragraph, unhurried from the first word to the " +
-            "last. Register: the educated nineteenth-century Southern written voice — " +
-            "elaborate courtesy, Latinate diction with a scriptural cadence beneath it, " +
-            "gracious formality even in disagreement; courtly without servility, assured " +
-            "and never hurried. It is a voice, not a letter: no salutations, no sign-offs, " +
-            "no framing of address. Render this register of the transcript's own language " +
-            "— restyle the text in its own tongue in that language's period voice; never " +
-            "translate it into English. The period lends its syntax, diction, and courtesy " +
-            "ONLY: facts, names, numbers, and referents never change, a modern thing keeps " +
-            "the speaker's name for it, and the style must never import the era's racial " +
+            "casual. Punctuation: the semicolon and the colon do the joinery; commas fall " +
+            "where the cadence breathes. Sentence architecture: DILATE, never clip. Every " +
+            "sentence is built as a period — subordinate clauses first, balanced against " +
+            "one another, courtesy formulae woven through, the main clause arriving only " +
+            "at the end with its full weight; NEVER clip a thought into wire-service " +
+            "fragments or let a fact stand bare and unattended — that haste belongs to " +
+            "the newsroom, not the veranda. Paragraphing: one measured paragraph, " +
+            "unhurried from the first word to the last. Register: the educated " +
+            "nineteenth-century Southern written voice — elaborate courtesy, Latinate " +
+            "diction with a scriptural cadence beneath it, gracious formality even in " +
+            "disagreement; courtly without servility, assured and never hurried. It is " +
+            "a voice, not a letter: no salutations, no sign-offs, no framing of address. " +
+            "Render this register of the transcript's own language — restyle the text in " +
+            "its own tongue in that language's period voice; never translate it into " +
+            "English. The period lends its syntax, diction, and courtesy ONLY: facts, " +
+            "names, numbers, and referents never change, a modern thing keeps the " +
+            "speaker's name for it, and the style must never import the era's racial " +
             "vocabulary or Lost Cause apologetics, on any input, ever. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
-                raw = "thanks for sending the photos, the kids look great and we had a great time",
-                styled = "I am obliged for the photographs; the children look splendid, " +
-                    "and our visit was a pleasure from first to last.",
+                raw = "i took some photos of the kids at the park with my new phone " +
+                    "and the battery lasted all day",
+                styled = "I took the children's photographs at the park with my new phone, " +
+                    "and the battery, I am gratified to say, served faithfully the whole " +
+                    "of the day.",
             ),
             FewShot(
-                raw = "i disagree with the plan, the cost is too high and the timeline is unrealistic",
-                styled = "With respect, I cannot commend the plan: the cost exceeds what " +
-                    "prudence allows, and the schedule promises what no honest effort can deliver.",
+                raw = "the backup script failed at step three, the database migration " +
+                    "filled the disk and we lost two hours of logs",
+                styled = "The backup script failed at its third step, the database migration " +
+                    "having filled the disk beyond its capacity, and we are the poorer " +
+                    "by two hours of logs.",
             ),
             FewShot(
-                raw = "the backup script failed last night because the disk filled up, " +
-                    "and we lost about two hours of logs",
-                styled = "The backup script failed in the night, the disk having filled " +
-                    "beyond its capacity, and we are the poorer by some two hours of logs.",
+                raw = "i disagree with the plan, the cost is too high " +
+                    "and the timeline is unrealistic",
+                styled = "With respect, I cannot commend the plan: its cost exceeds what " +
+                    "prudence allows, and its schedule promises what no honest effort " +
+                    "can deliver.",
             ),
         ),
         kind = StyleKind.LLM,
