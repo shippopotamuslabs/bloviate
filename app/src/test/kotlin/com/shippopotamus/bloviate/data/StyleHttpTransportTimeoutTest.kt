@@ -4,22 +4,35 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * ENC-83 regression pin: the style call's budget is owned by
- * `OpenRouterStyleClient`'s coroutine cap (4s). A non-streamed chat
- * completion sends no bytes until generation finishes, so if the
- * transport's socket read timeout is shorter than realistic generation
- * (observed 3.3–4.0s server-side), it pre-empts the client cap and every
- * slow-but-successful call silently falls back. The socket timeouts are
- * backstops and must never bind first.
+ * The socket-vs-client budget pin, born in ENC-83 and re-based in
+ * ENC-81. ENC-83's bug: two nested caps, the wrong one binding — the
+ * transport's 2.5s socket read timeout pre-empted the client's 4s total
+ * cap on a silent single-shot response, so every slow-but-successful
+ * style call fell back. ENC-81 replaced the single total cap with
+ * liveness budgets judged by the client (first-token / inter-token
+ * gap, plus a generous absolute backstop). The invariant survives the
+ * redesign: the socket timeout is a backstop for an abandoned read and
+ * must never bind before the client's own gap budget — and it must
+ * stay below the absolute cap, or an abandoned stream could outlive
+ * the call that gave up on it.
  */
 class StyleHttpTransportTimeoutTest {
 
     @Test
-    fun `the socket read timeout never binds before the client cap`() {
+    fun `the socket read timeout never binds before the client gap budget`() {
         assertTrue(
-            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS >= CLIENT_CAP_MS,
+            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS > OpenRouterStyleClient.TOKEN_GAP_TIMEOUT_MS,
             "read timeout ${HttpURLConnectionStyleTransport.READ_TIMEOUT_MS}ms would pre-empt " +
-                "the client's ${CLIENT_CAP_MS}ms cap",
+                "the client's ${OpenRouterStyleClient.TOKEN_GAP_TIMEOUT_MS}ms gap budget",
+        )
+    }
+
+    @Test
+    fun `the socket read timeout stays below the client absolute cap`() {
+        assertTrue(
+            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS < OpenRouterStyleClient.ABSOLUTE_CAP_MS,
+            "read timeout ${HttpURLConnectionStyleTransport.READ_TIMEOUT_MS}ms would outlive " +
+                "the client's ${OpenRouterStyleClient.ABSOLUTE_CAP_MS}ms absolute cap",
         )
     }
 
@@ -29,10 +42,5 @@ class StyleHttpTransportTimeoutTest {
             HttpURLConnectionStyleTransport.CONNECT_TIMEOUT_MS <
                 HttpURLConnectionStyleTransport.READ_TIMEOUT_MS,
         )
-    }
-
-    private companion object {
-        /** Mirrors OpenRouterStyleClient's documented whole-call cap. */
-        const val CLIENT_CAP_MS: Int = 4_000
     }
 }
