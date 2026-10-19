@@ -1,6 +1,12 @@
 package com.shippopotamus.bloviate.service
 
 import android.content.res.Configuration
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -30,10 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -44,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -72,7 +82,18 @@ private val WAVEFORM_HEIGHT: Dp = 28.dp
 private val WAVEFORM_BAR_WIDTH: Dp = 4.dp
 private val WAVEFORM_BAR_SPACING: Dp = 3.dp
 private val WAVEFORM_MIN_BAR_HEIGHT: Dp = 4.dp
-private val PROGRESS_SIZE: Dp = 24.dp
+
+/**
+ * Shimmer parameters, Enclave's `ShimmerText` values verbatim (ENC-76):
+ * the erase band is 200 px wide and the sweep travels 1 000 px per
+ * 1 500 ms pass. The band's strength is `1 − highlight alpha`, so the
+ * highlight color is passed at [SHIMMER_HIGHLIGHT_ALPHA] to land the
+ * strength mid-range.
+ */
+private const val SHIMMER_BAND_WIDTH_PX: Float = 200f
+private const val SHIMMER_SWEEP_DISTANCE_PX: Float = 1_000f
+private const val SHIMMER_SWEEP_DURATION_MS: Int = 1_500
+private const val SHIMMER_HIGHLIGHT_ALPHA: Float = 0.45f
 private const val DISMISS_ZONE_SCALE: Float = 0.8f
 private const val FULL_SCALE: Float = 1f
 private const val QUIET_BAR_ALPHA: Float = 0.35f
@@ -105,9 +126,12 @@ private val WAVEFORM_WIDTH: Dp =
  *   body) exactly like the bubble; hit-testing in the bar's gesture
  *   handler decides tap-vs-drag by movement, so a press that moves is a
  *   drag and never a button tap.
- * - [RecordingBarState.Transcribing] / [RecordingBarState.Done] /
- *   [RecordingBarState.Error]: transient bar/bubble treatments while the
- *   pipeline finishes; not interactive.
+ * - [RecordingBarState.Transcribing] / [RecordingBarState.Polishing]:
+ *   the bar while the send pipeline runs, showing the stage's name as
+ *   small shimmering text (ENC-76) — the pipeline has two stages with
+ *   very different latencies, and the bar says which one it is in.
+ * - [RecordingBarState.Done] / [RecordingBarState.Error]: transient
+ *   bubble treatments while the pipeline finishes; not interactive.
  *
  * Gestures are detected inside the composition: the composition's internal
  * child view is the touch target, so a view-level touch listener on the
@@ -134,7 +158,7 @@ private val WAVEFORM_WIDTH: Dp =
  * recording controller runs the same return on its own timer; whichever
  * fires first wins, so the bubble can never strand on the check or the
  * error mark — the composition is provably alive whenever either is
- * visible (the transcribing spinner animates in this same window).
+ * visible (the stage shimmer animates in this same window).
  */
 @Composable
 fun BubbleContent(
@@ -158,6 +182,7 @@ fun BubbleContent(
             RecordingBarState.Idle,
             is RecordingBarState.Recording,
             RecordingBarState.Transcribing,
+            RecordingBarState.Polishing,
             -> null
         }
         if (displayMs != null) {
@@ -187,7 +212,16 @@ fun BubbleContent(
             onDragCancel = onDragCancel,
             modifier = modifier,
         )
-        RecordingBarState.Transcribing -> TranscribingBar(modifier = modifier)
+        RecordingBarState.Transcribing,
+        RecordingBarState.Polishing,
+        -> ProcessingBar(
+            label = stringResource(
+                requireNotNull(barState.processingLabelRes()) {
+                    "Only the pipeline stages carry a stage label: $barState"
+                },
+            ),
+            modifier = modifier,
+        )
         RecordingBarState.Done -> DoneBubble(modifier = modifier)
         RecordingBarState.Error -> ErrorBubble(modifier = modifier)
     }
@@ -377,13 +411,34 @@ private fun RecordingBar(
     }
 }
 
+/**
+ * The stage word the processing bar shows for a send-pipeline state
+ * (ENC-76): the label is state-driven — [RecordingBarState.Transcribing]
+ * and [RecordingBarState.Polishing] name their stages, every other state
+ * has no stage word. The word is also the bar's content description, so
+ * what a screen reader announces is what the bar says.
+ */
+internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
+    RecordingBarState.Transcribing -> R.string.bubble_stage_transcribing
+    RecordingBarState.Polishing -> R.string.bubble_stage_polishing
+    RecordingBarState.Idle,
+    is RecordingBarState.Recording,
+    RecordingBarState.Done,
+    RecordingBarState.Error,
+    -> null
+}
+
+/**
+ * The bar while the send pipeline runs: the recording bar's skeleton with
+ * the current stage's name as small shimmering text where the waveform
+ * sat (ENC-76). Not interactive — the pipeline owns this window.
+ */
 @Composable
-private fun TranscribingBar(modifier: Modifier = Modifier) {
-    val description = stringResource(R.string.bubble_transcribing_description)
+private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier
             .height(BAR_HEIGHT)
-            .semantics { contentDescription = description },
+            .semantics { contentDescription = label },
         shape = RoundedCornerShape(BAR_CORNER),
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -395,17 +450,76 @@ private fun TranscribingBar(modifier: Modifier = Modifier) {
         ) {
             Box(modifier = Modifier.size(BAR_SLOT_SIZE))
             Box(
-                modifier = Modifier.width(WAVEFORM_WIDTH),
+                modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(PROGRESS_SIZE),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                ShimmerText(
+                    text = label,
+                    baseColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    highlightColor =
+                        MaterialTheme.colorScheme.primary.copy(alpha = SHIMMER_HIGHLIGHT_ALPHA),
+                    style = MaterialTheme.typography.labelLarge,
                 )
             }
             Box(modifier = Modifier.size(BAR_SLOT_SIZE))
         }
     }
+}
+
+/**
+ * A word with a sweep running through it — ported from Enclave's
+ * `ShimmerText` (`core/ui/component/ShimmerText.kt`), which its bottom
+ * input bar shows while transcribing (ENC-76). The technique is
+ * Enclave's: the text is drawn in [baseColor] on an offscreen layer, then
+ * a gradient band sweeps across under [BlendMode.DstOut], erasing a
+ * moving window out of the glyphs so the surface behind shows through.
+ * The sweep is a 1 500 ms linear infinite transition (offset 0→1 000 px,
+ * restart), the band 200 px wide; the band's strength is derived from the
+ * highlight color's alpha (`1 − alpha`), exactly as Enclave computes it.
+ * The animated offset is read inside the draw block, so the sweep runs
+ * at display rate without recomposing.
+ */
+@Composable
+private fun ShimmerText(
+    text: String,
+    baseColor: Color,
+    highlightColor: Color,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val animatedOffset = infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = SHIMMER_SWEEP_DISTANCE_PX,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = SHIMMER_SWEEP_DURATION_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmerOffset",
+    )
+    val bandStrength = (1f - highlightColor.alpha).coerceIn(0f, 1f)
+    Text(
+        text = text,
+        style = style.copy(color = baseColor),
+        modifier = modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithCache {
+                onDrawWithContent {
+                    drawContent()
+                    val offset = animatedOffset.value
+                    val brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = bandStrength),
+                            Color.Transparent,
+                        ),
+                        start = Offset(offset - SHIMMER_BAND_WIDTH_PX, 0f),
+                        end = Offset(offset, 0f),
+                    )
+                    drawRect(brush = brush, blendMode = BlendMode.DstOut)
+                }
+            },
+    )
 }
 
 @Composable
@@ -661,6 +775,24 @@ private fun BubbleContentTranscribingPreview() {
     PreviewTheme {
         BubbleContent(
             barState = RecordingBarState.Transcribing,
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Polishing - Light", showBackground = true)
+@Preview(
+    name = "Polishing - Dark",
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+private fun BubbleContentPolishingPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Polishing,
             waveformLevels = { emptyList() },
             inDismissZone = false,
         )

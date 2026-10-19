@@ -13,6 +13,8 @@ import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.SendProgressPort
+import com.shippopotamus.bloviate.domain.port.SendStage
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import kotlinx.coroutines.CancellationException
@@ -203,9 +205,11 @@ class BubbleRecordingController(
                 waveform.clear()
                 Log.d(TAG, "Host hidden while recording; recording cancelled")
             }
-            RecordingBarState.Transcribing -> {
+            RecordingBarState.Transcribing,
+            RecordingBarState.Polishing,
+            -> {
                 pipelineJob?.cancel()
-                Log.d(TAG, "Host hidden while transcribing; transcript discarded")
+                Log.d(TAG, "Host hidden while the send pipeline ran; transcript discarded")
             }
             RecordingBarState.Idle,
             RecordingBarState.Done,
@@ -370,7 +374,12 @@ class BubbleRecordingController(
                 raw
             }
             val transcribedAtMs = nowMs()
-            val styled = withContext(workDispatcher) { stylingProcessor.process(rawTranscript) }
+            val styled = withContext(workDispatcher) {
+                stylingProcessor.process(
+                    rawTranscript,
+                    progress = SendProgressPort { stage -> onSendStage(stage) },
+                )
+            }
             Log.d(
                 TAG,
                 "style id=${styled.styleId} llmMs=${styled.llmMs ?: "-"} fellBack=${styled.fellBack}",
@@ -411,6 +420,19 @@ class BubbleRecordingController(
             Log.w(TAG, "Transcription failed; the recording is kept for one retry tap", exception)
             retainForRetry(samples, isRetry)
             showError()
+        }
+    }
+
+    /**
+     * Stage transitions reported by the send pipeline (ENC-76): the bar
+     * names the stage it is in, so the flip to
+     * [RecordingBarState.Polishing] lands the moment the styling stage
+     * commits to its LLM call. Guarded to the transcribing window — a
+     * stray report after the pipeline has moved on changes nothing.
+     */
+    private fun onSendStage(stage: SendStage) {
+        if (stage == SendStage.POLISHING && mutableBarState.value == RecordingBarState.Transcribing) {
+            mutableBarState.update { RecordingBarState.Polishing }
         }
     }
 

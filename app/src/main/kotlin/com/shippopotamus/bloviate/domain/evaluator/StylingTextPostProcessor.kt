@@ -5,6 +5,8 @@ import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.domain.port.ApiKeyPort
 import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.domain.port.LlmStylePort
+import com.shippopotamus.bloviate.domain.port.SendProgressPort
+import com.shippopotamus.bloviate.domain.port.SendStage
 import com.shippopotamus.bloviate.domain.port.StylePreferencePort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import javax.inject.Inject
@@ -35,7 +37,18 @@ class StylingTextPostProcessor @Inject constructor(
     private val apiKeys: ApiKeyPort,
 ) {
 
-    suspend fun process(rawTranscript: String): StyleProcessResult {
+    /**
+     * Styles [rawTranscript]. When the LLM pass actually runs, [progress]
+     * is told the moment the pipeline commits to the call
+     * ([SendStage.POLISHING], ENC-76) — before the network wait, so the
+     * recording bar's stage label flips at the real handoff; a pass that
+     * then falls back still reports it, because the stage genuinely ran.
+     * Local-only sends (mechanical style, or no key stored) never report.
+     */
+    suspend fun process(
+        rawTranscript: String,
+        progress: SendProgressPort? = null,
+    ): StyleProcessResult {
         val localText = local.process(rawTranscript)
         val style = StyleCatalog.byId(stylePreference.selectedStyleId.value)
         if (style.kind != StyleKind.LLM || !apiKeys.hasKey.value) {
@@ -46,6 +59,7 @@ class StylingTextPostProcessor @Inject constructor(
                 fellBack = false,
             )
         }
+        progress?.onStage(SendStage.POLISHING)
         return when (val outcome = llm.style(style, localText)) {
             is LlmStyleOutcome.Styled -> StyleProcessResult(
                 text = outcome.text,
