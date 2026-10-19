@@ -32,18 +32,49 @@ object OpenRouterPayload {
     const val TEMPERATURE: Double = 0.3
     const val MAX_TOKENS: Int = 1024
 
-    /** Builds the chat-completions request body for [model] and [prompt]. */
+    /**
+     * Provider pin for the primary (ENC-80). Queried from OpenRouter's
+     * endpoints API at implementation time (2026-10-19): the
+     * `~x-ai/grok-latest` alias exposes no endpoint list of its own (it
+     * redirects), and its current resolution `x-ai/grok-4.7` is served
+     * ONLY by xAI's own endpoints (slugs `xai`, `xai/zdr`, `xai/zdr/us`,
+     * `xai/priority`, `xai/zdr/priority`). Ordering the base slug `xai`
+     * therefore pins the whole first-party family and keeps any future
+     * third-party endpoint from silently joining the pool.
+     */
+    val PRIMARY_PROVIDER_ORDER: List<String> = listOf("xai")
+
+    /**
+     * Provider pin for the fallback (ENC-80): prefer Anthropic's
+     * first-party endpoint (slug `anthropic`) and skip
+     * `claude-on-aws` ("Claude Platform on AWS") — the upstream behind
+     * the 2026-10-19 dogfood 499 + degraded-retry incident. Fallbacks
+     * stay enabled, so Bedrock/Vertex/Azure still serve if Anthropic's
+     * own endpoint is down.
+     */
+    val FALLBACK_PROVIDER_ORDER: List<String> = listOf("anthropic")
+    val FALLBACK_PROVIDER_IGNORE: List<String> = listOf("claude-on-aws")
+
+    /**
+     * Builds the chat-completions request body for [model] and [prompt].
+     * When [providerOrder] is given, a `provider` routing block is
+     * appended (ENC-80): try those provider slugs in order,
+     * `allow_fallbacks` on, minus any [providerIgnore] slugs.
+     */
     fun buildChatRequest(
         model: String,
         system: PromptMessage,
         user: PromptMessage,
         temperature: Double = TEMPERATURE,
         maxTokens: Int = MAX_TOKENS,
+        providerOrder: List<String>? = null,
+        providerIgnore: List<String> = emptyList(),
     ): String =
         "{\"model\":" + escape(model) +
             ",\"temperature\":" + temperature +
             ",\"max_tokens\":" + maxTokens +
-            ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]}"
+            ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]" +
+            providerJson(providerOrder, providerIgnore) + "}"
 
     /** Extracts `choices[0].message.content` from a response body, or null. */
     fun extractAssistantContent(body: String): String? {
@@ -51,6 +82,16 @@ object OpenRouterPayload {
         val messageIndex = findKey(body, "message", choicesIndex) ?: return null
         val contentIndex = findKey(body, "content", messageIndex) ?: return null
         return readStringValue(body, contentIndex)
+    }
+
+    /**
+     * Extracts the top-level `provider` OpenRouter stamps on a response
+     * (the upstream that actually served it, e.g. "xAI" / "Anthropic"),
+     * or null when the body carries none (ENC-80 telemetry).
+     */
+    fun extractProvider(body: String): String? {
+        val providerIndex = findKey(body, "provider", 0) ?: return null
+        return readStringValue(body, providerIndex)
     }
 
     /**
@@ -62,6 +103,17 @@ object OpenRouterPayload {
         if (status == MODEL_NOT_FOUND_STATUS) return true
         val lowered = body.lowercase()
         return MODEL_UNAVAILABLE_MARKERS.any { marker -> marker in lowered }
+    }
+
+    private fun providerJson(order: List<String>?, ignore: List<String>): String {
+        if (order == null) return ""
+        val orderJson = order.joinToString(separator = ",") { slug -> escape(slug) }
+        val ignoreJson = if (ignore.isEmpty()) {
+            ""
+        } else {
+            ",\"ignore\":[" + ignore.joinToString(separator = ",") { slug -> escape(slug) } + "]"
+        }
+        return ",\"provider\":{\"order\":[" + orderJson + "],\"allow_fallbacks\":true" + ignoreJson + "}"
     }
 
     private fun messageJson(message: PromptMessage): String =

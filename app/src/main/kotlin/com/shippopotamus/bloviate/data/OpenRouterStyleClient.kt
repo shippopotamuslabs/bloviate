@@ -30,6 +30,10 @@ import java.net.HttpURLConnection
  * retry on [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that
  * the caller keeps the local text. Each attempt logs its `model=` so
  * dogfood telemetry shows which link of the chain actually answered.
+ * Each attempt also pins its OpenRouter provider routing (ENC-80:
+ * [OpenRouterPayload.PRIMARY_PROVIDER_ORDER] /
+ * [OpenRouterPayload.FALLBACK_PROVIDER_ORDER]) and surfaces the
+ * responding provider OpenRouter stamps on the response.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -50,7 +54,10 @@ class OpenRouterStyleClient(
             withTimeout(LLM_TIMEOUT_MS) {
                 attempt(key = key, model = OpenRouterPayload.PRIMARY_MODEL, prompt = prompt, startedMs = startedMs)
                     ?: retryOnce(key = key, prompt = prompt, startedMs = startedMs)
-                    ?: LlmStyleOutcome.FellBack(reason = REASON_MODEL_UNAVAILABLE)
+                    ?: LlmStyleOutcome.FellBack(
+                        reason = REASON_MODEL_UNAVAILABLE,
+                        model = OpenRouterPayload.FALLBACK_MODEL,
+                    )
             }
         } catch (timeout: TimeoutCancellationException) {
             // The reason code is the pipeline's contract; the log keeps the
@@ -74,12 +81,20 @@ class OpenRouterStyleClient(
         model: String,
         prompt: StylePrompt,
         startedMs: Long,
+        providerOrder: List<String>? = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
+        providerIgnore: List<String> = emptyList(),
     ): LlmStyleOutcome? {
-        val request = OpenRouterPayload.buildChatRequest(model = model, system = prompt.system, user = prompt.user)
+        val request = OpenRouterPayload.buildChatRequest(
+            model = model,
+            system = prompt.system,
+            user = prompt.user,
+            providerOrder = providerOrder,
+            providerIgnore = providerIgnore,
+        )
         val result = transport.postChatCompletion(apiKey = key, requestJson = request)
         if (result.status == HttpURLConnection.HTTP_OK) {
-            val outcome = finish(body = result.body, startedMs = startedMs)
-            Log.d(TAG, "style attempt model=$model outcome=${outcome.logLabel()}")
+            val outcome = finish(body = result.body, startedMs = startedMs, model = model)
+            Log.d(TAG, "style attempt model=$model provider=${outcome.providerLabel()} outcome=${outcome.logLabel()}")
             return outcome
         }
         if (OpenRouterPayload.isModelUnavailable(status = result.status, body = result.body)) {
@@ -87,7 +102,11 @@ class OpenRouterStyleClient(
             return null
         }
         Log.d(TAG, "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status}")
-        return LlmStyleOutcome.FellBack(reason = REASON_HTTP_PREFIX + result.status)
+        return LlmStyleOutcome.FellBack(
+            reason = REASON_HTTP_PREFIX + result.status,
+            model = model,
+            provider = OpenRouterPayload.extractProvider(result.body),
+        )
     }
 
     private suspend fun retryOnce(
@@ -99,11 +118,17 @@ class OpenRouterStyleClient(
             model = OpenRouterPayload.FALLBACK_MODEL,
             system = prompt.system,
             user = prompt.user,
+            providerOrder = OpenRouterPayload.FALLBACK_PROVIDER_ORDER,
+            providerIgnore = OpenRouterPayload.FALLBACK_PROVIDER_IGNORE,
         )
         val result = transport.postChatCompletion(apiKey = key, requestJson = request)
         if (result.status == HttpURLConnection.HTTP_OK) {
-            val outcome = finish(body = result.body, startedMs = startedMs)
-            Log.d(TAG, "style attempt model=${OpenRouterPayload.FALLBACK_MODEL} outcome=${outcome.logLabel()}")
+            val outcome = finish(body = result.body, startedMs = startedMs, model = OpenRouterPayload.FALLBACK_MODEL)
+            Log.d(
+                TAG,
+                "style attempt model=${OpenRouterPayload.FALLBACK_MODEL}" +
+                    " provider=${outcome.providerLabel()} outcome=${outcome.logLabel()}",
+            )
             return outcome
         }
         Log.d(TAG, "style attempt model=${OpenRouterPayload.FALLBACK_MODEL} outcome=failed status=${result.status}")
@@ -117,12 +142,27 @@ class OpenRouterStyleClient(
             is LlmStyleOutcome.FellBack -> "fell-back:$reason"
         }
 
-    private fun finish(body: String, startedMs: Long): LlmStyleOutcome {
+    /** The responding provider for telemetry, or "-" when unknown (ENC-80). */
+    private fun LlmStyleOutcome.providerLabel(): String =
+        when (this) {
+            is LlmStyleOutcome.Styled -> provider ?: "-"
+            is LlmStyleOutcome.FellBack -> provider ?: "-"
+        }
+
+    private fun finish(body: String, startedMs: Long, model: String): LlmStyleOutcome {
+        val provider = OpenRouterPayload.extractProvider(body)
         val content = OpenRouterPayload.extractAssistantContent(body)
-            ?: return LlmStyleOutcome.FellBack(reason = REASON_BAD_RESPONSE)
+            ?: return LlmStyleOutcome.FellBack(reason = REASON_BAD_RESPONSE, model = model, provider = provider)
         val cleaned = cleaner.clean(content)
-        if (cleaned.isBlank()) return LlmStyleOutcome.FellBack(reason = REASON_EMPTY_RESPONSE)
-        return LlmStyleOutcome.Styled(text = cleaned, llmMs = clock() - startedMs)
+        if (cleaned.isBlank()) {
+            return LlmStyleOutcome.FellBack(reason = REASON_EMPTY_RESPONSE, model = model, provider = provider)
+        }
+        return LlmStyleOutcome.Styled(
+            text = cleaned,
+            llmMs = clock() - startedMs,
+            model = model,
+            provider = provider,
+        )
     }
 
     private companion object {
