@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
 import androidx.core.content.ContextCompat
 import com.shippopotamus.bloviate.service.BubbleOverlayService
 import com.shippopotamus.whisper.WhisperEngine
@@ -39,7 +38,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
+            BloviateTheme {
                 MainRoute(
                     viewModel = viewModel,
                     onOpenAccessibilitySettings = ::openAccessibilitySettings,

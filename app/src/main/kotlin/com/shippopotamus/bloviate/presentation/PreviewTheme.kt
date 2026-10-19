@@ -1,21 +1,15 @@
 package com.shippopotamus.bloviate.presentation
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
 /**
- * Theme wrapper for `@Preview` composables across the presentation layer:
- * follows the system dark-mode setting so one preview declaration pair
- * covers Light + Dark. Previews never reference Hilt or real ViewModels
+ * Theme wrapper for `@Preview` composables across the presentation
+ * layer: previews render the real app theme ([BloviateTheme] — dark
+ * only since ENC-75), so a preview is a truthful picture of the shipped
+ * screen. Previews never reference Hilt or real ViewModels
  * (contracts/UI_DESIGN_SPEC.md §4).
  */
 @Composable
 internal fun PreviewTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-        content = content,
-    )
+    BloviateTheme(content = content)
 }
