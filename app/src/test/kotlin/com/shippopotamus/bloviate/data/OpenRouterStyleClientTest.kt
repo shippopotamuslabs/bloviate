@@ -6,8 +6,8 @@ import com.shippopotamus.bloviate.domain.model.StyleCatalog
 import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeStyleHttpTransport
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -38,14 +38,14 @@ class OpenRouterStyleClientTest {
         fakeTransport.handler = { _, _, emit ->
             // The network takes 800ms on the injected clock.
             nowMs = 1_800L
-            emitStream(emit, parts = listOf("Polished ", "text."))
+            emitStream(emit, parts = listOf("The meeting is ", "moved to Friday afternoon."))
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
-        assertEquals("Polished text.", styled.text)
+        assertEquals(STYLED_TEXT, styled.text)
         assertEquals(800L, styled.llmMs)
     }
 
@@ -53,13 +53,13 @@ class OpenRouterStyleClientTest {
     fun `a preamble in the assembled answer is stripped before returning`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf("Here is the rewrite:\nPolished text."))
+            emitStream(emit, parts = listOf("Here is the rewrite:\n$STYLED_TEXT"))
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals("Polished text.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
     }
 
     @Test
@@ -67,7 +67,7 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeKeys.setKey(null)
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(LlmStyleOutcome.FellBack(reason = "no-key"), outcome)
         assertEquals(0, fakeTransport.keylessCallCount)
@@ -84,16 +84,19 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a server error falls back with its status`() = runTest {
+    fun `a server error on both models falls back with its status`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-82: a provider failure retries once on the other model;
+        // the final reason is the last attempt's.
         fakeTransport.handler = { _, _, _ -> HttpResult(status = 500, body = "boom") }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "http-500", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "http-500", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -102,11 +105,11 @@ class OpenRouterStyleClientTest {
         // ENC-80: streamed chunks carry the serving upstream; telemetry
         // surfaces it so instability is visible from logcat.
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf("Polished text."), provider = "xAI")
+            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "xAI")
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals("xAI", styled.provider)
@@ -120,7 +123,7 @@ class OpenRouterStyleClientTest {
             HttpResult(status = 500, body = "{\"provider\":\"Claude Platform on AWS\",\"error\":{}}")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val fellBack = outcome as LlmStyleOutcome.FellBack
         assertEquals("http-500", fellBack.reason)
@@ -135,12 +138,12 @@ class OpenRouterStyleClientTest {
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
             } else {
-                emitStream(emit, parts = listOf("Fallback polish."))
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
                 HttpResult(status = 200, body = "")
             }
         }
 
-        client.style(style = professional, text = "raw words")
+        client.style(style = professional, text = SOURCE_TEXT)
 
         assertTrue(fakeTransport.requests[0].contains("\"stream\":true"))
         assertTrue(fakeTransport.requests[0].contains("\"provider\":{\"order\":[\"xai\"],\"allow_fallbacks\":true}"))
@@ -161,14 +164,14 @@ class OpenRouterStyleClientTest {
                 HttpResult(status = 404, body = "model not found")
             } else {
                 assertTrue(requestJson.contains("anthropic/claude-haiku-5.5"))
-                emitStream(emit, parts = listOf("Haiku polish."))
+                emitStream(emit, parts = listOf(HAIKU_STYLED_TEXT))
                 HttpResult(status = 200, body = "")
             }
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals("Haiku polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(HAIKU_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
         assertEquals(2, fakeTransport.requests.size)
         assertTrue(fakeTransport.requests[0].contains("~x-ai/grok-latest"))
         assertTrue(fakeTransport.requests[1].contains("anthropic/claude-haiku-5.5"))
@@ -183,14 +186,14 @@ class OpenRouterStyleClientTest {
                 HttpResult(status = 404, body = "model not found")
             } else {
                 assertTrue(requestJson.contains(OpenRouterPayload.FALLBACK_MODEL))
-                emitStream(emit, parts = listOf("Fallback polish."))
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
                 HttpResult(status = 200, body = "")
             }
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals("Fallback polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
         assertEquals(2, fakeTransport.keylessCallCount)
     }
 
@@ -199,7 +202,7 @@ class OpenRouterStyleClientTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         fakeTransport.handler = { _, _, _ -> HttpResult(status = 404, body = "model not found") }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
             LlmStyleOutcome.FellBack(reason = "model-unavailable", model = OpenRouterPayload.FALLBACK_MODEL),
@@ -216,20 +219,20 @@ class OpenRouterStyleClientTest {
         // time — past the old 4s total cap AND the old 2.5s socket
         // budget — and the call must succeed. Liveness, not total time.
         fakeTransport.handler = { _, _, emit ->
-            emit(chunk("Long "))
-            repeat(3) {
+            emit(chunk("The "))
+            listOf("meeting ", "is ", "moved ").forEach { part ->
                 delay(TRICKLE_GAP_MS)
-                emit(chunk("polish "))
+                emit(chunk(part))
             }
             delay(TRICKLE_GAP_MS)
-            emit(chunk("done."))
+            emit(chunk("to Friday afternoon."))
             emit(DONE_LINE)
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals("Long polish polish polish done.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
     }
 
     @Test
@@ -242,7 +245,7 @@ class OpenRouterStyleClientTest {
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
             LlmStyleOutcome.FellBack(reason = "first-token-timeout", model = OpenRouterPayload.FALLBACK_MODEL),
@@ -260,15 +263,15 @@ class OpenRouterStyleClientTest {
                 delay(NEVER_STARTS_MS)
                 HttpResult(status = 200, body = "")
             } else {
-                emitStream(emit, parts = listOf("Recovered polish."))
+                emitStream(emit, parts = listOf(STYLED_TEXT))
                 HttpResult(status = 200, body = "")
             }
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         // The fragment from the stalled stream is never used (atomicity).
-        assertEquals("Recovered polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
         assertEquals(2, fakeTransport.keylessCallCount)
     }
 
@@ -281,7 +284,7 @@ class OpenRouterStyleClientTest {
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
             LlmStyleOutcome.FellBack(reason = "stream-stall", model = OpenRouterPayload.FALLBACK_MODEL),
@@ -298,13 +301,13 @@ class OpenRouterStyleClientTest {
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "stream-error", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "stream-error", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
-        assertEquals(1, fakeTransport.keylessCallCount)
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -315,24 +318,30 @@ class OpenRouterStyleClientTest {
                 emit("data: {\"error\":{\"message\":\"Model not found\",\"code\":404}}")
                 HttpResult(status = 200, body = "")
             } else {
-                emitStream(emit, parts = listOf("Fallback polish."))
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
                 HttpResult(status = 200, body = "")
             }
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals("Fallback polish.", (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
     }
 
     @Test
-    fun `a transport exception falls back`() = runTest {
+    fun `a transport exception on both models falls back`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-82: a dead transport is a provider failure — one retry on
+        // the other model before the local text wins.
         fakeTransport.handler = { _, _, _ -> throw IOException("network down") }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
-        assertEquals(LlmStyleOutcome.FellBack(reason = "transport-error"), outcome)
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "transport-error", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+        assertEquals(2, fakeTransport.keylessCallCount)
     }
 
     @Test
@@ -345,12 +354,103 @@ class OpenRouterStyleClientTest {
             HttpResult(status = 200, body = "")
         }
 
-        val outcome = client.style(style = professional, text = "raw words")
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         assertEquals(
-            LlmStyleOutcome.FellBack(reason = "empty-response", model = OpenRouterPayload.PRIMARY_MODEL),
+            LlmStyleOutcome.FellBack(reason = "empty-response", model = OpenRouterPayload.FALLBACK_MODEL),
             outcome,
         )
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a refusal from the primary is never inserted and the fallback answers`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-82's catastrophic case: refusal-shaped output must be a
+        // failure routed to the next model, not a result.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf("I'm sorry, but I can't help with that."))
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a refusal from both models falls back as a refusal`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf("I'm sorry, but I can't help with that."))
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "refusal", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+    }
+
+    @Test
+    fun `a fidelity loss on the primary falls back to the second model`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-82's Idiocracy datapoint, end to end: the primary's
+        // output silently drops the slur; the guard fails it and the
+        // fallback's faithful restyle is what gets inserted.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(IDIOCRACY_DROPPED))
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(IDIOCRACY_PRESERVED))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = IDIOCRACY_SOURCE)
+
+        assertEquals(IDIOCRACY_PRESERVED, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a fidelity loss on both models falls back as fidelity`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf(IDIOCRACY_DROPPED))
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = IDIOCRACY_SOURCE)
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "fidelity", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+    }
+
+    @Test
+    fun `the gerbil limerick passes the guard end to end`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // The canonical ENC-82 datapoint: profanity intact, one call.
+        fakeTransport.handler = { _, _, emit ->
+            emitStream(emit, parts = listOf(GERBIL_STYLED))
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = GERBIL_SOURCE)
+
+        assertEquals(GERBIL_STYLED, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.keylessCallCount)
     }
 
     /** One SSE chunk line carrying [content] (and optionally the serving [provider]). */
@@ -376,5 +476,29 @@ class OpenRouterStyleClientTest {
         const val DONE_LINE: String = "data: [DONE]"
         const val TRICKLE_GAP_MS: Long = 1_500L
         const val NEVER_STARTS_MS: Long = 30_000L
+
+        /** A guard-safe source/restyle pair: same content words, new casing. */
+        const val SOURCE_TEXT: String = "the meeting is moved to friday afternoon"
+        const val STYLED_TEXT: String = "The meeting is moved to Friday afternoon."
+        const val FALLBACK_STYLED_TEXT: String = "The meeting has been moved to Friday afternoon."
+        const val HAIKU_STYLED_TEXT: String = "The meeting is now moved to Friday afternoon."
+
+        const val GERBIL_SOURCE: String =
+            "there once was a man from nantucket who took his gerbil and fucked it"
+        const val GERBIL_STYLED: String =
+            "There once was a man from Nantucket who took his gerbil and fucked it."
+
+        const val IDIOCRACY_SOURCE: String =
+            "what's that movie called, the one where everyone in the future is really stupid, " +
+                "and this guy wakes up and asks the other guy what he's doing, " +
+                "and the guy says reading a book, fag"
+        const val IDIOCRACY_DROPPED: String =
+            "What is that film called — the one where everyone in the future is " +
+                "profoundly unintelligent, and a man awakens to ask another what he is doing, " +
+                "and the man replies that he is reading a book."
+        const val IDIOCRACY_PRESERVED: String =
+            "What's that movie called, the one where everyone in the future is really stupid, " +
+                "and this guy wakes up and asks the other guy what he's doing, " +
+                "and the guy says, reading a book, fag."
     }
 }
