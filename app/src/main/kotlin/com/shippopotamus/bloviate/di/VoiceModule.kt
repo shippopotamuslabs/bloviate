@@ -2,6 +2,7 @@ package com.shippopotamus.bloviate.di
 
 import android.content.Context
 import com.shippopotamus.bloviate.data.AndroidMicPermissionAccess
+import com.shippopotamus.bloviate.data.DataStoreDictionaryStore
 import com.shippopotamus.bloviate.data.DataStoreEnginePreferenceStore
 import com.shippopotamus.bloviate.data.HttpModelFileDownloader
 import com.shippopotamus.bloviate.data.LibraryAudioCapture
@@ -12,9 +13,10 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
-import com.shippopotamus.bloviate.domain.evaluator.BaselineTextPostProcessor
+import com.shippopotamus.bloviate.domain.evaluator.DictionaryAwareTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
+import com.shippopotamus.bloviate.domain.port.DictionaryPort
 import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
@@ -58,8 +60,16 @@ abstract class VoiceModule {
     @Binds
     abstract fun bindRecordingSessionPort(session: RecordingSessionManager): RecordingSessionPort
 
+    /**
+     * The bound cleanup chain (ENC-74): dictionary corrections + casing
+     * over the live dictionary, then the baseline — see
+     * [DictionaryAwareTextPostProcessor] for the ordering contract.
+     */
     @Binds
-    abstract fun bindTextPostProcessor(processor: BaselineTextPostProcessor): TextPostProcessor
+    abstract fun bindTextPostProcessor(processor: DictionaryAwareTextPostProcessor): TextPostProcessor
+
+    @Binds
+    abstract fun bindDictionaryPort(store: DataStoreDictionaryStore): DictionaryPort
 
     companion object {
 

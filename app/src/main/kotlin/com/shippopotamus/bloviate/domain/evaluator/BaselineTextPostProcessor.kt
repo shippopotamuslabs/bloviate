@@ -10,8 +10,10 @@ import javax.inject.Inject
  * deterministic — it never guesses, reorders, or drops real words.
  *
  * Deliberate limits (Phase 3 / future cloud territory, never heuristics
- * that guess): no spoken-punctuation commands, no personal dictionary,
- * no self-correction resolution ("Tuesday — no, Wednesday" stays literal).
+ * that guess): no spoken-punctuation commands, no self-correction
+ * resolution ("Tuesday — no, Wednesday" stays literal). The personal
+ * dictionary is not here either — it layers in front of this baseline in
+ * [DictionaryAwareTextPostProcessor], which is the bound processor.
  */
 class BaselineTextPostProcessor @Inject constructor() : TextPostProcessor {
 
