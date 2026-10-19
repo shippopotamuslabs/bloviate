@@ -108,29 +108,62 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `assistant content is extracted from a choices envelope`() {
-        val body = "{\"id\":\"x\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Polished text.\"}}]}"
+    fun `streaming is off unless requested and on when requested`() {
+        val plain = OpenRouterPayload.buildChatRequest(model = "m", system = system, user = user)
+        val streamed = OpenRouterPayload.buildChatRequest(model = "m", system = system, user = user, stream = true)
 
-        assertEquals("Polished text.", OpenRouterPayload.extractAssistantContent(body))
+        assertFalse(plain.contains("\"stream\""))
+        assertTrue(streamed.contains("\"stream\":true"))
     }
 
     @Test
-    fun `escaped sequences in the answer are unescaped`() {
-        val body = "{\"choices\":[{\"message\":{\"content\":\"Line one.\\nLine \\\"two\\\".\"}}]}"
+    fun `a stream delta is extracted from a chunk`() {
+        val data = "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Pol\"}}]}"
 
-        assertEquals("Line one.\nLine \"two\".", OpenRouterPayload.extractAssistantContent(body))
+        assertEquals("Pol", OpenRouterPayload.extractStreamDelta(data))
+        assertFalse(OpenRouterPayload.isStreamError(data))
     }
 
     @Test
-    fun `a content decoy inside an error string does not resolve as the answer`() {
-        val body = "{\"error\":{\"message\":\"the \\\"content\\\" field is missing\"}}"
+    fun `a role-only opener chunk carries no delta`() {
+        val data = "{\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}"
 
-        assertNull(OpenRouterPayload.extractAssistantContent(body))
+        assertNull(OpenRouterPayload.extractStreamDelta(data))
     }
 
     @Test
-    fun `missing choices read as no answer`() {
-        assertNull(OpenRouterPayload.extractAssistantContent("{\"error\":{\"code\":500}}"))
+    fun `a chunk without choices carries no delta`() {
+        assertNull(OpenRouterPayload.extractStreamDelta("{\"usage\":{\"total_tokens\":9}}"))
+    }
+
+    @Test
+    fun `an error payload chunk reads as a stream error`() {
+        val data = "{\"error\":{\"message\":\"provider exploded\",\"code\":500}}"
+
+        assertTrue(OpenRouterPayload.isStreamError(data))
+        assertNull(OpenRouterPayload.extractStreamDelta(data))
+    }
+
+    @Test
+    fun `the word error inside delta content is not a stream error`() {
+        val data = "{\"choices\":[{\"delta\":{\"content\":\"error handling is fun\"}}]}"
+
+        assertFalse(OpenRouterPayload.isStreamError(data))
+        assertEquals("error handling is fun", OpenRouterPayload.extractStreamDelta(data))
+    }
+
+    @Test
+    fun `escaped sequences in a delta are unescaped`() {
+        val data = "{\"choices\":[{\"delta\":{\"content\":\"Line one.\\nLine \\\"two\\\".\"}}]}"
+
+        assertEquals("Line one.\nLine \"two\".", OpenRouterPayload.extractStreamDelta(data))
+    }
+
+    @Test
+    fun `a content decoy inside an error string does not resolve as a delta`() {
+        val data = "{\"error\":{\"message\":\"the \\\"content\\\" field is missing\"}}"
+
+        assertNull(OpenRouterPayload.extractStreamDelta(data))
     }
 
     @Test
