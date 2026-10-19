@@ -37,18 +37,26 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `the primary provider pool is the us fast class latency sorted`() {
-        // ENC-100: endpoint tags are the OpenRouter endpoints API's
-        // values, verified live at implementation time (all at
-        // status 0 / 100% 30-day uptime). Sean specified US fast
-        // providers: DeepSeek direct, Alibaba, and the Flex tier
-        // (deepinfra/fp8/flex) are absent on purpose — an allow-list
-        // admits only what it names.
-        assertEquals(
-            listOf("deepinfra/fp8/priority", "deepinfra/fp8", "fireworks", "together", "baseten", "parasail/fp8"),
-            OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-        )
-        assertEquals("latency", OpenRouterPayload.PRIMARY_PROVIDER_SORT)
+    fun `the primary provider order is the evidence ranked us pool`() {
+        // ENC-101, revised mid-flight by live evidence (recorded
+        // on the ticket): OpenRouter's provider table (P50, past
+        // 3 days) REFUTED the ticket's DeepInfra-first hypothesis —
+        // DeepInfra Priority (1.28s / 65 tps / 99.33%) is worse
+        // than its own standard tier, and Parasail's 97.84% uptime
+        // is the table's weakest. The order the table supports:
+        // inference.net (0.42s / 193 tps / 100.00% at the largest
+        // US-class share) leads; Together (0.26s / 217 tps /
+        // 100.00%) second despite its tail risk; Baseten (0.46s /
+        // 243 tps / 100.00%) third; Fireworks and Crusoe (both
+        // 100.00%) fill the middle; DeepInfra STANDARD (0.77s /
+        // 60 tps / 99.52%) last for depth. The `only` allow-list
+        // is the same six tags, so fallbacks cannot leave the
+        // pool; DeepSeek direct, Alibaba, Flex, Priority, and
+        // Parasail are all absent on purpose.
+        val expected =
+            listOf("inference-net/fp8", "together", "baseten", "fireworks", "crusoe/fp8", "deepinfra/fp8")
+        assertEquals(expected, OpenRouterPayload.PRIMARY_PROVIDER_ORDER)
+        assertEquals(expected, OpenRouterPayload.PRIMARY_PROVIDER_ONLY)
     }
 
     @Test
@@ -65,24 +73,33 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `a request with an only list and a sort carries both in the provider block`() {
-        // ENC-100: the primary's exact wire shape — the US-only
-        // allow-list plus latency sort, fallbacks on within the list.
+    fun `a request with the primary pin carries the deterministic provider order`() {
+        // ENC-101 (revised): the primary's exact wire shape — the
+        // evidence-ranked order, fallbacks on so the router walks
+        // the order on failure, fenced by the same six tags as an
+        // allow-list. No `sort`: ENC-100's latency sort is what
+        // led with the pool's slowest route on device.
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
             providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
         )
 
         assertTrue(
             request.contains(
-                "\"provider\":{\"allow_fallbacks\":true," +
-                    "\"only\":[\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"together\",\"baseten\",\"parasail/fp8\"]," +
-                    "\"sort\":\"latency\"}",
+                "\"provider\":{\"order\":[" +
+                    "\"inference-net/fp8\",\"together\",\"baseten\",\"fireworks\",\"crusoe/fp8\",\"deepinfra/fp8\"" +
+                    "],\"allow_fallbacks\":true," +
+                    "\"only\":[" +
+                    "\"inference-net/fp8\",\"together\",\"baseten\",\"fireworks\",\"crusoe/fp8\",\"deepinfra/fp8\"" +
+                    "]}",
             ),
         )
+        assertFalse(request.contains("\"sort\""))
+        assertFalse(request.contains("parasail"))
+        assertFalse(request.contains("priority"))
         assertFalse(request.contains("flex"))
         assertFalse(request.contains("alibaba"))
     }
@@ -229,8 +246,7 @@ class OpenRouterPayloadTest {
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
-            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
         )
 
         assertFalse(request.contains("\"reasoning\""))
