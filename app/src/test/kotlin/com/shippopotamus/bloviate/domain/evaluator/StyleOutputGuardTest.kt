@@ -172,6 +172,45 @@ class StyleOutputGuardTest {
     }
 
     @Test
+    fun `the enc-91 screenshot restyle passes`() {
+        // ENC-91 hypothesis 3, the literal observed output: Sean's
+        // 2026-10-19 acceptance-test dictation (the pill-expansion bug
+        // report) and Grok 4.7's completion exactly as OpenRouter shows
+        // it — second-person framing and an added closing flourish,
+        // but every content word of the source preserved. If this
+        // passed the guard, the fallback that day was not the guard's
+        // doing; if it fails, the guard is the bug.
+        val source = "okay one last sort of bug that i've noticed it's actually new but it's " +
+            "better than what it was doing anyway when you first start recording and the pill " +
+            "expands out it expands very very slowly it might take like three seconds to expand " +
+            "out it should expand really quickly within half a second and snap out to the full pill"
+        val styled = "You have noticed one last sort of bug, and it is actually new. " +
+            "It is better than what it was doing. Do not mistake a milder fault for a " +
+            "finished cure. When you first start recording and the pill expands out, " +
+            "it expands very, very slowly. It might take like three seconds to expand out. " +
+            "It should expand really quickly, within half a second, and snap out to the " +
+            "full pill. Why give three seconds to a motion meant for half a second? " +
+            "What ought to snap, let it snap."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
+    fun `a heavy but faithful seneca restyle passes`() {
+        // ENC-91 hypothesis 3, constructed edge: Seneca's diction
+        // substitution replaces most ordinary vocabulary (checking ->
+        // reach for, feel bad -> ashamed) while every fact survives —
+        // who, where, what, and how it felt. Ordinary vocabulary is
+        // the style's declared playground; this must not fail fidelity.
+        val source = "i keep checking my phone during dinner with my family " +
+            "and i feel bad about it afterwards"
+        val styled = "At table with my family, I reach for my phone — and afterwards " +
+            "I am ashamed of the hour I stole from them."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
     fun `a blank output passes and leaves emptiness to the client`() {
         assertEquals(Verdict.PASS, StyleOutputGuard.classify("some words", "   "))
     }

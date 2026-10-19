@@ -94,6 +94,43 @@ object OpenRouterPayload {
     }
 
     /**
+     * Extracts the reasoning text from one streamed chunk, or null when
+     * the chunk carries none (ENC-91). Grok thinks out loud before it
+     * answers: xAI streams the thought as `delta.reasoning_content`,
+     * OpenRouter's unified shape as `delta.reasoning`, and some routes
+     * as structured `delta.reasoning_details` (whose mere presence is
+     * the sign of life — returned as "" because the detail entries
+     * have no single text field). The client consumes none of it; the
+     * extraction exists so a reasoning chunk registers as model
+     * activity instead of looking like silence.
+     */
+    fun extractReasoningDelta(data: String): String? {
+        val choicesIndex = findKey(data, "choices", 0) ?: return null
+        val deltaIndex = findKey(data, "delta", choicesIndex) ?: return null
+        for (field in REASONING_TEXT_FIELDS) {
+            val fieldIndex = findKey(data, field, deltaIndex) ?: continue
+            val value = readStringValue(data, fieldIndex)
+            if (value != null) return value
+        }
+        return if (findKey(data, REASONING_DETAILS_FIELD, deltaIndex) != null) "" else null
+    }
+
+    /**
+     * Extracts `choices[0].message.content` from a whole NON-streamed
+     * chat-completion body, or null when [data] is not one (ENC-91).
+     * A stream request can still be answered in the single-shot shape
+     * — a cached replay or a gateway/provider that does not stream —
+     * and the body then carries the complete answer in one line with
+     * no SSE framing at all.
+     */
+    fun extractMessageContent(data: String): String? {
+        val choicesIndex = findKey(data, "choices", 0) ?: return null
+        val messageIndex = findKey(data, "message", choicesIndex) ?: return null
+        val contentIndex = findKey(data, "content", messageIndex) ?: return null
+        return readStringValue(data, contentIndex)?.takeIf { value -> value.isNotBlank() }
+    }
+
+    /**
      * Whether one streamed chunk is an error payload rather than a
      * completion chunk — OpenRouter can commit a 200 stream and still
      * deliver `{"error": ...}` mid-stream (ENC-81).
@@ -262,6 +299,10 @@ object OpenRouterPayload {
                 -1
             }
         }
+
+    /** Streamed reasoning fields carrying plain text (xAI's, then OpenRouter's unified name). */
+    private val REASONING_TEXT_FIELDS: List<String> = listOf("reasoning_content", "reasoning")
+    private const val REASONING_DETAILS_FIELD: String = "reasoning_details"
 
     private const val MODEL_NOT_FOUND_STATUS: Int = 404
     private const val SIMPLE_ESCAPE_WIDTH: Int = 2

@@ -345,6 +345,128 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `reasoning deltas streamed ahead of content keep the grok attempt alive`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-91 hypothesis 1, streamed shape: Grok thinks out loud
+        // first — reasoning deltas in both wire shapes (xAI's
+        // reasoning_content, OpenRouter's reasoning) — then the answer.
+        // The fallback is scripted to 499 (Sean's repro), so any
+        // wrongful retry is visible as a fallback outcome.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(reasoningChunkXai("Restyle the dictation, keeping every fact."))
+                delay(TRICKLE_GAP_MS)
+                emit(reasoningChunkOpenRouter("Plain casing, one paragraph."))
+                delay(TRICKLE_GAP_MS)
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "SpaceXAI")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `a silent reasoning phase ahead of the first chunk does not kill the grok attempt`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-91 hypothesis 1, silent shape: the reasoning phase
+        // delivers NO line for longer than the old 2s first-token
+        // budget, then the whole answer streams. Sean's repro exactly:
+        // Grok completed server-side, the client fell back to a
+        // Haiku 499, and the local text landed.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                delay(SLOW_REASONING_MS)
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "SpaceXAI")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `slow gaps between reasoning deltas do not kill the grok attempt`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-91 hypothesis 1, paused shape: reasoning starts, pauses
+        // past the old 2s budget mid-thought, resumes, then answers.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(reasoningChunkXai("Restyle the dictation."))
+                delay(SLOW_REASONING_MS)
+                emit(reasoningChunkOpenRouter("Still thinking."))
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "SpaceXAI")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `a cached burst delivering the whole stream at once is used`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-91 hypothesis 2, burst shape: a cached replay delivers
+        // every chunk back to back with no pacing at all.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(
+                    emit,
+                    parts = listOf("The meeting ", "is ", "moved to ", "Friday afternoon."),
+                    provider = "SpaceXAI",
+                )
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `a non-streamed json completion body is used instead of falling back`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-91 hypothesis 2, non-streamed shape: a cached/gateway
+        // answer arrives as ONE plain JSON completion body (no SSE
+        // framing) on a 200. Dropping it as "empty" burns the fallback
+        // on a call that succeeded.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit(nonStreamedCompletion(STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(STYLED_TEXT, styled.text)
+        assertEquals("SpaceXAI", styled.provider)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
     fun `a stream with no content falls back as an empty response`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // A 200 stream that delivers no tokens at all (the streamed form
@@ -453,6 +575,21 @@ class OpenRouterStyleClientTest {
         assertEquals(1, fakeTransport.keylessCallCount)
     }
 
+    /** One SSE chunk line carrying only an xAI-shaped reasoning delta (ENC-91). */
+    private fun reasoningChunkXai(reasoning: String): String =
+        "data: {\"provider\":\"SpaceXAI\",\"choices\":[{\"delta\":{\"role\":\"assistant\"," +
+            "\"reasoning_content\":" + OpenRouterPayload.escape(reasoning) + "}}]}"
+
+    /** One SSE chunk line carrying only an OpenRouter-shaped reasoning delta (ENC-91). */
+    private fun reasoningChunkOpenRouter(reasoning: String): String =
+        "data: {\"choices\":[{\"delta\":{\"reasoning\":" + OpenRouterPayload.escape(reasoning) + "}}]}"
+
+    /** A whole non-streamed chat-completion body as ONE raw line (no SSE framing) (ENC-91). */
+    private fun nonStreamedCompletion(content: String): String =
+        "{\"id\":\"gen-enc91\",\"provider\":\"SpaceXAI\",\"model\":\"x-ai/grok-4.7\"," +
+            "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":" +
+            OpenRouterPayload.escape(content) + "},\"finish_reason\":\"stop\"}]}"
+
     /** One SSE chunk line carrying [content] (and optionally the serving [provider]). */
     private fun chunk(content: String, provider: String? = null): String {
         val providerField = if (provider == null) "" else "\"provider\":\"" + provider + "\","
@@ -475,6 +612,9 @@ class OpenRouterStyleClientTest {
     private companion object {
         const val DONE_LINE: String = "data: [DONE]"
         const val TRICKLE_GAP_MS: Long = 1_500L
+
+        /** A reasoning-phase silence/pause longer than the old 2s liveness budgets (ENC-91). */
+        const val SLOW_REASONING_MS: Long = 3_500L
         const val NEVER_STARTS_MS: Long = 30_000L
 
         /** A guard-safe source/restyle pair: same content words, new casing. */
