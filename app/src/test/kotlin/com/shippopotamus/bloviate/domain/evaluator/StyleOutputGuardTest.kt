@@ -5,12 +5,16 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 /**
- * ENC-82 fixtures. The two dogfood anchors: the gerbil limerick (Haiku
- * restyled it with profanity intact — must PASS) and the Idiocracy
- * sentence (Haiku silently dropped the final slur — the primary's
- * output must FAIL). The rest pin the guard's calibration: refusal
- * shapes fail, borderline legitimate text passes, and the safe failure
- * direction is always toward the local text.
+ * ENC-82 fixtures, re-pinned by the ENC-100 slimming. The guard now
+ * promises exactly two things — never insert a refusal, never insert
+ * unrelated text — so the calibration changed: refusal shapes fail,
+ * wholesale replacements fail, and everything else passes, INCLUDING
+ * outputs the original two-tier guard failed (the Idiocracy slur
+ * drop, spelled-out numbers, a dropped name). Those flips are
+ * Sean's accepted trade, recorded on ENC-100: the dropped word
+ * ships visible text; a false-positive guard verdict silently
+ * breaks the feature. The gerbil limerick (restyled with profanity
+ * intact — must PASS) remains an anchor.
  */
 class StyleOutputGuardTest {
 
@@ -68,14 +72,21 @@ class StyleOutputGuardTest {
     }
 
     @Test
-    fun `the idiocracy sentence with the slur dropped fails fidelity`() {
-        // Reconstructed from the ENC-82 dogfood report: everything
-        // restyled, one content word — the slur — silently gone.
+    fun `the idiocracy sentence with the slur dropped passes since the slimming`() {
+        // CHANGED EXPECTATION (ENC-100 amendment): ENC-82's guard
+        // FAILED this output — the reconstructed dogfood datapoint,
+        // everything restyled with one content word (the slur)
+        // silently gone — because the hard-token tier made the
+        // profanity class mandatory. The tier is removed: the
+        // output's coverage is ~0.39, far over the wholesale floor,
+        // and Sean's accepted trade is that a single dropped word
+        // is no longer caught. This pin exists so the flip is a
+        // decision on record, not a regression nobody noticed.
         val styled = "What is that film called — the one where everyone in the future is " +
             "profoundly unintelligent, and a man awakens to ask another what he is doing, " +
             "and the man replies that he is reading a book."
 
-        assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(idiocracySource, styled))
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(idiocracySource, styled))
     }
 
     @Test
@@ -88,11 +99,16 @@ class StyleOutputGuardTest {
     }
 
     @Test
-    fun `a dropped number fails fidelity`() {
+    fun `a spelled out number passes since the slimming`() {
+        // CHANGED EXPECTATION (ENC-100 amendment): numbers were
+        // hard-tier tokens under ENC-82 — dropping "200"/"50" for
+        // "two hundred" FAILED fidelity. The tier is removed; the
+        // restyle keeps ~0.78 coverage and passes. Numbers are no
+        // longer protected tokens.
         val source = "the catering order came to 200 dollars and the deposit is 50 due friday"
         val styled = "The catering order came to two hundred dollars, with the deposit due Friday."
 
-        assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(source, styled))
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
     }
 
     @Test
@@ -104,17 +120,42 @@ class StyleOutputGuardTest {
     }
 
     @Test
-    fun `a dropped proper noun fails fidelity`() {
+    fun `a dropped proper noun passes since the slimming`() {
+        // CHANGED EXPECTATION (ENC-100 amendment): proper nouns
+        // were hard-tier tokens under ENC-82 — dropping
+        // "Summerville" FAILED fidelity. The tier is removed; the
+        // restyle keeps ~0.83 coverage and passes. Names are no
+        // longer protected tokens either.
         val source = "we drove to Summerville to see Kelsey about the house on friday"
         val styled = "We drove into town to see Kelsey about the house on Friday."
 
-        assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(source, styled))
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
     }
 
     @Test
     fun `a wholesale replacement fails fidelity`() {
         val source = "please remind the team that the budget review moved to thursday and bring the updated forecast deck"
         val styled = "Sure thing, all set."
+
+        assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
+    fun `a total replacement with generic persona text fails fidelity`() {
+        // The floor's reason to exist (ENC-98's device datapoint,
+        // pinned by ENC-100): the dictation is about testing the
+        // style pass — grapes, a marble house, Seneca — and the
+        // output is generic Stoic prose sharing ~0 content words
+        // with it. Not a refusal, not empty: unrelated text, and
+        // the one fidelity shape the slim guard still catches.
+        val source = "alright let's say test this fucking shit using grok llama hopefully it turns " +
+            "all this fucking shit into a good fucking nice lovely sentence that seneca would have " +
+            "written back in one thousand bc or whatever the fuck when he's sitting and eating some " +
+            "grapes and shit in his royal fucking marble house"
+        val styled = "I unleash a torrent of words, yet do they bring me peace. Can a mind at ease " +
+            "be troubled by the words it speaks. In the stillness of a quiet hour, even the " +
+            "philosopher kings found wisdom, not in the grandeur of their halls, but in the " +
+            "simplicity of their thoughts."
 
         assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(source, styled))
     }
@@ -158,7 +199,8 @@ class StyleOutputGuardTest {
         // fell back locally. Its output shape — an inserted paragraph
         // break, 'colour' for 'color', elevated diction, but EVERY
         // content word preserved — is a legitimate restyle and must
-        // PASS; only the Idiocracy drop may fail this guard.
+        // PASS. (Under the slimmed guard the Idiocracy drop passes
+        // too; this datapoint's PASS is unchanged.)
         val source = "a man's character is revealed not by his grand declarations but by his small daily choices. " +
             "anyone can be generous when the world is watching, but the color of his soul shows in how he " +
             "treats people who can do nothing for him. excellence is not a single act but a habit, " +

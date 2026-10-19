@@ -1,34 +1,40 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
 /**
- * Output guard for the LLM style pass (ENC-82). The style layer's
- * contract is that voice may change but words must not: facts, names,
- * numbers, and profanity survive a restyle. Two model failure shapes
- * violate that contract while looking like success:
+ * Output guard for the LLM style pass (ENC-82; SLIMMED by Sean's
+ * ENC-100 amendment, 2026-10-19). The guard's contract is now
+ * exactly two promises: never insert a refusal, and never insert
+ * unrelated text. Three checks:
  *
- * - a REFUSAL ("I can't help with that...") — inserting one into the
- *   user's text field would be catastrophic, so refusal-shaped output
- *   is a failure, never a result;
- * - a silent FIDELITY loss — the 2026-10-19 dogfood datapoint: a 200
- *   completion that restyled everything except one content word (a
- *   slur) it quietly dropped. No refusal, no error — altered words
- *   shipped under the user's name.
+ * - REFUSAL shape ("I can't help with that...") — inserting one
+ *   into the user's text field would be catastrophic, so
+ *   refusal-shaped output is a failure, never a result. This
+ *   check is unchanged from ENC-82: its false-positive rate is
+ *   near zero.
+ * - Non-empty — judged by the client, not here: a blank [styled]
+ *   passes classification and the caller reports its own
+ *   empty-response failure.
+ * - Wholesale replacement — if almost none of the source's
+ *   content words survive ([MIN_COVERAGE]), the output is not a
+ *   restyle of this text at all: it is invented or off-topic text
+ *   (the Llama-class failure, ENC-98: generic persona prose at
+ *   ~0 coverage). The verdict name stays FIDELITY_LOSS; since
+ *   ENC-100 it means wholesale replacement ONLY.
  *
- * Both verdicts are failures routed into the client's fallback chain,
- * exactly like a transport error. The guard errs toward PASS: a false
- * refusal/fidelity verdict costs one fallback to the next model (and
- * at worst the local text — the pre-LLM behavior), while a false PASS
- * can put words the user never said into their field.
- *
- * Fidelity is judged in two tiers. HARD tokens must all survive
- * (case-insensitively): numbers, proper nouns, and the profanity class
- * models are observed to silently censor — ordinary vocabulary is the
- * style's legitimate playground (persona styles substitute diction by
- * design). Over the rest, a soft floor: if under a third of the
- * source's distinct content words survive, the output is not a
- * restyle of this text at all. The baseline pipeline runs before the
- * LLM, so filler removal is already done and is not the guard's
- * concern.
+ * What was REMOVED, and why (Sean's reasoning, recorded on
+ * ENC-100): the original two-tier fidelity judgment — a hard-token
+ * tier (numbers, proper nouns, and the profanity class had to all
+ * survive) over a 0.35 soft coverage floor — false-positived
+ * against the persona styles, whose entire job is to radically
+ * change the text. ENC-91 already had to soften the floor for one
+ * faithful Seneca restyle; the ENC-99 build's Gemini completion was
+ * most likely guard-killed the same way. A guard false-positive
+ * invisibly breaks the feature (the user silently gets the local
+ * text), while a dropped word ships VISIBLE text the user can see
+ * and fix. The accepted trade: a model silently dropping one
+ * word — even a protected-class one — is no longer caught. The
+ * baseline pipeline runs before the LLM, so filler removal is
+ * already done and is not the guard's concern.
  */
 object StyleOutputGuard {
 
@@ -48,7 +54,6 @@ object StyleOutputGuard {
         if (styled.isBlank()) return Verdict.PASS
         val opening = styled.trim().lowercase().take(OPENING_CHARS)
         if (isRefusal(opening = opening, source = source, styled = styled)) return Verdict.REFUSAL
-        if (hardTokens(source).any { token -> token !in wordSet(styled) }) return Verdict.FIDELITY_LOSS
         if (coverage(source = source, styled = styled) < MIN_COVERAGE) return Verdict.FIDELITY_LOSS
         return Verdict.PASS
     }
@@ -71,36 +76,6 @@ object StyleOutputGuard {
 
     private fun wordCount(text: String): Int = WORD_REGEX.findAll(text).count()
 
-    /**
-     * The tokens a restyle may never drop: numbers, proper nouns
-     * (capitalized mid-sentence, or all-caps), and the profanity class.
-     */
-    private fun hardTokens(source: String): Set<String> {
-        val matches = WORD_REGEX.findAll(source).toList()
-        val hard = mutableSetOf<String>()
-        matches.forEachIndexed { index, match ->
-            val raw = match.value
-            val lowered = raw.lowercase()
-            when {
-                raw.any { char -> char.isDigit() } -> hard += lowered
-                lowered in PROFANITY -> hard += lowered
-                isProperNoun(source = source, matches = matches, index = index) -> hard += lowered
-            }
-        }
-        return hard
-    }
-
-    private fun isProperNoun(source: String, matches: List<MatchResult>, index: Int): Boolean {
-        val raw = matches[index].value
-        if (raw.length < 2 || !raw[0].isUpperCase()) return false
-        if (raw.drop(1).all { char -> char.isUpperCase() || !char.isLetter() }) return true
-        if (index == 0) return false
-        // A capitalized word is a name unless grammar put it there:
-        // sentence-initial words are capitalized for free.
-        val gap = source.substring(matches[index - 1].range.last + 1, matches[index].range.first)
-        return gap.none { char -> char == '.' || char == '!' || char == '?' || char == '\n' }
-    }
-
     /** Share of the source's distinct content words that survive in [styled]. */
     private fun coverage(source: String, styled: String): Double {
         val sourceContent = wordSet(source) - STOPWORDS
@@ -113,16 +88,19 @@ object StyleOutputGuard {
     private const val OPENING_CHARS: Int = 200
 
     /**
-     * Under a third of the content surviving is not a restyle of this
-     * text. ENC-91 re-based this from 0.5: persona styles substitute
-     * ordinary diction by design, and on SHORT dictations a handful of
-     * legitimate substitutions (checking → reach for, feel bad →
-     * ashamed) pushed faithful restyles under the half line. The hard
-     * tier remains the real censor-catcher — the Idiocracy drop fails
-     * there regardless of coverage — and the wholesale-replacement
-     * shape still scores ~0.
+     * The wholesale-replacement floor (ENC-100 amendment): under a
+     * tenth of the source's content words surviving means the
+     * output is not a restyle of this text at all — it is invented
+     * or off-topic text (the Llama-class shape scores ~0). This is
+     * the ONLY coverage judgment left: ENC-82's floor was 0.5,
+     * ENC-91 re-based it to 0.35 after it false-positived a
+     * faithful heavy Seneca restyle, and ENC-100 slimmed the guard
+     * to this floor alone (with the hard-token tier removed
+     * entirely) on Sean's call — persona styles substitute
+     * diction by design, and catching single dropped words is no
+     * longer the guard's job.
      */
-    private const val MIN_COVERAGE: Double = 0.35
+    private const val MIN_COVERAGE: Double = 0.10
 
     private val WORD_REGEX: Regex = Regex("[A-Za-z0-9']+")
 
@@ -165,13 +143,6 @@ object StyleOutputGuard {
         "my policy",
         "inappropriate content",
         "violates my",
-    )
-
-    /** The profanity class models are observed to silently drop (ENC-82 dogfood). */
-    private val PROFANITY: Set<String> = setOf(
-        "fuck", "fucked", "fucking", "fucker", "shit", "bitch", "bitches", "cunt",
-        "dick", "cock", "pussy", "whore", "slut", "fag", "fags", "faggot",
-        "nigger", "nigga", "asshole", "bastard", "bastards",
     )
 
     private val STOPWORDS: Set<String> = setOf(
