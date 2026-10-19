@@ -235,6 +235,8 @@ class OpenRouterStyleClient(
     /** One chain step: a model, its provider pin, and its reasoning profile. */
     private data class ChainLink(
         val model: String,
+        /** Endpoint slugs to try in this exact order, or null for no `order` pin. */
+        val providerOrder: List<String>? = null,
         /** Allow-listed endpoint slugs for this link, or empty for no `only` pin. */
         val providerOnly: List<String>,
         /** Live-metric ordering for the link's endpoint pool, or null for none. */
@@ -293,6 +295,7 @@ class OpenRouterStyleClient(
             model = model,
             system = prompt.system,
             user = prompt.user,
+            providerOrder = link.providerOrder,
             providerOnly = link.providerOnly,
             providerSort = link.providerSort,
             stream = true,
@@ -608,17 +611,20 @@ class OpenRouterStyleClient(
         const val TAG: String = "OpenRouterStyle"
 
         /**
-         * The chain's head (ENC-100): DeepSeek V4.1 Flash,
-         * allow-listed to its US fast endpoints and latency-sorted,
-         * with reasoning explicitly off — its models-API metadata
-         * has reasoning ON by default at high effort, so the effort
-         * block is a load-bearing part of this link, not an
-         * optional extra (see [OpenRouterPayload]).
+         * The chain's head (ENC-100, routing reshaped by ENC-101):
+         * DeepSeek V4.1 Flash, routed by a DETERMINISTIC provider
+         * order — DeepInfra first, Together last — over its US
+         * fast endpoints, with reasoning explicitly off — its
+         * models-API metadata has reasoning ON by default at high
+         * effort, so the effort block is a load-bearing part of
+         * this link, not an optional extra (see
+         * [OpenRouterPayload]).
          */
         private val PRIMARY_LINK: ChainLink = ChainLink(
             model = OpenRouterPayload.PRIMARY_MODEL,
-            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
+            providerOnly = emptyList(),
+            providerSort = null,
             reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
         )
 
