@@ -65,15 +65,30 @@ import java.net.HttpURLConnection
  *
  * Reasoning control (ENC-94): ENC-91 taught the client to tolerate
  * Grok's thinking; ENC-94 stops the thinking from being the problem.
- * Every request carries OpenRouter's unified `reasoning` controls at
- * effort low with a hard token cap (see
- * [OpenRouterPayload.REASONING_EFFORT] for why "off" is not honored
- * by Grok 4.7 and "exclude" saves no time), so a restyle's generation
- * is content-dominated and the healthy path lands in seconds. The
- * chain cap is re-tuned to that constrained profile, and the usage
- * chunk's reasoning-token count is logged with each attempt's
- * outcome, so a future blowout is visible in telemetry, not just in
- * OpenRouter's dashboard.
+ * The primary's request carries OpenRouter's unified `reasoning`
+ * control at effort low (see [OpenRouterPayload.REASONING_EFFORT]
+ * for why "off" is not honored by Grok 4.7 and "exclude" saves no
+ * time), so a restyle's generation is content-dominated and the
+ * healthy path lands in seconds. The chain cap is re-tuned to that
+ * constrained profile, and the usage chunk's reasoning-token count
+ * is logged with each attempt's outcome, so a future blowout is
+ * visible in telemetry, not just in OpenRouter's dashboard.
+ *
+ * Degraded retry (ENC-95): ENC-94's first shape shipped
+ * `reasoning: {effort, max_tokens}` on every attempt — a combination
+ * OpenRouter's unified parameter does not accept, with fallback
+ * arithmetic that was invalid by construction (see the payload
+ * docs) — and both attempts began dying instantly with 400-class
+ * rejections. The block is now effort-only and primary-only, and
+ * the client is structurally hardened against the whole class: when
+ * an attempt fails with a 400-class rejection (an HTTP 4xx, or an
+ * in-stream error chunk carrying a 4xx code), that same model is
+ * retried ONCE with a degraded payload — no reasoning block, no
+ * `stream_options`, nothing optional left to reject — before the
+ * chain advances. Provider parameter pickiness can slow the chain
+ * by one round trip; it can no longer zero the style pass. Failed
+ * attempts log their HTTP status and the provider's error code/type,
+ * so the next rejection is diagnosable from logcat alone.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -129,9 +144,7 @@ class OpenRouterStyleClient(
         when (
             val second = attempt(
                 key = key,
-                model = OpenRouterPayload.FALLBACK_MODEL,
-                providerOrder = OpenRouterPayload.FALLBACK_PROVIDER_ORDER,
-                providerIgnore = OpenRouterPayload.FALLBACK_PROVIDER_IGNORE,
+                link = FALLBACK_LINK,
                 prompt = prompt,
                 sourceText = sourceText,
                 startedMs = startedMs,
@@ -153,36 +166,69 @@ class OpenRouterStyleClient(
     ): AttemptResult =
         attempt(
             key = key,
-            model = OpenRouterPayload.PRIMARY_MODEL,
-            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
-            providerIgnore = emptyList(),
+            link = PRIMARY_LINK,
             prompt = prompt,
             sourceText = sourceText,
             startedMs = startedMs,
         )
 
+    /** One chain step: a model, its provider pin, and its reasoning profile. */
+    private data class ChainLink(
+        val model: String,
+        val providerOrder: List<String>?,
+        val providerIgnore: List<String>,
+        /** The unified `reasoning` effort for this link, or null for no block (ENC-95). */
+        val reasoningEffort: String?,
+    )
+
     /**
-     * One model attempt, streamed. Success is [AttemptResult.Done];
+     * One chain step, streamed. Success is [AttemptResult.Done];
      * EVERY failure class is [AttemptResult.Retry] — worth the other
      * model's one try (ENC-82). The chain gives up only when the
      * fallback attempt also fails, reporting its reason.
+     *
+     * ENC-95 hardening: a 400-class rejection (the request itself was
+     * refused — see [AttemptResult.Retry.clientError]) earns ONE
+     * degraded retry on the SAME model before the chain advances:
+     * whatever optional parameter the provider objected to, the
+     * degraded payload doesn't carry it.
      */
     private suspend fun attempt(
         key: String,
-        model: String,
-        providerOrder: List<String>?,
-        providerIgnore: List<String>,
+        link: ChainLink,
         prompt: StylePrompt,
         sourceText: String,
         startedMs: Long,
     ): AttemptResult {
+        val full = attemptOnce(key = key, link = link, prompt = prompt, sourceText = sourceText, startedMs = startedMs, degraded = false)
+        if (full !is AttemptResult.Retry || !full.clientError) return full
+        Log.d(TAG, "style attempt model=${link.model} outcome=$REASON_DEGRADED_RETRY after=${full.reason}")
+        return attemptOnce(key = key, link = link, prompt = prompt, sourceText = sourceText, startedMs = startedMs, degraded = true)
+    }
+
+    /**
+     * A single call against one model. [degraded] strips the payload
+     * to the bare streamed request (ENC-95): no reasoning block, no
+     * `stream_options` — nothing left for a provider to reject.
+     */
+    private suspend fun attemptOnce(
+        key: String,
+        link: ChainLink,
+        prompt: StylePrompt,
+        sourceText: String,
+        startedMs: Long,
+        degraded: Boolean,
+    ): AttemptResult {
+        val model = link.model
         val request = OpenRouterPayload.buildChatRequest(
             model = model,
             system = prompt.system,
             user = prompt.user,
-            providerOrder = providerOrder,
-            providerIgnore = providerIgnore,
+            providerOrder = link.providerOrder,
+            providerIgnore = link.providerIgnore,
             stream = true,
+            reasoningEffort = if (degraded) null else link.reasoningEffort,
+            includeUsage = !degraded,
         )
         val lines = Channel<String>(Channel.RENDEZVOUS)
         val call = producerScope.async {
@@ -321,8 +367,19 @@ class OpenRouterStyleClient(
             Log.d(TAG, "style attempt model=$model outcome=model-unavailable (stream error)")
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE, provider = provider)
         }
-        Log.d(TAG, "style attempt model=$model outcome=$REASON_STREAM_ERROR")
-        return AttemptResult.Retry(reason = REASON_STREAM_ERROR, provider = provider)
+        // ENC-95 telemetry: an in-stream rejection names its code/type
+        // too — a 400-class one also arms the degraded retry.
+        val errorInfo = OpenRouterPayload.extractErrorInfo(data)
+        Log.d(
+            TAG,
+            "style attempt model=$model outcome=$REASON_STREAM_ERROR " +
+                "errorCode=${errorInfo?.code?.toString() ?: "-"} errorType=${errorInfo?.type ?: "-"}",
+        )
+        return AttemptResult.Retry(
+            reason = REASON_STREAM_ERROR,
+            provider = provider,
+            clientError = errorInfo?.code != null && errorInfo.code in CLIENT_ERROR_RANGE,
+        )
     }
 
     private fun httpFailureResult(result: HttpResult, model: String): AttemptResult {
@@ -330,10 +387,19 @@ class OpenRouterStyleClient(
             Log.d(TAG, "style attempt model=$model outcome=model-unavailable")
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE)
         }
-        Log.d(TAG, "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status}")
+        // ENC-95 telemetry: status plus the provider's error code/type
+        // (metadata only, never body text) — the next 400-class death
+        // must be diagnosable from logcat alone.
+        val errorInfo = OpenRouterPayload.extractErrorInfo(result.body)
+        Log.d(
+            TAG,
+            "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status} " +
+                "errorCode=${errorInfo?.code?.toString() ?: "-"} errorType=${errorInfo?.type ?: "-"}",
+        )
         return AttemptResult.Retry(
             reason = REASON_HTTP_PREFIX + result.status,
             provider = OpenRouterPayload.extractProvider(result.body),
+            clientError = result.status in CLIENT_ERROR_RANGE,
         )
     }
 
@@ -401,7 +467,19 @@ class OpenRouterStyleClient(
     /** What one attempt concluded: a final outcome, or a retryable failure with its reason. */
     private sealed interface AttemptResult {
         data class Done(val outcome: LlmStyleOutcome) : AttemptResult
-        data class Retry(val reason: String, val provider: String? = null) : AttemptResult
+
+        /**
+         * A failed attempt. [clientError] marks a 400-class rejection
+         * — the request itself was refused — which arms the same
+         * model's one degraded retry before the chain advances
+         * (ENC-95). Server failures, liveness deaths, and guard
+         * verdicts are not request rejections and never set it.
+         */
+        data class Retry(
+            val reason: String,
+            val provider: String? = null,
+            val clientError: Boolean = false,
+        ) : AttemptResult
     }
 
     /** The assembled stream: full content, responding provider, and how it ended. */
@@ -419,6 +497,29 @@ class OpenRouterStyleClient(
 
     internal companion object {
         const val TAG: String = "OpenRouterStyle"
+
+        /**
+         * The chain, in order (ENC-84/95). The reasoning block rides
+         * the primary only: Grok's default effort is the blowout risk
+         * ENC-94 leashed, while Haiku's proven shape is the pre-ENC-94
+         * payload with no block — and a block on the Anthropic route
+         * is one translation away from an invalid request (ENC-95).
+         */
+        private val PRIMARY_LINK: ChainLink = ChainLink(
+            model = OpenRouterPayload.PRIMARY_MODEL,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
+            providerIgnore = emptyList(),
+            reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
+        )
+        private val FALLBACK_LINK: ChainLink = ChainLink(
+            model = OpenRouterPayload.FALLBACK_MODEL,
+            providerOrder = OpenRouterPayload.FALLBACK_PROVIDER_ORDER,
+            providerIgnore = OpenRouterPayload.FALLBACK_PROVIDER_IGNORE,
+            reasoningEffort = null,
+        )
+
+        /** HTTP statuses that mean "your request was refused" — the degraded retry's trigger (ENC-95). */
+        val CLIENT_ERROR_RANGE: IntRange = 400..499
 
         /**
          * Time a stream may stay silent before its first line of any
@@ -447,15 +548,16 @@ class OpenRouterStyleClient(
          * to the reasoning-constrained profile (the 20s ENC-81 value
          * was sized for unconstrained generation — and still lost to
          * a 41s Grok generation). The constrained healthy path: ~0.5s
-         * routing/connect, reasoning capped at
-         * [OpenRouterPayload.REASONING_MAX_TOKENS] (in practice near
-         * zero at low effort on a surface transform), then content at
+         * routing/connect, reasoning held at effort low (in practice
+         * near zero tokens on a surface transform), then content at
          * the ~150 tok/s rate observed in the ENC-83/91 evidence —
          * a long ~700-token restyle lands in ~5–6s end to end. The
          * slowest legitimate chain is two full liveness deaths
          * (2 × [FIRST_TOKEN_TIMEOUT_MS] = 12s), so 14s leaves headroom
          * over that while a pathological stream still dies young.
-         * Only a pathological stream reaches it.
+         * The ENC-95 degraded retries fire on instant 400-class
+         * deaths, so they add round trips, not liveness waits; only
+         * a pathological stream reaches the cap.
          */
         const val ABSOLUTE_CAP_MS: Long = 14_000L
 
@@ -466,6 +568,9 @@ class OpenRouterStyleClient(
         const val REASON_FIRST_TOKEN_TIMEOUT: String = "first-token-timeout"
         const val REASON_STREAM_STALL: String = "stream-stall"
         const val REASON_STREAM_ERROR: String = "stream-error"
+
+        /** A 400-class rejection is being retried once on the same model, degraded (ENC-95). */
+        const val REASON_DEGRADED_RETRY: String = "degraded-retry"
         const val REASON_HTTP_PREFIX: String = "http-"
         const val REASON_EMPTY_RESPONSE: String = "empty-response"
 
