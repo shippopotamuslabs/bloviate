@@ -60,29 +60,30 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
+import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import com.shippopotamus.bloviate.domain.model.BubbleRenderParams
+import com.shippopotamus.bloviate.domain.model.BubbleShape
+import com.shippopotamus.bloviate.domain.model.BubbleSize
+import com.shippopotamus.bloviate.domain.model.BubbleTint
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.presentation.BloviateColors
 import com.shippopotamus.bloviate.presentation.BloviateSpacing
 import com.shippopotamus.bloviate.presentation.BloviateTheme
+import com.shippopotamus.bloviate.presentation.barShape
+import com.shippopotamus.bloviate.presentation.bubbleShape
+import com.shippopotamus.bloviate.presentation.tintColors
 import kotlin.math.hypot
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-private val BUBBLE_SIZE: Dp = 56.dp
-private val BUBBLE_ICON_SIZE: Dp = 28.dp
 private val BUBBLE_ELEVATION: Dp = 6.dp
-private val BAR_HEIGHT: Dp = 56.dp
-private val BAR_SLOT_SIZE: Dp = 48.dp
-private val BAR_ICON_SIZE: Dp = 24.dp
 
 /** The bar's inner horizontal inset is the gospel's micro spacing (ENC-86). */
 private val BAR_HORIZONTAL_PADDING: Dp = BloviateSpacing.s4
-private val SEND_CIRCLE_SIZE: Dp = 36.dp
-private val SEND_ICON_SIZE: Dp = 22.dp
-private val WAVEFORM_HEIGHT: Dp = 28.dp
 private val WAVEFORM_BAR_WIDTH: Dp = 4.dp
 private val WAVEFORM_BAR_SPACING: Dp = 3.dp
 private val WAVEFORM_MIN_BAR_HEIGHT: Dp = 4.dp
@@ -218,6 +219,13 @@ internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize>
  * fires first wins, so the bubble can never strand on the check or the
  * error mark — the composition is provably alive whenever either is
  * visible (the stage shimmer animates in this same window).
+ *
+ * Appearance (ENC-68): [appearance] is the user's persisted look —
+ * opacity on the root (so the bar states inherit it), geometry from
+ * [BubbleAppearanceMath] (the bar scales with the bubble's size step),
+ * silhouette and tint from the presentation mapping. The default is the
+ * pre-ENC-68 shipping look, and a new emission restyles the showing
+ * bubble in place — no window recreation.
  */
 @Composable
 fun BubbleContent(
@@ -233,7 +241,9 @@ fun BubbleContent(
     onDragEnd: () -> Unit = {},
     onDragCancel: () -> Unit = {},
     modifier: Modifier = Modifier,
+    appearance: BubbleAppearance = BubbleAppearance.DEFAULT,
 ) {
+    val renderParams = remember(appearance) { BubbleAppearanceMath.renderParams(appearance) }
     LaunchedEffect(barState) {
         val displayMs = when (barState) {
             RecordingBarState.Done -> DONE_DISPLAY_MS
@@ -254,11 +264,19 @@ fun BubbleContent(
     // animateContentSize springs the width between state geometries.
     // The spec is per-transition (ENC-93): the incoming state picks
     // it — the recording expansion snaps, the processing settle and
-    // the transient bubbles stay on ENC-89's calm spring.
-    Box(modifier = modifier.animateContentSize(animationSpec = barState.sizeAnimationSpec())) {
+    // the transient bubbles stay on ENC-89's calm spring. The user's
+    // opacity rides the same root (ENC-68), so every state — bubble,
+    // bar, transient — wears it uniformly.
+    Box(
+        modifier = modifier
+            .graphicsLayer { alpha = renderParams.opacity }
+            .animateContentSize(animationSpec = barState.sizeAnimationSpec()),
+    ) {
         when (barState) {
             RecordingBarState.Idle -> MicBubble(
                 inDismissZone = inDismissZone,
+                appearance = appearance,
+                renderParams = renderParams,
                 onTap = onTap,
                 onDragStart = onDragStart,
                 onDrag = onDrag,
@@ -269,6 +287,8 @@ fun BubbleContent(
                 elapsedMs = barState.elapsedMs,
                 waveformLevels = waveformLevels,
                 inDismissZone = inDismissZone,
+                appearance = appearance,
+                renderParams = renderParams,
                 onCancelRecording = onCancelRecording,
                 onSendRecording = onSendRecording,
                 onDragStart = onDragStart,
@@ -284,9 +304,17 @@ fun BubbleContent(
                         "Only the pipeline stages carry a stage label: $barState"
                     },
                 ),
+                appearance = appearance,
+                renderParams = renderParams,
             )
-            RecordingBarState.Done -> DoneBubble()
-            RecordingBarState.Error -> ErrorBubble()
+            RecordingBarState.Done -> DoneBubble(
+                appearance = appearance,
+                renderParams = renderParams,
+            )
+            RecordingBarState.Error -> ErrorBubble(
+                appearance = appearance,
+                renderParams = renderParams,
+            )
         }
     }
 }
@@ -294,6 +322,8 @@ fun BubbleContent(
 @Composable
 private fun MicBubble(
     inDismissZone: Boolean,
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
     onTap: () -> Unit,
     onDragStart: () -> Unit,
     onDrag: (Float, Float, Long) -> Unit,
@@ -302,20 +332,23 @@ private fun MicBubble(
     modifier: Modifier = Modifier,
 ) {
     val description = stringResource(R.string.bubble_content_description)
+    // The dismiss zone keeps its danger treatment whatever the tint:
+    // it is a warning state, not part of the user's chosen look.
+    val tint = appearance.tint.tintColors()
     val containerColor = if (inDismissZone) {
         MaterialTheme.colorScheme.errorContainer
     } else {
-        MaterialTheme.colorScheme.primaryContainer
+        tint.container
     }
     val contentColor = if (inDismissZone) {
         MaterialTheme.colorScheme.onErrorContainer
     } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
+        tint.content
     }
     val scale = if (inDismissZone) DISMISS_ZONE_SCALE else FULL_SCALE
     Surface(
         modifier = modifier
-            .size(BUBBLE_SIZE)
+            .size(renderParams.bubbleSizeDp.dp)
             .bubbleGestures(
                 onTap = onTap,
                 onDragStart = onDragStart,
@@ -331,7 +364,7 @@ private fun MicBubble(
                 contentDescription = description
                 role = Role.Button
             },
-        shape = CircleShape,
+        shape = appearance.shape.bubbleShape(),
         color = containerColor,
         contentColor = contentColor,
         shadowElevation = BUBBLE_ELEVATION,
@@ -340,7 +373,7 @@ private fun MicBubble(
             Icon(
                 painter = painterResource(R.drawable.ic_mic),
                 contentDescription = null,
-                modifier = Modifier.size(BUBBLE_ICON_SIZE),
+                modifier = Modifier.size(renderParams.bubbleIconDp.dp),
             )
         }
     }
@@ -351,6 +384,8 @@ private fun RecordingBar(
     elapsedMs: Long,
     waveformLevels: () -> List<Float>,
     inDismissZone: Boolean,
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
     onCancelRecording: () -> Unit,
     onSendRecording: () -> Unit,
     onDragStart: () -> Unit,
@@ -373,21 +408,23 @@ private fun RecordingBar(
     val recordingDescription = stringResource(R.string.bubble_recording_description)
     val cancelDescription = stringResource(R.string.bubble_cancel_description)
     val sendDescription = stringResource(R.string.bubble_send_description)
+    val tint = appearance.tint.tintColors()
     val containerColor = if (inDismissZone) {
         MaterialTheme.colorScheme.errorContainer
     } else {
-        MaterialTheme.colorScheme.primaryContainer
+        tint.container
     }
     val contentColor = if (inDismissZone) {
         MaterialTheme.colorScheme.onErrorContainer
     } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
+        tint.content
     }
     val scale = if (inDismissZone) DISMISS_ZONE_SCALE else FULL_SCALE
     Surface(
         modifier = modifier
-            .height(BAR_HEIGHT)
+            .height(renderParams.barHeightDp.dp)
             .recordingBarGestures(
+                slotSize = renderParams.barSlotDp.dp,
                 onCancelTap = onCancelRecording,
                 onSendTap = onSendRecording,
                 onDragStart = onDragStart,
@@ -400,7 +437,7 @@ private fun RecordingBar(
                 scaleY = scale
             }
             .semantics { contentDescription = recordingDescription },
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = appearance.shape.barShape(),
         color = containerColor,
         contentColor = contentColor,
         shadowElevation = BUBBLE_ELEVATION,
@@ -411,7 +448,7 @@ private fun RecordingBar(
         ) {
             Box(
                 modifier = Modifier
-                    .size(BAR_SLOT_SIZE)
+                    .size(renderParams.barSlotDp.dp)
                     .semantics {
                         contentDescription = cancelDescription
                         role = Role.Button
@@ -425,7 +462,7 @@ private fun RecordingBar(
                 Icon(
                     painter = painterResource(R.drawable.ic_close),
                     contentDescription = null,
-                    modifier = Modifier.size(BAR_ICON_SIZE),
+                    modifier = Modifier.size(renderParams.barIconDp.dp),
                 )
             }
             WaveformCanvas(
@@ -434,7 +471,7 @@ private fun RecordingBar(
                 barColor = contentColor,
                 modifier = Modifier
                     .width(WAVEFORM_WIDTH)
-                    .height(WAVEFORM_HEIGHT),
+                    .height(renderParams.waveformHeightDp.dp),
             )
             Text(
                 text = ElapsedTimeFormatter.format(elapsedMs),
@@ -443,7 +480,7 @@ private fun RecordingBar(
             )
             Box(
                 modifier = Modifier
-                    .size(BAR_SLOT_SIZE)
+                    .size(renderParams.barSlotDp.dp)
                     .semantics {
                         contentDescription = sendDescription
                         role = Role.Button
@@ -456,7 +493,7 @@ private fun RecordingBar(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(SEND_CIRCLE_SIZE)
+                        .size(renderParams.sendCircleDp.dp)
                         .background(
                             color = MaterialTheme.colorScheme.primary,
                             shape = CircleShape,
@@ -467,7 +504,7 @@ private fun RecordingBar(
                         painter = painterResource(R.drawable.ic_check),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(SEND_ICON_SIZE),
+                        modifier = Modifier.size(renderParams.sendIconDp.dp),
                     )
                 }
             }
@@ -509,14 +546,20 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
  * stage.
  */
 @Composable
-private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
+private fun ProcessingBar(
+    label: String,
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
+    modifier: Modifier = Modifier,
+) {
+    val tint = appearance.tint.tintColors()
     Surface(
         modifier = modifier
-            .height(BAR_HEIGHT)
+            .height(renderParams.barHeightDp.dp)
             .semantics { contentDescription = label },
-        shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = appearance.shape.barShape(),
+        color = tint.container,
+        contentColor = tint.content,
         shadowElevation = BUBBLE_ELEVATION,
     ) {
         Box(
@@ -525,7 +568,7 @@ private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
         ) {
             ShimmerText(
                 text = label,
-                baseColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                baseColor = tint.content,
                 highlightColor =
                     MaterialTheme.colorScheme.primary.copy(alpha = SHIMMER_HIGHLIGHT_ALPHA),
                 style = MaterialTheme.typography.labelLarge,
@@ -591,14 +634,20 @@ private fun ShimmerText(
 }
 
 @Composable
-private fun DoneBubble(modifier: Modifier = Modifier) {
+private fun DoneBubble(
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
+    modifier: Modifier = Modifier,
+) {
     val description = stringResource(R.string.bubble_done_description)
     val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
-            .size(BUBBLE_SIZE)
+            .size(renderParams.bubbleSizeDp.dp)
             .semantics { contentDescription = description },
-        shape = CircleShape,
+        // State colors stay semantic (the tint is the user's look, not a
+        // status signal); the silhouette follows the chosen shape.
+        shape = appearance.shape.bubbleShape(),
         color = semantic.success,
         contentColor = semantic.onSuccess,
         shadowElevation = BUBBLE_ELEVATION,
@@ -607,21 +656,25 @@ private fun DoneBubble(modifier: Modifier = Modifier) {
             Icon(
                 painter = painterResource(R.drawable.ic_check),
                 contentDescription = null,
-                modifier = Modifier.size(BUBBLE_ICON_SIZE),
+                modifier = Modifier.size(renderParams.bubbleIconDp.dp),
             )
         }
     }
 }
 
 @Composable
-private fun ErrorBubble(modifier: Modifier = Modifier) {
+private fun ErrorBubble(
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
+    modifier: Modifier = Modifier,
+) {
     val description = stringResource(R.string.bubble_error_description)
     val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
-            .size(BUBBLE_SIZE)
+            .size(renderParams.bubbleSizeDp.dp)
             .semantics { contentDescription = description },
-        shape = CircleShape,
+        shape = appearance.shape.bubbleShape(),
         color = semantic.danger,
         contentColor = semantic.onDanger,
         shadowElevation = BUBBLE_ELEVATION,
@@ -702,21 +755,24 @@ private fun Modifier.bubbleGestures(
 /**
  * Gesture arbitration for the recording bar. One pointer stream decides:
  * released within the touch slop → a tap, hit-tested against the cancel
- * slot (left [BAR_SLOT_SIZE]) and the send slot (right [BAR_SLOT_SIZE]);
- * moved past the slop → a drag ([BubbleDragSession] semantics, the same
- * drag the bubble uses) and never a button tap. Doing the arbitration in
- * one handler is what keeps the bar's buttons and its drag from fighting
- * over the stream the way sibling detectors on parent/child would.
+ * slot (left [slotSize]) and the send slot (right [slotSize]); moved past
+ * the slop → a drag ([BubbleDragSession] semantics, the same drag the
+ * bubble uses) and never a button tap. Doing the arbitration in one
+ * handler is what keeps the bar's buttons and its drag from fighting
+ * over the stream the way sibling detectors on parent/child would. The
+ * slot width is a parameter (ENC-68) because the user's size step scales
+ * the bar — the hit test must measure the slots that are actually drawn.
  */
 private fun Modifier.recordingBarGestures(
+    slotSize: Dp,
     onCancelTap: () -> Unit,
     onSendTap: () -> Unit,
     onDragStart: () -> Unit,
     onDrag: (Float, Float, Long) -> Unit,
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
-): Modifier = pointerInput(Unit) {
-    val slotWidthPx = BAR_SLOT_SIZE.toPx()
+): Modifier = pointerInput(slotSize) {
+    val slotWidthPx = slotSize.toPx()
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         var dragging = false
@@ -801,6 +857,25 @@ private fun BubbleContentDismissZonePreview() {
             barState = RecordingBarState.Idle,
             waveformLevels = { emptyList() },
             inDismissZone = true,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Custom look - large cookie, amber, 60%", showBackground = true)
+@Composable
+private fun BubbleContentCustomLookPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Idle,
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+            appearance = BubbleAppearance(
+                opacity = 0.6f,
+                size = BubbleSize.LARGE,
+                shape = BubbleShape.COOKIE,
+                tint = BubbleTint.WARNING,
+            ),
         )
     }
 }

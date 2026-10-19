@@ -1,7 +1,12 @@
 package com.shippopotamus.bloviate.presentation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,13 +15,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,17 +35,32 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.BuildConfig
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import kotlin.math.roundToInt
 
 /**
  * The Setup tab, dashboard form (ENC-75): the header pill carries the
@@ -66,6 +88,10 @@ fun SetupScreen(
     onWhisperDownloadClick: () -> Unit,
     onParakeetDownloadClick: () -> Unit,
     onSelectEngine: (DictationEngineUi) -> Unit,
+    onBubbleOpacityChange: (Float) -> Unit,
+    onBubbleSizeChange: (BubbleSizeUi) -> Unit,
+    onBubbleShapeChange: (BubbleShapeUi) -> Unit,
+    onBubbleTintChange: (BubbleTintUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -106,6 +132,16 @@ fun SetupScreen(
                 uiState = uiState,
                 onStartBubble = onStartBubble,
                 onStopBubble = onStopBubble,
+            )
+            DashboardSectionHeader(
+                text = stringResource(R.string.bubble_look_title),
+            )
+            BubbleLookCard(
+                appearance = uiState.bubbleAppearance,
+                onOpacityChange = onBubbleOpacityChange,
+                onSizeChange = onBubbleSizeChange,
+                onShapeChange = onBubbleShapeChange,
+                onTintChange = onBubbleTintChange,
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.model_card_title),
@@ -240,8 +276,7 @@ private fun focusSub(classification: FocusClassification): String =
 
 /**
  * The dictation card (ENC-75): the bubble is a switch — the control
- * that matches an on/off job — and Bubble look is the quiet chevron
- * row ENC-68 will grow into. The switch is live regardless of the
+ * that matches an on/off job. The switch is live regardless of the
  * overlay permission, exactly as the old start/stop buttons were: the
  * service is the thing that runs, the permission gate is its own row.
  */
@@ -267,18 +302,334 @@ private fun DictationCard(
                 )
             },
         )
-        DashboardRow(
-            label = stringResource(R.string.bubble_look_title),
-            icon = Icons.Filled.Tune,
-            sub = stringResource(R.string.bubble_look_sub),
-            showChevron = true,
-            dividerAbove = true,
-            trailing = {
-                StatusChip(text = stringResource(R.string.chip_soon), tone = StatusTone.NEUTRAL)
-            },
-        )
     }
 }
+
+/**
+ * The Bubble look card (ENC-68): the four controls for the bubble's
+ * appearance, each the control that matches its job — a slider for
+ * opacity (with the live preview beside it, so the drag is judged
+ * against the thing itself), a segmented control for the size steps,
+ * and radio swatch groups for silhouette and tint. Every change
+ * persists immediately and restyles the showing bubble; the preview
+ * here is rendered with the same shape/tint mapping the overlay uses,
+ * so what is picked is what floats.
+ *
+ * The opacity slider keeps a local draft while dragging: the persisted
+ * value (and the bubble over the host app) updates on release, while
+ * the preview tracks the draft continuously.
+ */
+@Composable
+private fun BubbleLookCard(
+    appearance: BubbleAppearanceUi,
+    onOpacityChange: (Float) -> Unit,
+    onSizeChange: (BubbleSizeUi) -> Unit,
+    onShapeChange: (BubbleShapeUi) -> Unit,
+    onTintChange: (BubbleTintUi) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var draftOpacity by remember(appearance.opacity) { mutableFloatStateOf(appearance.opacity) }
+    DashboardCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
+            ) {
+                BubblePreview(appearance = appearance, opacity = draftOpacity)
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BubbleLookLabel(text = stringResource(R.string.bubble_look_opacity))
+                        Text(
+                            text = stringResource(
+                                R.string.bubble_look_opacity_format,
+                                (draftOpacity * PERCENT_WHOLE).roundToInt(),
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Slider(
+                        value = draftOpacity,
+                        onValueChange = { draftOpacity = it },
+                        onValueChangeFinished = { onOpacityChange(draftOpacity) },
+                        valueRange = BubbleAppearance.MIN_OPACITY..BubbleAppearance.MAX_OPACITY,
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8)) {
+                BubbleLookLabel(text = stringResource(R.string.bubble_look_size))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    BubbleSizeUi.entries.forEachIndexed { index, size ->
+                        SizeSegment(
+                            label = stringResource(size.labelRes()),
+                            selected = appearance.size == size,
+                            index = index,
+                            onClick = { onSizeChange(size) },
+                        )
+                    }
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8)) {
+                BubbleLookLabel(text = stringResource(R.string.bubble_look_shape))
+                BubbleShapeOptions(
+                    selected = appearance.shape,
+                    appearance = appearance,
+                    onShapeChange = onShapeChange,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8)) {
+                BubbleLookLabel(text = stringResource(R.string.bubble_look_color))
+                BubbleTintOptions(
+                    selected = appearance.tint,
+                    onTintChange = onTintChange,
+                )
+            }
+        }
+    }
+}
+
+/** A control group's label inside the Bubble look card: the row label voice, without the row. */
+@Composable
+private fun BubbleLookLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+}
+
+/**
+ * The live preview: the bubble itself, at a card-sized rendering of the
+ * chosen size step, wearing the chosen silhouette and tint at the
+ * (draft) opacity — same mapping functions as the overlay, so the card
+ * can never promise a look the bubble doesn't wear.
+ */
+@Composable
+private fun BubblePreview(
+    appearance: BubbleAppearanceUi,
+    opacity: Float,
+    modifier: Modifier = Modifier,
+) {
+    val previewSize = when (appearance.size) {
+        BubbleSizeUi.SMALL -> PREVIEW_SIZE_SMALL
+        BubbleSizeUi.MEDIUM -> PREVIEW_SIZE_MEDIUM
+        BubbleSizeUi.LARGE -> PREVIEW_SIZE_LARGE
+    }
+    val tint = appearance.tint.toDomain().tintColors()
+    val description = stringResource(R.string.bubble_look_preview_description)
+    Surface(
+        modifier = modifier
+            .size(previewSize)
+            .graphicsLayer { alpha = opacity }
+            .semantics { contentDescription = description },
+        shape = appearance.shape.toDomain().bubbleShape(),
+        color = tint.container,
+        contentColor = tint.content,
+        shadowElevation = PREVIEW_ELEVATION,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(R.drawable.ic_mic),
+                contentDescription = null,
+                modifier = Modifier.size(previewSize * PREVIEW_ICON_FRACTION),
+            )
+        }
+    }
+}
+
+/** The silhouette radio group: a swatch of the shape itself (in the current tint), captioned. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BubbleShapeOptions(
+    selected: BubbleShapeUi,
+    appearance: BubbleAppearanceUi,
+    onShapeChange: (BubbleShapeUi) -> Unit,
+) {
+    val tint = appearance.tint.toDomain().tintColors()
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+        verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+    ) {
+        BubbleShapeUi.entries.forEach { shape ->
+            val isSelected = shape == selected
+            Column(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .selectable(
+                        selected = isSelected,
+                        role = Role.RadioButton,
+                        onClick = { onShapeChange(shape) },
+                    )
+                    .padding(BloviateSpacing.s4),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s4),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(SWATCH_SIZE)
+                        .background(color = tint.container, shape = shape.toDomain().bubbleShape())
+                        .then(
+                            if (isSelected) {
+                                Modifier.border(
+                                    width = SELECTED_RING_WIDTH,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shape = shape.toDomain().bubbleShape(),
+                                )
+                            } else {
+                                Modifier
+                            },
+                        ),
+                )
+                Text(
+                    text = stringResource(shape.labelRes()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** The tint radio group: each swatch is the tint's container disc with its content dot. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BubbleTintOptions(
+    selected: BubbleTintUi,
+    onTintChange: (BubbleTintUi) -> Unit,
+) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+        verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+    ) {
+        BubbleTintUi.entries.forEach { tint ->
+            val isSelected = tint == selected
+            val colors = tint.toDomain().tintColors()
+            Column(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .selectable(
+                        selected = isSelected,
+                        role = Role.RadioButton,
+                        onClick = { onTintChange(tint) },
+                    )
+                    .padding(BloviateSpacing.s4),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s4),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(SWATCH_SIZE)
+                        .background(color = colors.container, shape = CircleShape)
+                        .border(
+                            width = if (isSelected) SELECTED_RING_WIDTH else HAIRLINE_WIDTH,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            },
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(SWATCH_DOT_SIZE)
+                            .background(color = colors.content, shape = CircleShape),
+                    )
+                }
+                Text(
+                    text = stringResource(tint.labelRes()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SingleChoiceSegmentedButtonRowScope.SizeSegment(
+    label: String,
+    selected: Boolean,
+    index: Int,
+    onClick: () -> Unit,
+) {
+    SegmentedButton(
+        selected = selected,
+        onClick = onClick,
+        shape = SegmentedButtonDefaults.itemShape(index = index, count = SIZE_SEGMENT_COUNT),
+        colors = SegmentedButtonDefaults.colors(
+            activeContainerColor = MaterialTheme.colorScheme.primary,
+            activeContentColor = MaterialTheme.colorScheme.onPrimary,
+            inactiveContainerColor = MaterialTheme.colorScheme.surface,
+            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+        icon = {},
+    ) {
+        Text(text = label)
+    }
+}
+
+private fun BubbleSizeUi.labelRes(): Int =
+    when (this) {
+        BubbleSizeUi.SMALL -> R.string.bubble_size_small
+        BubbleSizeUi.MEDIUM -> R.string.bubble_size_medium
+        BubbleSizeUi.LARGE -> R.string.bubble_size_large
+    }
+
+private fun BubbleShapeUi.labelRes(): Int =
+    when (this) {
+        BubbleShapeUi.CIRCLE -> R.string.bubble_shape_circle
+        BubbleShapeUi.PILL -> R.string.bubble_shape_pill
+        BubbleShapeUi.SQUIRCLE -> R.string.bubble_shape_squircle
+        BubbleShapeUi.COOKIE -> R.string.bubble_shape_cookie
+        BubbleShapeUi.CLOVER -> R.string.bubble_shape_clover
+        BubbleShapeUi.ARCH -> R.string.bubble_shape_arch
+    }
+
+private fun BubbleTintUi.labelRes(): Int =
+    when (this) {
+        BubbleTintUi.INDIGO -> R.string.bubble_tint_indigo
+        BubbleTintUi.NEUTRAL -> R.string.bubble_tint_neutral
+        BubbleTintUi.GREEN -> R.string.bubble_tint_green
+        BubbleTintUi.AMBER -> R.string.bubble_tint_amber
+        BubbleTintUi.ROSE -> R.string.bubble_tint_rose
+        BubbleTintUi.SKY -> R.string.bubble_tint_sky
+    }
+
+/** Card-sized renderings of the size steps, for the preview only (the real bubble is 48/56/64dp). */
+private val PREVIEW_SIZE_SMALL: Dp = 40.dp
+private val PREVIEW_SIZE_MEDIUM: Dp = 48.dp
+private val PREVIEW_SIZE_LARGE: Dp = 56.dp
+private val PREVIEW_ELEVATION: Dp = 6.dp
+private const val PREVIEW_ICON_FRACTION: Float = 0.5f
+private val SWATCH_SIZE: Dp = 40.dp
+private val SWATCH_DOT_SIZE: Dp = 14.dp
+private val SELECTED_RING_WIDTH: Dp = 2.dp
+private val HAIRLINE_WIDTH: Dp = 1.dp
+private const val PERCENT_WHOLE: Float = 100f
+private const val SIZE_SEGMENT_COUNT: Int = 3
 
 /**
  * Per-engine model rows + the engine choice (ENC-54, dashboard form
@@ -495,6 +846,10 @@ private fun SetupScreenEmptyPreview() {
             onWhisperDownloadClick = {},
             onParakeetDownloadClick = {},
             onSelectEngine = {},
+            onBubbleOpacityChange = {},
+            onBubbleSizeChange = {},
+            onBubbleShapeChange = {},
+            onBubbleTintChange = {},
         )
     }
 }
@@ -514,6 +869,12 @@ private fun SetupScreenPopulatedPreview() {
                 whisperModelStatus = ModelUiStatus.Ready,
                 parakeetModelStatus = ModelUiStatus.Ready,
                 selectedEngine = DictationEngineUi.PARAKEET,
+                bubbleAppearance = BubbleAppearanceUi(
+                    opacity = 0.7f,
+                    size = BubbleSizeUi.LARGE,
+                    shape = BubbleShapeUi.CLOVER,
+                    tint = BubbleTintUi.SKY,
+                ),
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
@@ -523,6 +884,10 @@ private fun SetupScreenPopulatedPreview() {
             onWhisperDownloadClick = {},
             onParakeetDownloadClick = {},
             onSelectEngine = {},
+            onBubbleOpacityChange = {},
+            onBubbleSizeChange = {},
+            onBubbleShapeChange = {},
+            onBubbleTintChange = {},
         )
     }
 }

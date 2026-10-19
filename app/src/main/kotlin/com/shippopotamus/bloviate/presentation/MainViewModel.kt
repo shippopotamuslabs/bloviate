@@ -2,6 +2,7 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
@@ -11,12 +12,14 @@ import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
+import com.shippopotamus.bloviate.domain.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +50,8 @@ class MainViewModel @Inject constructor(
     private val ensureParakeetModel: EnsureParakeetModelUseCase,
     observeEnginePreference: ObserveEnginePreferenceUseCase,
     private val selectEngine: SelectEngineUseCase,
+    private val observeBubbleAppearance: ObserveBubbleAppearanceUseCase,
+    private val saveBubbleAppearance: SaveBubbleAppearanceUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
@@ -83,12 +88,14 @@ class MainViewModel @Inject constructor(
         observeModelState(),
         observeParakeetModelState(),
         observeEnginePreference(),
-    ) { baseState, whisperState, parakeetState, engine ->
+        observeBubbleAppearance(),
+    ) { baseState, whisperState, parakeetState, engine, appearance ->
         baseState.copy(
             whisperModelStatus = mapModelStatus(whisperState),
             parakeetModelStatus = mapModelStatus(parakeetState),
             selectedEngine = mapEngine(engine),
             engineFallback = mapEngineFallback(engine, whisperState, parakeetState),
+            bubbleAppearance = appearance.toUi(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -102,6 +109,7 @@ class MainViewModel @Inject constructor(
                 observeModelState().value,
                 observeParakeetModelState().value,
             ),
+            bubbleAppearance = observeBubbleAppearance().value.toUi(),
         ),
     )
 
@@ -128,6 +136,42 @@ class MainViewModel @Inject constructor(
                     DictationEngineUi.PARAKEET -> DictationEngine.PARAKEET
                 },
             )
+        }
+    }
+
+    /** Bubble opacity slider committed: persists just that field of the current appearance. */
+    fun onBubbleOpacityChange(opacity: Float) {
+        updateBubbleAppearance { current ->
+            current.copy(
+                opacity = opacity.coerceIn(BubbleAppearance.MIN_OPACITY, BubbleAppearance.MAX_OPACITY),
+            )
+        }
+    }
+
+    /** Bubble size segment tapped: persists just that field of the current appearance. */
+    fun onBubbleSizeChange(size: BubbleSizeUi) {
+        updateBubbleAppearance { current -> current.copy(size = size.toDomain()) }
+    }
+
+    /** Bubble silhouette tapped: persists just that field of the current appearance. */
+    fun onBubbleShapeChange(shape: BubbleShapeUi) {
+        updateBubbleAppearance { current -> current.copy(shape = shape.toDomain()) }
+    }
+
+    /** Bubble tint tapped: persists just that field of the current appearance. */
+    fun onBubbleTintChange(tint: BubbleTintUi) {
+        updateBubbleAppearance { current -> current.copy(tint = tint.toDomain()) }
+    }
+
+    /**
+     * One appearance edit: read the live preference (never a cached UI
+     * copy — the overlay may be showing it), transform one field, save.
+     * The store's next emission restyles both this screen's preview and
+     * the already-showing bubble.
+     */
+    private fun updateBubbleAppearance(transform: (BubbleAppearance) -> BubbleAppearance) {
+        viewModelScope.launch {
+            saveBubbleAppearance(transform(observeBubbleAppearance().value))
         }
     }
 

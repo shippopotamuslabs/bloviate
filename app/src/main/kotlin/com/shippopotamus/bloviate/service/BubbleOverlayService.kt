@@ -25,6 +25,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
@@ -42,6 +43,7 @@ import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
+import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubblePositionUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleVisibilityUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveBubblePositionUseCase
@@ -94,6 +96,9 @@ class BubbleOverlayService : Service() {
     lateinit var observeBubblePosition: ObserveBubblePositionUseCase
 
     @Inject
+    lateinit var observeBubbleAppearance: ObserveBubbleAppearanceUseCase
+
+    @Inject
     lateinit var saveBubblePosition: SaveBubblePositionUseCase
 
     @Inject
@@ -138,6 +143,11 @@ class BubbleOverlayService : Service() {
     private val inDismissZone = mutableStateOf(false)
     private var recordingController: BubbleRecordingController? = null
     private val barStateSnapshot = mutableStateOf<RecordingBarState>(RecordingBarState.Idle)
+
+    // The user's bubble look (ENC-68): collected for the service's whole
+    // lifetime, so a Setup edit restyles the showing bubble on the next
+    // emission — the window is never recreated for an appearance change.
+    private val appearanceSnapshot = mutableStateOf(BubbleAppearance.DEFAULT)
 
     // Bar-form window placement (ENC-65): the recording bar is far wider
     // than the bubble and the window is anchored top-left, so the morph
@@ -197,6 +207,9 @@ class BubbleOverlayService : Service() {
         }
         serviceScope.launch {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
+        }
+        serviceScope.launch {
+            observeBubbleAppearance().collect { appearance -> appearanceSnapshot.value = appearance }
         }
         serviceScope.launch {
             modelStore.state.collect { state -> onModelStateChanged(state) }
@@ -337,6 +350,7 @@ class BubbleOverlayService : Service() {
                     barState = barStateSnapshot.value,
                     waveformLevels = controller.waveform::levels,
                     inDismissZone = inDismissZone.value,
+                    appearance = appearanceSnapshot.value,
                     onTap = dragController::onTap,
                     onCancelRecording = controller::onCancelTap,
                     onSendRecording = controller::onSendTap,
@@ -351,8 +365,15 @@ class BubbleOverlayService : Service() {
         // Bar-form placement rides the window's own layout: whenever the
         // view's width changes (the bar morph settling, elapsed-time
         // growth), the placement check keeps the whole bar on-screen.
-        view.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
-            if (right - left != oldRight - oldLeft) applyBarPlacement()
+        // An appearance size change (ENC-68) resizes the idle bubble in
+        // the same way, so it re-clamps into the screen too — the drag
+        // math reads the view's live size, and the persisted anchor is a
+        // normalized fraction, so a resize never strands the bubble.
+        view.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val widthChanged = right - left != oldRight - oldLeft
+            val heightChanged = bottom - top != oldBottom - oldTop
+            if (widthChanged) applyBarPlacement()
+            if ((widthChanged || heightChanged) && barFormAnchorXPx == null) reclampBubble()
         }
         windowManager.addView(view, params)
         lifecycleOwner = owner
@@ -536,7 +557,7 @@ class BubbleOverlayService : Service() {
             params.y = clamped.yPx
             windowManager.updateViewLayout(view, params)
         }
-        Log.d(TAG, "Configuration changed; bubble re-clamped into ${bounds.widthPx}x${bounds.heightPx}")
+        Log.d(TAG, "Bubble re-clamped into ${bounds.widthPx}x${bounds.heightPx}")
     }
 
     private fun createLayoutParams(): WindowManager.LayoutParams =

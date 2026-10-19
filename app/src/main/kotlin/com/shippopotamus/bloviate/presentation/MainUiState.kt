@@ -1,5 +1,10 @@
 package com.shippopotamus.bloviate.presentation
 
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import com.shippopotamus.bloviate.domain.model.BubbleShape
+import com.shippopotamus.bloviate.domain.model.BubbleSize
+import com.shippopotamus.bloviate.domain.model.BubbleTint
+
 /** Presentation-only classification of the focused field, mapped from the domain state. */
 enum class FocusClassification {
     NONE,
@@ -85,6 +90,107 @@ fun MainUiState.setupStatus(): SetupStatusUi =
         else -> SetupStatusUi.Ready
     }
 
+/** Presentation-only mapping of the bubble size steps (ENC-68). */
+enum class BubbleSizeUi {
+    SMALL,
+    MEDIUM,
+    LARGE,
+}
+
+/** Presentation-only mapping of the bubble silhouettes (ENC-68). */
+enum class BubbleShapeUi {
+    CIRCLE,
+    PILL,
+    SQUIRCLE,
+    COOKIE,
+    CLOVER,
+    ARCH,
+}
+
+/** Presentation-only mapping of the bubble tints, under their user-facing names (ENC-68). */
+enum class BubbleTintUi {
+    INDIGO,
+    NEUTRAL,
+    GREEN,
+    AMBER,
+    ROSE,
+    SKY,
+}
+
+/**
+ * The Setup screen's bubble-look state (ENC-68): the user's opacity,
+ * size, silhouette, and tint, mapped from the domain [BubbleAppearance]
+ * by the ViewModel so no domain type reaches a composable.
+ */
+data class BubbleAppearanceUi(
+    val opacity: Float = 1f,
+    val size: BubbleSizeUi = BubbleSizeUi.MEDIUM,
+    val shape: BubbleShapeUi = BubbleShapeUi.CIRCLE,
+    val tint: BubbleTintUi = BubbleTintUi.INDIGO,
+)
+
+internal fun BubbleSizeUi.toDomain(): BubbleSize =
+    when (this) {
+        BubbleSizeUi.SMALL -> BubbleSize.SMALL
+        BubbleSizeUi.MEDIUM -> BubbleSize.MEDIUM
+        BubbleSizeUi.LARGE -> BubbleSize.LARGE
+    }
+
+internal fun BubbleSize.toUi(): BubbleSizeUi =
+    when (this) {
+        BubbleSize.SMALL -> BubbleSizeUi.SMALL
+        BubbleSize.MEDIUM -> BubbleSizeUi.MEDIUM
+        BubbleSize.LARGE -> BubbleSizeUi.LARGE
+    }
+
+internal fun BubbleShapeUi.toDomain(): BubbleShape =
+    when (this) {
+        BubbleShapeUi.CIRCLE -> BubbleShape.CIRCLE
+        BubbleShapeUi.PILL -> BubbleShape.PILL
+        BubbleShapeUi.SQUIRCLE -> BubbleShape.SQUIRCLE
+        BubbleShapeUi.COOKIE -> BubbleShape.COOKIE
+        BubbleShapeUi.CLOVER -> BubbleShape.CLOVER
+        BubbleShapeUi.ARCH -> BubbleShape.ARCH
+    }
+
+internal fun BubbleShape.toUi(): BubbleShapeUi =
+    when (this) {
+        BubbleShape.CIRCLE -> BubbleShapeUi.CIRCLE
+        BubbleShape.PILL -> BubbleShapeUi.PILL
+        BubbleShape.SQUIRCLE -> BubbleShapeUi.SQUIRCLE
+        BubbleShape.COOKIE -> BubbleShapeUi.COOKIE
+        BubbleShape.CLOVER -> BubbleShapeUi.CLOVER
+        BubbleShape.ARCH -> BubbleShapeUi.ARCH
+    }
+
+internal fun BubbleTintUi.toDomain(): BubbleTint =
+    when (this) {
+        BubbleTintUi.INDIGO -> BubbleTint.INDIGO
+        BubbleTintUi.NEUTRAL -> BubbleTint.NEUTRAL
+        BubbleTintUi.GREEN -> BubbleTint.SUCCESS
+        BubbleTintUi.AMBER -> BubbleTint.WARNING
+        BubbleTintUi.ROSE -> BubbleTint.DANGER
+        BubbleTintUi.SKY -> BubbleTint.INFO
+    }
+
+internal fun BubbleTint.toUi(): BubbleTintUi =
+    when (this) {
+        BubbleTint.INDIGO -> BubbleTintUi.INDIGO
+        BubbleTint.NEUTRAL -> BubbleTintUi.NEUTRAL
+        BubbleTint.SUCCESS -> BubbleTintUi.GREEN
+        BubbleTint.WARNING -> BubbleTintUi.AMBER
+        BubbleTint.DANGER -> BubbleTintUi.ROSE
+        BubbleTint.INFO -> BubbleTintUi.SKY
+    }
+
+internal fun BubbleAppearance.toUi(): BubbleAppearanceUi =
+    BubbleAppearanceUi(
+        opacity = opacity,
+        size = size.toUi(),
+        shape = shape.toUi(),
+        tint = tint.toUi(),
+    )
+
 /**
  * Home/status screen state: watcher enablement, the live field-focus
  * classification, bubble overlay permission + service state, microphone
@@ -102,4 +208,5 @@ data class MainUiState(
     val parakeetModelStatus: ModelUiStatus = ModelUiStatus.Absent,
     val selectedEngine: DictationEngineUi = DictationEngineUi.PARAKEET,
     val engineFallback: EngineFallbackUi? = null,
+    val bubbleAppearance: BubbleAppearanceUi = BubbleAppearanceUi(),
 )
