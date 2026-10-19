@@ -117,25 +117,90 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `the reasoning controls pin to effort low with a hard token cap`() {
-        // ENC-94: the shipped control values, pinned literally for the
-        // same reason as the model slugs — a silent edit here changes
-        // every style call's latency profile. Effort LOW because the
-        // alias's current model (Grok 4.7) does not honor "none"; the
-        // cap is the hard bound behind it.
+    fun `the reasoning control pins to effort low`() {
+        // ENC-94/95: the shipped control value, pinned literally for
+        // the same reason as the model slugs — a silent edit here
+        // changes every style call's latency profile. Effort LOW
+        // because the alias's current model (Grok 4.7) does not honor
+        // "none" (Sean's ruling, ENC-94).
         assertEquals("low", OpenRouterPayload.REASONING_EFFORT)
-        assertEquals(512, OpenRouterPayload.REASONING_MAX_TOKENS)
     }
 
     @Test
-    fun `a request carries the reasoning controls by default`() {
+    fun `a request carries the reasoning control by default`() {
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
         )
 
-        assertTrue(request.contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
+        assertTrue(request.contains("\"reasoning\":{\"effort\":\"low\"}"))
+    }
+
+    @Test
+    fun `the reasoning block never combines effort with a token cap`() {
+        // ENC-95's regression, pinned: OpenRouter's unified reasoning
+        // parameter accepts effort OR max_tokens, not both — the
+        // combined ENC-94 shape is what providers rejected with
+        // 400-class errors on device. Whatever else changes, the two
+        // must never ride together again.
+        val request = OpenRouterPayload.buildChatRequest(
+            model = OpenRouterPayload.PRIMARY_MODEL,
+            system = system,
+            user = user,
+            stream = true,
+        )
+
+        assertFalse(request.contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\""))
+        assertFalse(request.contains(",\"max_tokens\":512}"))
+    }
+
+    @Test
+    fun `a degraded request drops the reasoning block and stream options but still streams`() {
+        // ENC-95: the degraded retry's payload shape — the bare
+        // streamed request, with nothing optional left to reject.
+        val request = OpenRouterPayload.buildChatRequest(
+            model = OpenRouterPayload.PRIMARY_MODEL,
+            system = system,
+            user = user,
+            stream = true,
+            reasoningEffort = null,
+            includeUsage = false,
+        )
+
+        assertTrue(request.contains("\"stream\":true"))
+        assertFalse(request.contains("\"stream_options\""))
+        assertFalse(request.contains("\"reasoning\""))
+    }
+
+    @Test
+    fun `error code and type are extracted from an openrouter error body`() {
+        // ENC-95 telemetry: provider metadata off a rejected attempt.
+        val body = "{\"error\":{\"message\":\"max_tokens must be greater than the thinking budget\"," +
+            "\"code\":400,\"type\":\"invalid_request_error\",\"metadata\":{\"provider_name\":\"Anthropic\"}}}"
+
+        val info = OpenRouterPayload.extractErrorInfo(body)
+        assertEquals(400, info?.code)
+        assertEquals("invalid_request_error", info?.type)
+    }
+
+    @Test
+    fun `a string error code still resolves to its number`() {
+        val body = "{\"error\":{\"code\":\"429\",\"message\":\"rate limited\"}}"
+
+        assertEquals(429, OpenRouterPayload.extractErrorInfo(body)?.code)
+    }
+
+    @Test
+    fun `a body without an error object reports no error info`() {
+        assertNull(OpenRouterPayload.extractErrorInfo("{\"choices\":[]}"))
+    }
+
+    @Test
+    fun `an error decoy inside a string value does not resolve`() {
+        val body = "{\"choices\":[{\"delta\":{\"content\":\"an \\\"error\\\": {\\\"code\\\": 500} here\"}}]}"
+
+        assertNull(OpenRouterPayload.extractErrorInfo(body))
     }
 
     @Test

@@ -468,11 +468,14 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `both chain attempts carry the reasoning controls`() = runTest {
+    fun `the primary carries effort only reasoning and the fallback carries none`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-94: the constraint rides the whole chain — the Haiku
-        // fallback gets the same profile, so a fallback answer is as
-        // prompt as a primary one.
+        // ENC-95's split profile (was ENC-94's both-carry-it shape):
+        // effort-only on the primary — never combined with a token
+        // cap, the combination providers rejected — and no block at
+        // all on the Anthropic fallback, whose translated budget
+        // arithmetic made the combined request invalid by
+        // construction and which has no blowout to leash.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
@@ -484,8 +487,127 @@ class OpenRouterStyleClientTest {
 
         client.style(style = professional, text = SOURCE_TEXT)
 
-        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
-        assertTrue(fakeTransport.requests[1].contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
+        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"low\"}"))
+        assertTrue(!fakeTransport.requests[1].contains("\"reasoning\""))
+    }
+
+    @Test
+    fun `a 400 on the primary retries degraded on the same model and succeeds`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-95's device symptom, answered: the full payload is
+        // refused with a 400-class rejection, and the SAME model
+        // answers the degraded retry — the fallback is never called
+        // and the styled text lands.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 400, body = BUDGET_400_BODY)
+            } else {
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "xAI")
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+        // The retry is the degraded shape: streamed, but bare.
+        val degraded = fakeTransport.requests[1]
+        assertTrue(degraded.contains("\"stream\":true"))
+        assertTrue(!degraded.contains("\"reasoning\""))
+        assertTrue(!degraded.contains("\"stream_options\""))
+        assertTrue(degraded.contains(OpenRouterPayload.PRIMARY_MODEL))
+    }
+
+    @Test
+    fun `a 400 on both payload shapes advances the chain to the fallback`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // The primary refuses BOTH shapes; the fallback's plain call
+        // answers. Three requests total: full, degraded, fallback.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex < 2) {
+                HttpResult(status = 400, body = BUDGET_400_BODY)
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(FALLBACK_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(3, fakeTransport.requests.size)
+        assertTrue(fakeTransport.requests[2].contains(OpenRouterPayload.FALLBACK_MODEL))
+    }
+
+    @Test
+    fun `a 400 on every shape of both models falls back after one degraded retry each`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // The structural bound: full + degraded per model, then the
+        // chain reports the last attempt's reason — never a loop.
+        fakeTransport.handler = { _, _, _ -> HttpResult(status = 400, body = BUDGET_400_BODY) }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "http-400", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+        assertEquals(4, fakeTransport.requests.size)
+        assertTrue(!fakeTransport.requests[1].contains("\"reasoning\""))
+        assertTrue(!fakeTransport.requests[3].contains("\"stream_options\""))
+    }
+
+    @Test
+    fun `an in-stream error carrying a 400 code retries degraded on the same model`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-95 suspect (3), hardened: the stream itself opens with
+        // a 400-class error chunk. Same recourse as an HTTP 400 — one
+        // degraded retry before the chain moves on.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emit("data: {\"id\":\"gen-enc95\",\"provider\":\"xAI\",\"error\":{\"code\":400,\"message\":\"invalid request\"}}")
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(STYLED_TEXT), provider = "xAI")
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+        assertTrue(!fakeTransport.requests[1].contains("\"reasoning\""))
+    }
+
+    @Test
+    fun `a usage tail chunk in the full openrouter shape completes the attempt`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-95 suspect (2), exonerated in fixture form: with
+        // include_usage the stream's tail is a finish chunk, then a
+        // usage chunk with EMPTY choices. The assembled answer stands.
+        fakeTransport.handler = { _, _, emit ->
+            emit("data: {\"id\":\"gen-enc95\",\"provider\":\"SpaceXAI\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}")
+            emit("data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{\"content\":\"The meeting is moved \"}}]}")
+            emit("data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{\"content\":\"to Friday afternoon.\"}}]}")
+            emit(
+                "data: {\"id\":\"gen-enc95\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," +
+                    "\"usage\":{\"prompt_tokens\":900,\"completion_tokens\":12,\"total_tokens\":912}}",
+            )
+            emit(usageChunk(reasoningTokens = 4))
+            emit(DONE_LINE)
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
     }
 
     @Test
@@ -721,6 +843,15 @@ class OpenRouterStyleClientTest {
                 "want to hear them is that you want to know whether this fucking dictation " +
                 "will work, and whether Gronk will convert this profanity-laced tirade into " +
                 "something Seneca would say. I want to know that too. So here goes."
+
+        /**
+         * Representative 400 body for the ENC-95 rejection: the
+         * Anthropic budget translation failure, in OpenRouter's
+         * error envelope (ENC-95 diagnosis fixture).
+         */
+        const val BUDGET_400_BODY: String =
+            "{\"error\":{\"message\":\"max_tokens must be greater than the thinking budget\"," +
+                "\"code\":400,\"type\":\"invalid_request_error\",\"metadata\":{\"provider_name\":\"Anthropic\"}}}"
 
         /** A guard-safe source/restyle pair: same content words, new casing. */
         const val SOURCE_TEXT: String = "the meeting is moved to friday afternoon"
