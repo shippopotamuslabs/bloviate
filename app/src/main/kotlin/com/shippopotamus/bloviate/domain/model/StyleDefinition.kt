@@ -286,6 +286,48 @@ object StyleCatalog {
     )
 
     /** The style an absent or unrecognized selection reads as: today's baseline behavior. */
+    private val TheColonel: StyleDefinition = StyleDefinition(
+        id = "the-colonel",
+        displayName = "The Colonel",
+        description = "Courtly, periodic, unhurried — the old Southern written voice.",
+        sample = "I am most grateful for the news, and I shall attend to the matter in due course.",
+        systemInstructions = "Casing: formal sentence case throughout, nothing clipped or " +
+            "casual. Punctuation: periodic sentences built on balanced clauses, semicolons " +
+            "and colons doing the joinery, each sentence allowed its full measure. " +
+            "Paragraphing: one measured paragraph, unhurried from the first word to the " +
+            "last. Register: the educated nineteenth-century Southern written voice — " +
+            "elaborate courtesy, Latinate diction with a scriptural cadence beneath it, " +
+            "gracious formality even in disagreement; courtly without servility, assured " +
+            "and never hurried. It is a voice, not a letter: no salutations, no sign-offs, " +
+            "no framing of address. Render this register of the transcript's own language " +
+            "— restyle the text in its own tongue in that language's period voice; never " +
+            "translate it into English. The period lends its syntax, diction, and courtesy " +
+            "ONLY: facts, names, numbers, and referents never change, a modern thing keeps " +
+            "the speaker's name for it, and the style must never import the era's racial " +
+            "vocabulary or Lost Cause apologetics, on any input, ever. " + NEVER_CLAUSE,
+        fewShots = listOf(
+            FewShot(
+                raw = "thanks for sending the photos, the kids look great and we had a great time",
+                styled = "I am obliged for the photographs; the children look splendid, " +
+                    "and our visit was a pleasure from first to last.",
+            ),
+            FewShot(
+                raw = "i disagree with the plan, the cost is too high and the timeline is unrealistic",
+                styled = "With respect, I cannot commend the plan: the cost exceeds what " +
+                    "prudence allows, and the schedule promises what no honest effort can deliver.",
+            ),
+            FewShot(
+                raw = "the backup script failed last night because the disk filled up, " +
+                    "and we lost about two hours of logs",
+                styled = "The backup script failed in the night, the disk having filled " +
+                    "beyond its capacity, and we are the poorer by some two hours of logs.",
+            ),
+        ),
+        kind = StyleKind.LLM,
+    )
+
+    /** The style an absent or unrecognized selection reads as: today's baseline behavior. */
+
     val DEFAULT: StyleDefinition = NormalCapsCasual
 
     /** Every style Bloviate offers, in display order. */
@@ -300,6 +342,7 @@ object StyleCatalog {
         MarcusAurelius,
         OscarWilde,
         Talkie,
+        TheColonel,
     )
 
     /** Looks up [id]; unknown ids resolve to [DEFAULT], never null. */
