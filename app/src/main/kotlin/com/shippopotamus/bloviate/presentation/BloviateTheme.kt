@@ -2,9 +2,15 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.SwitchColors
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -12,8 +18,13 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * The Shippopotamus canonical palette — the "Palette Gospel", declared
@@ -213,10 +224,186 @@ internal val BloviateDarkColorScheme = darkColorScheme(
 )
 
 /**
+ * The Shippopotamus Compose Gospel's spacing scale (ENC-86): the ONLY
+ * spacing source for the app screens and the shared dashboard
+ * components. Base unit 4dp, major grid 8dp; the vertical rhythm is
+ * 8 / 16 / 24 / 32 / 48 / 64 and off-rhythm values (5, 7, 10, 15, …)
+ * are banned in presentation code — if a gap is not one of these, the
+ * layout is wrong, not the scale. (Non-spacing geometry — icon glyph
+ * sizes, border widths, the overlay's waveform measurements — is not
+ * spacing and stays component-local; see UI_DESIGN_SPEC.md §6.)
+ */
+object BloviateSpacing {
+    val s4: Dp = 4.dp
+    val s8: Dp = 8.dp
+    val s12: Dp = 12.dp
+    val s16: Dp = 16.dp
+    val s24: Dp = 24.dp
+    val s32: Dp = 32.dp
+    val s48: Dp = 48.dp
+    val s64: Dp = 64.dp
+}
+
+/**
+ * The gospel's shape scale (ENC-86): shape is hierarchy — cards and
+ * sheets step 4 / 8 / 12 / 16 / 28 by emphasis, and [Pill] is the full
+ * capsule for buttons, the switch track, and the nav indicator. The
+ * nested rule keeps inner corners honest: child radius = parent
+ * radius − padding. Don't invent radii.
+ */
+object BloviateShapes {
+    val Scale: Shapes = Shapes(
+        extraSmall = RoundedCornerShape(4.dp),
+        small = RoundedCornerShape(8.dp),
+        medium = RoundedCornerShape(12.dp),
+        large = RoundedCornerShape(16.dp),
+        extraLarge = RoundedCornerShape(28.dp),
+    )
+
+    /** The full capsule (gospel "full"): buttons, toggle track, active nav indicator. */
+    val Pill: Shape = CircleShape
+}
+
+/**
+ * The gospel's type scale (ENC-86), the full M3 ramp with the gospel's
+ * two deliberate deviations from stock M3 pinned: [Typography.titleLarge]
+ * is SemiBold (emphasized titles/top bars — stock M3 is Regular) and
+ * [Typography.bodySmall] letter-spacing is +0.15. The dark-mode
+ * astigmatism rule is structural here: no style uses Light (300) —
+ * body text is 400–500, emphasis 600.
+ *
+ * Font family: the gospel names "Shipopotamus Sans" with a Roboto Flex
+ * fallback, but no such font asset exists yet, so the styles leave the
+ * family unset — the platform default sans (Roboto Flex variable on
+ * the target devices) carries the gospel's weights and scale. When the
+ * brand font ships as an asset, it lands here and nowhere else.
+ */
+internal val BloviateTypography: Typography = Typography(
+    displayLarge = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.25).sp,
+    ),
+    displayMedium = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
+    ),
+    displaySmall = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+    ),
+    headlineLarge = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+    ),
+    headlineMedium = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+    ),
+    headlineSmall = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+    ),
+    titleLarge = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+    ),
+    titleMedium = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+    ),
+    titleSmall = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
+    bodyLarge = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+    ),
+    bodyMedium = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
+    bodySmall = TextStyle(
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.15.sp,
+    ),
+    labelLarge = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
+    labelMedium = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+    ),
+    labelSmall = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+    ),
+)
+
+/**
+ * The gospel switch colors, owned by the theme so every switch in the
+ * app gets them (ENC-88). Geometry stays stock M3 (52×32 track, 24dp
+ * checked thumb — the gospel's switch spec); colors are the fix: with
+ * the stock M3 defaults on this scheme the OFF thumb was `outline`
+ * (#2A2E39) on a `surfaceVariant` track (#1F222A) — a 1.17:1 pairing
+ * that read as an empty pill on device. The gospel pairings separate
+ * every layer:
+ *
+ * - OFF: text-primary thumb (#EDEEF0, 11.7:1 on the track) on the
+ *   gospel's inactive track, border-default (#2A2E39), rimmed with
+ *   text-tertiary (#858994 — 5.0:1 against the card surface, 5.5:1
+ *   against bg-base) so the rim and the knob — not the track fill —
+ *   carry the pill's edge on both backgrounds the Setup screen
+ *   presents.
+ * - ON: the gospel's active track (accent #7A7CFF) with the bg-base
+ *   thumb — the settled on-accent foreground (5.66:1, ENC-85).
+ */
+@Composable
+fun bloviateSwitchColors(): SwitchColors = SwitchDefaults.colors(
+    checkedThumbColor = BloviatePalette.BgBase,
+    checkedTrackColor = BloviatePalette.Accent,
+    checkedBorderColor = BloviatePalette.Accent,
+    uncheckedThumbColor = BloviatePalette.TextPrimary,
+    uncheckedTrackColor = BloviatePalette.BorderDefault,
+    uncheckedBorderColor = BloviatePalette.TextTertiary,
+)
+
+/**
  * The one app theme: a fixed dark Material 3 scheme carrying the
  * canonical palette (ENC-85; dark-only since ENC-75) — no light variant
  * and no dynamic color, so every screen and the bubble overlay read the
- * same on every device.
+ * same on every device. ENC-86 adds the Compose Gospel system on top:
+ * the gospel type scale and shape scale, wired here.
+ *
+ * Staged (ENC-86, flagged for Sean): the M3 Expressive surface —
+ * `MotionScheme.expressive()`, `MaterialExpressiveTheme`, and the
+ * morphable polygon shapes. The classes exist inside the pinned
+ * material3 1.4.0 artifact but are **internal** in its Kotlin metadata
+ * (the compiler rejects them: "it is internal in file"), so they are
+ * not public API in the pinned version and cannot be adopted without
+ * a version bump — and this repo's pins are aligned with Enclave's
+ * catalog on purpose, so the bump is a cross-repo decision. When the
+ * bump lands, the expressive motion scheme slots in here and nowhere
+ * else; stock components already animate on springs where M3
+ * implements it.
  */
 @Composable
 fun BloviateTheme(content: @Composable () -> Unit) {
@@ -225,6 +412,8 @@ fun BloviateTheme(content: @Composable () -> Unit) {
     ) {
         MaterialTheme(
             colorScheme = BloviateDarkColorScheme,
+            shapes = BloviateShapes.Scale,
+            typography = BloviateTypography,
             content = content,
         )
     }
@@ -235,8 +424,8 @@ fun BloviateTheme(content: @Composable () -> Unit) {
 @Composable
 private fun BloviateThemePreview() {
     BloviateTheme {
-        Card(modifier = Modifier.padding(16.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        Card(modifier = Modifier.padding(BloviateSpacing.s16)) {
+            Column(modifier = Modifier.padding(BloviateSpacing.s16)) {
                 Text(text = "Bloviate", style = MaterialTheme.typography.titleLarge)
                 Text(
                     text = "Dark-only dashboard theme.",

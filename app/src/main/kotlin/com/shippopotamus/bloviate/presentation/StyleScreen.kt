@@ -32,7 +32,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.R
@@ -93,7 +92,7 @@ fun StyleScreen(
                             },
                         ),
                         tone = if (uiState.hasApiKey) StatusTone.POSITIVE else StatusTone.NEUTRAL,
-                        modifier = Modifier.padding(end = 16.dp),
+                        modifier = Modifier.padding(end = BloviateSpacing.s16),
                     )
                 },
             )
@@ -107,8 +106,8 @@ fun StyleScreen(
                 .padding(innerPadding)
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
             DashboardSectionHeader(text = stringResource(R.string.style_section_key))
             AiKeyCard(
@@ -120,7 +119,6 @@ fun StyleScreen(
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.style_section_styles),
-                modifier = Modifier.padding(top = 10.dp),
             )
             DashboardCard {
                 uiState.options.forEachIndexed { index, option ->
@@ -135,7 +133,7 @@ fun StyleScreen(
                 text = stringResource(R.string.style_footer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                modifier = Modifier.padding(horizontal = BloviateSpacing.s4),
             )
         }
     }
@@ -158,12 +156,12 @@ private fun AiKeyCard(
     val keyLabel = stringResource(R.string.style_api_key_label)
     DashboardCard(modifier = modifier) {
         Column(
-            modifier = Modifier.padding(13.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
             ) {
                 OutlinedTextField(
                     value = apiKeyDraft,
@@ -250,7 +248,11 @@ private fun StyleListRow(
     )
 }
 
-/** The selected style's sample, inset under its row so the list pays for one sample, not nine. */
+/**
+ * The selected style's sample, inset under its row so the list pays for
+ * one sample, not nine. The start inset (s48) aligns the sample with
+ * the row's text: row padding s16 + leading gap s12 + the radio glyph.
+ */
 @Composable
 private fun StyleSample(
     sample: String,
@@ -259,12 +261,16 @@ private fun StyleSample(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 44.dp, end = 13.dp, bottom = 12.dp)
+            .padding(
+                start = BloviateSpacing.s48,
+                end = BloviateSpacing.s16,
+                bottom = BloviateSpacing.s12,
+            )
             .background(
                 color = MaterialTheme.colorScheme.surface,
                 shape = MaterialTheme.shapes.medium,
             )
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .padding(horizontal = BloviateSpacing.s12, vertical = BloviateSpacing.s8),
     ) {
         Text(
             text = sample,
