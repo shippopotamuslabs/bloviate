@@ -68,6 +68,7 @@ class StylingTextPostProcessorTest {
         assertEquals("professional", result.styleId)
         assertEquals(900L, result.llmMs)
         assertFalse(result.fellBack)
+        assertNull(result.fellBackReason)
         assertEquals(listOf("professional" to "raw words"), fakeLlm.inputs)
     }
 
@@ -83,6 +84,7 @@ class StylingTextPostProcessorTest {
         assertEquals("professional", result.styleId)
         assertNull(result.llmMs)
         assertTrue(result.fellBack)
+        assertEquals("timeout", result.fellBackReason)
     }
 
     @Test

@@ -81,6 +81,22 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `a slow call inside the hard cap still succeeds`() = runTest {
+        // ENC-83 regression: real OpenRouter generations take 3.3-4.0s
+        // server-side. A call that lands inside the client's 4s cap must
+        // succeed — the old failure was the transport's 2.5s socket read
+        // timeout pre-empting this cap (pinned in StyleHttpTransportTimeoutTest).
+        fakeTransport.handler = { _, _ ->
+            delay(SLOW_IN_BUDGET_MS)
+            HttpResult(status = 200, body = assistantBody("Slow polish."))
+        }
+
+        val outcome = client.style(style = professional, text = "raw words")
+
+        assertEquals("Slow polish.", (outcome as LlmStyleOutcome.Styled).text)
+    }
+
+    @Test
     fun `a hung call falls back on the hard timeout`() = runTest {
         fakeTransport.handler = { _, _ ->
             delay(HUNG_CALL_MS)
@@ -154,5 +170,6 @@ class OpenRouterStyleClientTest {
 
     private companion object {
         const val HUNG_CALL_MS: Long = 30_000L
+        const val SLOW_IN_BUDGET_MS: Long = 3_500L
     }
 }

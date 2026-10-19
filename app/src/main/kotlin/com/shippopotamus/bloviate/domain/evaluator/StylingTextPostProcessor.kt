@@ -17,6 +17,8 @@ data class StyleProcessResult(
     val styleId: String,
     val llmMs: Long?,
     val fellBack: Boolean,
+    /** Why the LLM pass fell back (ENC-83 telemetry); null when it did not run or succeeded. */
+    val fellBackReason: String? = null,
 )
 
 /**
@@ -72,6 +74,7 @@ class StylingTextPostProcessor @Inject constructor(
                 styleId = style.id,
                 llmMs = null,
                 fellBack = true,
+                fellBackReason = outcome.reason,
             )
         }
     }

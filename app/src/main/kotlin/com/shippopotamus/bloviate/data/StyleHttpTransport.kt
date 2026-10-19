@@ -60,15 +60,23 @@ class HttpURLConnectionStyleTransport(
             }
         }
 
-    private companion object {
+    internal companion object {
         const val TAG: String = "OpenRouterStyle"
         const val POST_METHOD: String = "POST"
         const val APP_REFERER: String = "https://github.com/browntown-development/bloviate"
         const val APP_TITLE: String = "Bloviate"
 
-        /** Worst case ~4s on the wire; the client caps the whole call at 4s too. */
         const val CONNECT_TIMEOUT_MS: Int = 1_500
-        const val READ_TIMEOUT_MS: Int = 2_500
+
+        /**
+         * Backstop only — the client's coroutine cap owns the call budget
+         * (ENC-83). A non-streamed completion sends no bytes until
+         * generation ends, so the socket sits silent for the whole server
+         * generation; this must never bind before the client cap or every
+         * slow-but-successful call falls back. It exists to bound the
+         * abandoned IO thread after the client has already given up.
+         */
+        const val READ_TIMEOUT_MS: Int = 4_000
 
         val SUCCESS_RANGE: IntRange = HttpURLConnection.HTTP_OK..HttpURLConnection.HTTP_MULT_CHOICE - 1
     }
