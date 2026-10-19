@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.presentation
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -128,12 +127,7 @@ private fun MainTab.icon(): ImageVector =
     }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Shell - Light", showBackground = true)
-@Preview(
-    name = "Shell - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Shell - Dark", showBackground = true)
 @Composable
 private fun AppShellPreview() {
     PreviewTheme {

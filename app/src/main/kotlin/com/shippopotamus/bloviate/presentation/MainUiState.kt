@@ -41,6 +41,50 @@ sealed interface ModelUiStatus {
     data class Failed(val reason: String) : ModelUiStatus
 }
 
+/** The first thing standing between the user and dictation, in gate order (ENC-75). */
+enum class SetupBlocker {
+    WATCHER,
+    OVERLAY,
+    MICROPHONE,
+    MODEL,
+    BUBBLE,
+}
+
+/**
+ * The Setup header pill's verdict (ENC-75): either everything dictation
+ * needs is in place, or the first blocker in gate order. Derived from
+ * [MainUiState] by [setupStatus] — a pure function of view state, so
+ * the pill can never disagree with the rows below it.
+ */
+sealed interface SetupStatusUi {
+
+    /** Watcher, overlay, microphone, a ready model, and the bubble are all in place. */
+    data object Ready : SetupStatusUi
+
+    /** Dictation is blocked; [blocker] is the first gate that fails. */
+    data class Blocked(val blocker: SetupBlocker) : SetupStatusUi
+}
+
+/**
+ * Derives the header-pill verdict from this state. Gate order is the
+ * order a user must fix things in: the watcher (without it no field is
+ * ever spotted), the overlay permission (without it the bubble cannot
+ * draw), the microphone, a downloaded model (either engine counts —
+ * dictation works on whichever is ready), and finally the bubble
+ * switch itself, which is a tap rather than a setup errand.
+ */
+fun MainUiState.setupStatus(): SetupStatusUi =
+    when {
+        !watcherEnabled -> SetupStatusUi.Blocked(SetupBlocker.WATCHER)
+        !overlayPermissionGranted -> SetupStatusUi.Blocked(SetupBlocker.OVERLAY)
+        !micPermissionGranted -> SetupStatusUi.Blocked(SetupBlocker.MICROPHONE)
+        whisperModelStatus !is ModelUiStatus.Ready &&
+            parakeetModelStatus !is ModelUiStatus.Ready ->
+            SetupStatusUi.Blocked(SetupBlocker.MODEL)
+        !bubbleServiceRunning -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE)
+        else -> SetupStatusUi.Ready
+    }
+
 /**
  * Home/status screen state: watcher enablement, the live field-focus
  * classification, bubble overlay permission + service state, microphone

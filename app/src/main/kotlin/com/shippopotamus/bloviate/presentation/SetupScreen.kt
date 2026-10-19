@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.presentation
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,17 +8,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -28,18 +41,18 @@ import com.shippopotamus.bloviate.BuildConfig
 import com.shippopotamus.bloviate.R
 
 /**
- * The Setup tab: everything a person needs to get dictation working,
- * written the way a person would say it — what each permission is for,
- * whether it's on, and a button that fixes it when it isn't. Same state
- * and wiring as the old status screen (watcher enablement, the live
- * field-focus readout, bubble permission + service controls, microphone
- * permission, both voice models and the engine choice); the rework is
- * presentation only.
+ * The Setup tab, dashboard form (ENC-75): the header pill carries the
+ * whole verdict (derived from this same state by [setupStatus]), and
+ * every control below is a row — status as a chip, the row itself as
+ * the settings link, a switch for the bubble, a segmented control for
+ * the engine — instead of cards full of sentences and verb buttons.
+ * Same state and callbacks as the card layout it replaced; the rework
+ * is presentation only.
  *
- * The card column scrolls: the cards together exceed short viewports
- * (fold cover screens, split windows), and every card must stay
- * reachable (ENC-65). The shell's navigation bar owns the bottom system
- * inset, so the column does not pad for it.
+ * The column scrolls: the sections together exceed short viewports
+ * (fold cover screens, split windows), and every row must stay
+ * reachable (ENC-65). The shell's navigation bar owns the bottom
+ * system inset, so the column does not pad for it.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +70,15 @@ fun SetupScreen(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(text = stringResource(R.string.app_name)) })
+            TopAppBar(
+                title = { Text(text = stringResource(R.string.app_name)) },
+                actions = {
+                    SetupStatusPill(
+                        status = uiState.setupStatus(),
+                        modifier = Modifier.padding(end = 16.dp),
+                    )
+                },
+            )
         },
         contentWindowInsets = WindowInsets(0),
         modifier = modifier,
@@ -69,21 +90,27 @@ fun SetupScreen(
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            FieldAccessCard(
+            DashboardSectionHeader(text = stringResource(R.string.setup_section_permissions))
+            PermissionsCard(
                 uiState = uiState,
                 onOpenAccessibilitySettings = onOpenAccessibilitySettings,
-            )
-            BubbleCard(
-                uiState = uiState,
                 onOpenOverlaySettings = onOpenOverlaySettings,
+                onRequestMicPermission = onRequestMicPermission,
+            )
+            DashboardSectionHeader(
+                text = stringResource(R.string.setup_section_dictation),
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            DictationCard(
+                uiState = uiState,
                 onStartBubble = onStartBubble,
                 onStopBubble = onStopBubble,
             )
-            MicrophoneCard(
-                uiState = uiState,
-                onRequestMicPermission = onRequestMicPermission,
+            DashboardSectionHeader(
+                text = stringResource(R.string.model_card_title),
+                modifier = Modifier.padding(top = 10.dp),
             )
             VoiceModelsCard(
                 uiState = uiState,
@@ -91,20 +118,179 @@ fun SetupScreen(
                 onParakeetDownloadClick = onParakeetDownloadClick,
                 onSelectEngine = onSelectEngine,
             )
-            BubbleLookCard()
-            AboutBlock()
+            SetupFooter(modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
 
+/** The header pill: green "Ready to dictate", or the first blocker in gate order (ENC-75). */
+@Composable
+private fun SetupStatusPill(
+    status: SetupStatusUi,
+    modifier: Modifier = Modifier,
+) {
+    when (status) {
+        SetupStatusUi.Ready -> StatusPill(
+            text = stringResource(R.string.setup_status_ready),
+            tone = StatusTone.POSITIVE,
+            modifier = modifier,
+        )
+        is SetupStatusUi.Blocked -> StatusPill(
+            text = stringResource(
+                when (status.blocker) {
+                    SetupBlocker.WATCHER -> R.string.setup_status_watcher
+                    SetupBlocker.OVERLAY -> R.string.setup_status_overlay
+                    SetupBlocker.MICROPHONE -> R.string.setup_status_mic
+                    SetupBlocker.MODEL -> R.string.setup_status_model
+                    SetupBlocker.BUBBLE -> R.string.setup_status_bubble
+                },
+            ),
+            tone = StatusTone.ATTENTION,
+            modifier = modifier,
+        )
+    }
+}
+
 /**
- * Per-engine model rows + the engine choice (ENC-54): each engine shows
- * its own download state and download/retry button; the choice reflects
- * the persisted preference and is enabled only for engines whose model is
+ * The three permission gates as one grouped card (ENC-75). Each row's
+ * chip carries the state; the row itself is the fix when one exists —
+ * the accessibility row always opens Settings (that is also how a user
+ * turns it back off), the microphone and overlay rows act only while
+ * their permission is missing. The detection row's sub-line doubles as
+ * the live focus readout while the watcher is on: which kind of field
+ * is focused, never its content or the app it belongs to.
+ */
+@Composable
+private fun PermissionsCard(
+    uiState: MainUiState,
+    onOpenAccessibilitySettings: () -> Unit,
+    onOpenOverlaySettings: () -> Unit,
+    onRequestMicPermission: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DashboardCard(modifier = modifier) {
+        DashboardRow(
+            label = stringResource(R.string.watcher_row_label),
+            icon = Icons.Filled.Visibility,
+            sub = if (uiState.watcherEnabled) {
+                focusSub(uiState.focusClassification)
+            } else {
+                stringResource(R.string.watcher_row_sub)
+            },
+            onClick = onOpenAccessibilitySettings,
+            trailing = {
+                StatusChip(
+                    text = stringResource(
+                        if (uiState.watcherEnabled) R.string.chip_on else R.string.chip_off,
+                    ),
+                    tone = if (uiState.watcherEnabled) StatusTone.POSITIVE else StatusTone.ATTENTION,
+                )
+            },
+        )
+        DashboardRow(
+            label = stringResource(R.string.mic_row_label),
+            icon = Icons.Filled.Mic,
+            sub = stringResource(R.string.mic_row_sub),
+            onClick = if (uiState.micPermissionGranted) null else onRequestMicPermission,
+            showChevron = !uiState.micPermissionGranted,
+            dividerAbove = true,
+            trailing = {
+                StatusChip(
+                    text = stringResource(
+                        if (uiState.micPermissionGranted) R.string.chip_on else R.string.chip_off,
+                    ),
+                    tone = if (uiState.micPermissionGranted) StatusTone.POSITIVE else StatusTone.ATTENTION,
+                )
+            },
+        )
+        DashboardRow(
+            label = stringResource(R.string.overlay_row_label),
+            icon = Icons.Filled.Layers,
+            sub = stringResource(R.string.overlay_row_sub),
+            onClick = if (uiState.overlayPermissionGranted) null else onOpenOverlaySettings,
+            showChevron = !uiState.overlayPermissionGranted,
+            dividerAbove = true,
+            trailing = {
+                StatusChip(
+                    text = stringResource(
+                        if (uiState.overlayPermissionGranted) {
+                            R.string.chip_allowed
+                        } else {
+                            R.string.chip_not_allowed
+                        },
+                    ),
+                    tone = if (uiState.overlayPermissionGranted) {
+                        StatusTone.POSITIVE
+                    } else {
+                        StatusTone.ATTENTION
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun focusSub(classification: FocusClassification): String =
+    stringResource(
+        when (classification) {
+            FocusClassification.NONE -> R.string.focus_sub_none
+            FocusClassification.EDITABLE -> R.string.focus_sub_editable
+            FocusClassification.PASSWORD -> R.string.focus_sub_password
+        },
+    )
+
+/**
+ * The dictation card (ENC-75): the bubble is a switch — the control
+ * that matches an on/off job — and Bubble look is the quiet chevron
+ * row ENC-68 will grow into. The switch is live regardless of the
+ * overlay permission, exactly as the old start/stop buttons were: the
+ * service is the thing that runs, the permission gate is its own row.
+ */
+@Composable
+private fun DictationCard(
+    uiState: MainUiState,
+    onStartBubble: () -> Unit,
+    onStopBubble: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DashboardCard(modifier = modifier) {
+        DashboardRow(
+            label = stringResource(R.string.bubble_row_label),
+            icon = Icons.Filled.ChatBubbleOutline,
+            sub = stringResource(R.string.bubble_row_sub),
+            trailing = {
+                Switch(
+                    checked = uiState.bubbleServiceRunning,
+                    onCheckedChange = { turnOn ->
+                        if (turnOn) onStartBubble() else onStopBubble()
+                    },
+                )
+            },
+        )
+        DashboardRow(
+            label = stringResource(R.string.bubble_look_title),
+            icon = Icons.Filled.Tune,
+            sub = stringResource(R.string.bubble_look_sub),
+            showChevron = true,
+            dividerAbove = true,
+            trailing = {
+                StatusChip(text = stringResource(R.string.chip_soon), tone = StatusTone.NEUTRAL)
+            },
+        )
+    }
+}
+
+/**
+ * Per-engine model rows + the engine choice (ENC-54, dashboard form
+ * ENC-75): each row's trailing slot carries its lifecycle — Ready chip,
+ * compact Download button, progress while downloading, Try again after
+ * a failure (with the reason as the sub-line). The engine choice is a
+ * segmented control, enabled only for engines whose model is
  * downloaded. While the selected engine's model is not downloaded but
- * the other engine's is, dictation falls back to the ready engine — the
- * note under the choice says so rather than letting the choice imply the
- * selected engine is the one transcribing.
+ * the other engine's is, dictation falls back to the ready engine —
+ * the note under the control says so rather than letting the control
+ * imply the selected engine is the one transcribing.
  */
 @Composable
 private fun VoiceModelsCard(
@@ -114,42 +300,39 @@ private fun VoiceModelsCard(
     onSelectEngine: (DictationEngineUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
+    DashboardCard(modifier = modifier) {
+        ModelRow(
+            name = stringResource(R.string.engine_parakeet_name),
+            detail = stringResource(R.string.engine_parakeet_sub),
+            status = uiState.parakeetModelStatus,
+            onDownloadClick = onParakeetDownloadClick,
+        )
+        ModelRow(
+            name = stringResource(R.string.engine_whisper_name),
+            detail = stringResource(R.string.engine_whisper_sub),
+            status = uiState.whisperModelStatus,
+            onDownloadClick = onWhisperDownloadClick,
+            dividerAbove = true,
+        )
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(start = 13.dp, end = 13.dp, bottom = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = stringResource(R.string.model_card_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            EngineRow(
-                name = stringResource(R.string.engine_parakeet_name),
-                detail = stringResource(R.string.engine_parakeet_detail),
-                status = uiState.parakeetModelStatus,
-                onDownloadClick = onParakeetDownloadClick,
-            )
-            EngineRow(
-                name = stringResource(R.string.engine_whisper_name),
-                detail = stringResource(R.string.engine_whisper_detail),
-                status = uiState.whisperModelStatus,
-                onDownloadClick = onWhisperDownloadClick,
-            )
-            Text(
-                text = stringResource(R.string.engine_selector_title),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                EngineChoiceButton(
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                EngineSegment(
                     label = stringResource(R.string.engine_whisper_short),
                     selected = uiState.selectedEngine == DictationEngineUi.WHISPER,
-                    enabled = uiState.whisperModelStatus is ModelUiStatus.Ready,
+                    enabled = uiState.whisperModelStatus is ModelUiStatus.Ready ||
+                        uiState.selectedEngine == DictationEngineUi.WHISPER,
+                    index = 0,
                     onClick = { onSelectEngine(DictationEngineUi.WHISPER) },
                 )
-                EngineChoiceButton(
+                EngineSegment(
                     label = stringResource(R.string.engine_parakeet_short),
                     selected = uiState.selectedEngine == DictationEngineUi.PARAKEET,
-                    enabled = uiState.parakeetModelStatus is ModelUiStatus.Ready,
+                    enabled = uiState.parakeetModelStatus is ModelUiStatus.Ready ||
+                        uiState.selectedEngine == DictationEngineUi.PARAKEET,
+                    index = 1,
                     onClick = { onSelectEngine(DictationEngineUi.PARAKEET) },
                 )
             }
@@ -161,69 +344,78 @@ private fun VoiceModelsCard(
                         engineShortName(fallback.effective),
                     ),
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = stringResource(R.string.model_hint),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = stringResource(R.string.engine_attribution),
-                style = MaterialTheme.typography.bodySmall,
-            )
         }
     }
 }
 
 @Composable
-private fun EngineRow(
+private fun ModelRow(
     name: String,
     detail: String,
     status: ModelUiStatus,
     onDownloadClick: () -> Unit,
+    dividerAbove: Boolean = false,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(text = name, style = MaterialTheme.typography.titleSmall)
-        Text(text = modelStatusLabel(status))
-        Button(
-            onClick = onDownloadClick,
-            enabled = status is ModelUiStatus.Absent || status is ModelUiStatus.Failed,
-        ) {
-            Text(
-                text = stringResource(
-                    if (status is ModelUiStatus.Failed) {
-                        R.string.model_retry
-                    } else {
-                        R.string.model_download
-                    },
-                ),
-            )
-        }
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
+    DashboardRow(
+        label = name,
+        sub = when (status) {
+            is ModelUiStatus.Downloading ->
+                stringResource(R.string.model_status_downloading_format, status.percent)
+            is ModelUiStatus.Failed ->
+                stringResource(R.string.model_status_failed_format, status.reason)
+            ModelUiStatus.Absent, ModelUiStatus.Ready -> detail
+        },
+        dividerAbove = dividerAbove,
+        trailing = {
+            when (status) {
+                ModelUiStatus.Ready -> StatusChip(
+                    text = stringResource(R.string.model_chip_ready),
+                    tone = StatusTone.POSITIVE,
+                )
+                ModelUiStatus.Absent -> Button(onClick = onDownloadClick) {
+                    Text(text = stringResource(R.string.model_download))
+                }
+                is ModelUiStatus.Downloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+                is ModelUiStatus.Failed -> Button(onClick = onDownloadClick) {
+                    Text(text = stringResource(R.string.model_retry))
+                }
+            }
+        },
+    )
 }
 
 @Composable
-private fun EngineChoiceButton(
+private fun SingleChoiceSegmentedButtonRowScope.EngineSegment(
     label: String,
     selected: Boolean,
     enabled: Boolean,
+    index: Int,
     onClick: () -> Unit,
 ) {
-    // The selected engine stays clickable (it is a no-op re-selection); an
-    // unselected engine is clickable only when its model is downloaded.
-    val clickable = enabled || selected
-    if (selected) {
-        Button(onClick = onClick, enabled = clickable) {
-            Text(text = label)
-        }
-    } else {
-        OutlinedButton(onClick = onClick, enabled = clickable) {
-            Text(text = label)
-        }
+    // Rendered inside a SingleChoiceSegmentedButtonRow; the row scope
+    // is what gives the segment its joined shape.
+    SegmentedButton(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        shape = SegmentedButtonDefaults.itemShape(index = index, count = ENGINE_SEGMENT_COUNT),
+        colors = SegmentedButtonDefaults.colors(
+            activeContainerColor = MaterialTheme.colorScheme.primary,
+            activeContentColor = MaterialTheme.colorScheme.onPrimary,
+            inactiveContainerColor = MaterialTheme.colorScheme.surface,
+            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledActiveContainerColor = MaterialTheme.colorScheme.primary,
+            disabledActiveContentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        icon = {},
+    ) {
+        Text(text = label)
     }
 }
 
@@ -236,227 +428,57 @@ private fun engineShortName(engine: DictationEngineUi): String =
         },
     )
 
-@Composable
-private fun modelStatusLabel(status: ModelUiStatus): String =
-    when (status) {
-        ModelUiStatus.Absent -> stringResource(R.string.model_status_absent)
-        is ModelUiStatus.Downloading ->
-            stringResource(R.string.model_status_downloading_format, status.percent)
-        ModelUiStatus.Ready -> stringResource(R.string.model_status_ready)
-        is ModelUiStatus.Failed ->
-            stringResource(R.string.model_status_failed_format, status.reason)
-    }
-
-@Composable
-private fun MicrophoneCard(
-    uiState: MainUiState,
-    onRequestMicPermission: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.mic_card_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(
-                    if (uiState.micPermissionGranted) {
-                        R.string.mic_status_granted
-                    } else {
-                        R.string.mic_status_missing
-                    },
-                ),
-            )
-            Button(
-                onClick = onRequestMicPermission,
-                enabled = !uiState.micPermissionGranted,
-            ) {
-                Text(text = stringResource(R.string.mic_request))
-            }
-            Text(
-                text = stringResource(R.string.mic_hint),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FieldAccessCard(
-    uiState: MainUiState,
-    onOpenAccessibilitySettings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.watcher_card_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(
-                    if (uiState.watcherEnabled) {
-                        R.string.watcher_status_enabled
-                    } else {
-                        R.string.watcher_status_disabled
-                    },
-                ),
-            )
-            Text(text = focusLabel(uiState.focusClassification))
-            uiState.focusPackageName?.let { packageName ->
-                Text(text = stringResource(R.string.focus_package_format, packageName))
-            }
-            Button(onClick = onOpenAccessibilitySettings) {
-                Text(text = stringResource(R.string.watcher_open_settings))
-            }
-            Text(
-                text = stringResource(R.string.watcher_hint),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-@Composable
-private fun BubbleCard(
-    uiState: MainUiState,
-    onOpenOverlaySettings: () -> Unit,
-    onStartBubble: () -> Unit,
-    onStopBubble: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.bubble_card_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(
-                    if (uiState.overlayPermissionGranted) {
-                        R.string.bubble_overlay_granted
-                    } else {
-                        R.string.bubble_overlay_missing
-                    },
-                ),
-            )
-            Text(
-                text = stringResource(
-                    if (uiState.bubbleServiceRunning) {
-                        R.string.bubble_service_running
-                    } else {
-                        R.string.bubble_service_stopped
-                    },
-                ),
-            )
-            Button(
-                onClick = onOpenOverlaySettings,
-                enabled = !uiState.overlayPermissionGranted,
-            ) {
-                Text(text = stringResource(R.string.bubble_overlay_open_settings))
-            }
-            Button(
-                onClick = onStartBubble,
-                enabled = !uiState.bubbleServiceRunning,
-            ) {
-                Text(text = stringResource(R.string.bubble_start))
-            }
-            Button(
-                onClick = onStopBubble,
-                enabled = uiState.bubbleServiceRunning,
-            ) {
-                Text(text = stringResource(R.string.bubble_stop))
-            }
-            Text(
-                text = stringResource(R.string.bubble_hint),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
 /**
- * Reserved home for the bubble appearance settings (ENC-68): a section
- * header and an honest "coming soon" note only — no controls until that
- * ticket builds them.
+ * The quiet footer (ENC-75): the privacy story in one line, the model
+ * attributions, and the exact build identity (ENC-69 — one-off test
+ * builds all report version 1.0, so the commit SHA is the only reliable
+ * way to tell which build is installed).
  */
 @Composable
-private fun BubbleLookCard(modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.bubble_look_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.bubble_look_soon),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-/**
- * Exact build identity, readable in-app (ENC-69): one-off test builds all
- * report version 1.0, so the commit SHA is the only reliable way to tell
- * which build is installed. Demoted to a quiet About block at the bottom
- * of Setup (ENC-71) — still visible, no longer competing with the cards
- * a user actually needs.
- */
-@Composable
-private fun AboutBlock(modifier: Modifier = Modifier) {
+private fun SetupFooter(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(13.dp),
+            )
+            Text(
+                text = stringResource(R.string.footer_privacy),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Text(
-            text = stringResource(R.string.about_title),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.about_version_format, BuildConfig.VERSION_NAME),
+            text = stringResource(R.string.engine_attribution),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = stringResource(R.string.build_tag_format, BuildConfig.GIT_SHA),
+            text = stringResource(
+                R.string.about_line_format,
+                BuildConfig.VERSION_NAME,
+                BuildConfig.GIT_SHA,
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-@Composable
-private fun focusLabel(classification: FocusClassification): String =
-    stringResource(
-        when (classification) {
-            FocusClassification.NONE -> R.string.focus_label_none
-            FocusClassification.EDITABLE -> R.string.focus_label_editable
-            FocusClassification.PASSWORD -> R.string.focus_label_password
-        },
-    )
+private const val ENGINE_SEGMENT_COUNT = 2
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Empty - Light", showBackground = true)
-@Preview(
-    name = "Empty - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Empty - Dark", showBackground = true)
 @Composable
 private fun SetupScreenEmptyPreview() {
     PreviewTheme {
@@ -475,12 +497,7 @@ private fun SetupScreenEmptyPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Populated - Light", showBackground = true)
-@Preview(
-    name = "Populated - Dark",
-    showBackground = true,
-    uiMode = Configuration.UI_MODE_NIGHT_YES,
-)
+@Preview(name = "Populated - Dark", showBackground = true)
 @Composable
 private fun SetupScreenPopulatedPreview() {
     PreviewTheme {
@@ -488,7 +505,6 @@ private fun SetupScreenPopulatedPreview() {
             uiState = MainUiState(
                 watcherEnabled = true,
                 focusClassification = FocusClassification.EDITABLE,
-                focusPackageName = "com.google.android.gm",
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
                 micPermissionGranted = true,
