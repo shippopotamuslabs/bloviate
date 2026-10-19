@@ -44,8 +44,9 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | State | Presentation |
 |-------|--------------|
 | Idle | Mic pill, resting elevation |
-| Listening | Pulsing ring + live RMS-driven amplitude + elapsed time |
-| Transcribing | Indeterminate progress treatment (no fake percentages) |
+| Listening | Recording bar: live waveform (RMS-driven) + elapsed time |
+| Transcribing | Shimmering status text: "Transcribing" (gradient sweep over the word; no spinner, no fake percentages) |
+| Polishing | Shimmering status text: "Polishing" — only while an AI style pass runs; local-only sends skip this state |
 | Done | Brief check affordance, then fade to Idle |
 | Error | Red flash/shake; the only sanctioned hard-coded semantic color use |
 
