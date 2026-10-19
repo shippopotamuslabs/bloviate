@@ -12,6 +12,7 @@ class StylePromptBuilderTest {
     private val professional = StyleCatalog.byId("professional")
     private val seneca = StyleCatalog.byId("seneca")
     private val lowercaseCasual = StyleCatalog.byId("lowercase-casual")
+    private val talkie = StyleCatalog.byId("talkie")
 
     @Test
     fun `system message carries the style instructions plus the only-text rule`() {
@@ -88,6 +89,30 @@ class StylePromptBuilderTest {
             assertTrue(prompt.system.content.contains(shot.styled), "lowercase-casual system lacks example output")
         }
         assertDemarcatedShape(prompt, lowercaseCasual)
+    }
+
+    @Test
+    fun `talkie prompt carries the period register for casual and technical dictation`() {
+        // ENC-102's prompt fixtures through the real builder: the
+        // era style's definitional material (1920s register, the
+        // register-of-the-language directive, the few-shot pairs)
+        // rides the system message for everyday and technical input
+        // alike, and both user messages keep the demarcated shape.
+        listOf(CASUAL_TRANSCRIPT, TECHNICAL_TRANSCRIPT).forEach { transcript ->
+            val prompt = builder.build(style = talkie, transcript = transcript)
+
+            assertTrue(prompt.system.content.contains("1920s"), "talkie system lacks the period register")
+            assertTrue(
+                prompt.system.content.contains("transcript's own language"),
+                "talkie system lacks the register-of-the-language directive",
+            )
+            talkie.fewShots.forEach { shot ->
+                assertTrue(prompt.system.content.contains(shot.raw), "talkie system lacks example input")
+                assertTrue(prompt.system.content.contains(shot.styled), "talkie system lacks example output")
+            }
+            assertTrue(prompt.user.content.contains("<transcript>"), "talkie user message lacks markers")
+            assertTrue(prompt.user.content.contains(transcript), "talkie user message lacks the transcript")
+        }
     }
 
     @Test
@@ -176,5 +201,9 @@ class StylePromptBuilderTest {
     private companion object {
         /** A transcript no catalog few-shot contains, so leakage assertions cannot false-positive. */
         const val TRANSCRIPT: String = "my bicycle has a flat tire again"
+
+        /** ENC-102 fixtures: an everyday dictation and a technical one through the era style. */
+        const val CASUAL_TRANSCRIPT: String = "remind me to call mom about sunday dinner"
+        const val TECHNICAL_TRANSCRIPT: String = "the nightly build broke on the auth module again"
     }
 }

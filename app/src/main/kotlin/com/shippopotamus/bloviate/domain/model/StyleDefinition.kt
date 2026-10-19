@@ -247,6 +247,45 @@ object StyleCatalog {
         kind = StyleKind.LLM,
     )
 
+    private val Talkie: StyleDefinition = StyleDefinition(
+        id = "talkie",
+        displayName = "Talkie",
+        description = "Bright, assured 1920s newspaper English.",
+        sample = "I shall send the letter by the evening post; the matter is quite settled.",
+        systemInstructions = "Casing: crisp 1920s newspaper sentence case — capitals where a " +
+            "quality daily of 1925 would put them, no more. Punctuation: the period's habits — " +
+            "semicolons and em dashes welcome, sentences balanced and a shade longer than " +
+            "today's, each one finished cleanly. Paragraphing: one assured paragraph, brisk " +
+            "throughout. Register: educated 1920s prose — the voice of a good newspaper of " +
+            "the era, assured and intelligent, formal one notch above modern casual, period " +
+            "idiom ('rather', 'quite', 'splendid') used sparingly and never as costume. " +
+            "Render the 1920s register of the transcript's own language — restyle the text " +
+            "in its own tongue in that language's period voice; never translate it into " +
+            "English. Period flavor touches FORM ONLY — diction, rhythm, idiom: a modern " +
+            "thing keeps the speaker's name for it (my phone stays my phone, never a period " +
+            "apparatus), and no period slur or item of bigotry the speaker did not use may " +
+            "ever appear. " + NEVER_CLAUSE,
+        fewShots = listOf(
+            FewShot(
+                raw = "i just got a new phone and honestly the battery is amazing, it lasts all day",
+                styled = "I have lately got a new phone, and the battery is quite a marvel — " +
+                    "it lasts the whole day through.",
+            ),
+            FewShot(
+                raw = "the server deploy failed because the database migration timed out at step three",
+                styled = "The deployment failed at the third step, the database migration " +
+                    "having run past its allotted time; the fault is plain, and rather tiresome.",
+            ),
+            FewShot(
+                raw = "i think we should leave the party early, the music is terrible and i'm bored",
+                styled = "I am for leaving the party early; the music is quite dreadful, " +
+                    "and I am thoroughly bored.",
+            ),
+        ),
+        kind = StyleKind.LLM,
+    )
+
+    /** The style an absent or unrecognized selection reads as: today's baseline behavior. */
     private val TheColonel: StyleDefinition = StyleDefinition(
         id = "the-colonel",
         displayName = "The Colonel",
@@ -288,6 +327,7 @@ object StyleCatalog {
     )
 
     /** The style an absent or unrecognized selection reads as: today's baseline behavior. */
+
     val DEFAULT: StyleDefinition = NormalCapsCasual
 
     /** Every style Bloviate offers, in display order. */
@@ -301,6 +341,7 @@ object StyleCatalog {
         Seneca,
         MarcusAurelius,
         OscarWilde,
+        Talkie,
         TheColonel,
     )
 
