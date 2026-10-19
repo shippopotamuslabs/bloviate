@@ -7,8 +7,64 @@ import org.junit.jupiter.api.Test
 class StyleCatalogTest {
 
     @Test
-    fun `the catalog holds exactly nine styles`() {
-        assertEquals(9, StyleCatalog.ALL.size)
+    fun `the catalog holds exactly ten styles`() {
+        assertEquals(10, StyleCatalog.ALL.size)
+    }
+
+    @Test
+    fun `talkie is an llm style in the 1920s register`() {
+        // ENC-102: the era-family entry inspired by Talkie-1930 — a
+        // prompt-layer register on the existing chain, not a model.
+        val talkie = StyleCatalog.byId("talkie")
+
+        assertEquals("Talkie", talkie.displayName)
+        assertEquals(StyleKind.LLM, talkie.kind)
+        assertTrue(talkie.systemInstructions.contains("1920s"), "talkie names no period register")
+    }
+
+    @Test
+    fun `talkie instructions carry the register-of-the-language directive and the form-only law`() {
+        // ENC-102's multilingual note: the pass restyles whatever
+        // language the transcript is in, in THAT language's 1920s
+        // register — never Anglicized. And period flavor is form
+        // only: modern referents keep the speaker's names, and no
+        // period bigotry the speaker did not use may appear.
+        val talkie = StyleCatalog.byId("talkie")
+
+        assertTrue(
+            talkie.systemInstructions.contains("transcript's own language"),
+            "talkie lacks the register-of-the-language directive",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("never translate"),
+            "talkie does not forbid translating into English",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("FORM ONLY"),
+            "talkie lacks the form-only law",
+        )
+        assertTrue(
+            talkie.systemInstructions.contains("my phone stays my phone"),
+            "talkie does not pin the modern-referent rule",
+        )
+    }
+
+    @Test
+    fun `talkie few-shots restyle casual and technical dictation with facts intact`() {
+        // ENC-102's fixture pairs: a casual dictation whose modern
+        // referent survives unnamed-by-costume (the phone stays a
+        // phone), and a technical one whose load-bearing facts —
+        // the database migration, the third step — survive the
+        // register untouched.
+        val talkie = StyleCatalog.byId("talkie")
+
+        val casual = talkie.fewShots.first { shot -> shot.raw.contains("phone") }
+        assertTrue(casual.styled.contains("phone"), "talkie renamed the speaker's phone: ${casual.styled}")
+        assertTrue(casual.styled.contains("battery"), "talkie dropped the battery: ${casual.styled}")
+
+        val technical = talkie.fewShots.first { shot -> shot.raw.contains("database") }
+        assertTrue(technical.styled.contains("database migration"), "talkie lost the migration: ${technical.styled}")
+        assertTrue(technical.styled.contains("third step"), "talkie lost the step count: ${technical.styled}")
     }
 
     @Test
