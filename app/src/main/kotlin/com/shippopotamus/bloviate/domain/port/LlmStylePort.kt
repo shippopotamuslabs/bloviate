@@ -9,15 +9,26 @@ import com.shippopotamus.bloviate.domain.model.StyleDefinition
  */
 sealed interface LlmStyleOutcome {
 
-    /** The model returned usable styled text, plus its wall-clock cost. */
+    /**
+     * The model returned usable styled text, plus its wall-clock cost.
+     * [model] is the model that answered (ENC-80 telemetry) and
+     * [provider] the OpenRouter upstream that served it, when known.
+     */
     data class Styled(
         val text: String,
         val llmMs: Long,
+        val model: String? = null,
+        val provider: String? = null,
     ) : LlmStyleOutcome
 
-    /** The LLM path did not run or failed; the caller keeps the local text. */
+    /**
+     * The LLM path did not run or failed; the caller keeps the local
+     * text. [model]/[provider] name the last attempt, when one ran.
+     */
     data class FellBack(
         val reason: String,
+        val model: String? = null,
+        val provider: String? = null,
     ) : LlmStyleOutcome
 }
 
