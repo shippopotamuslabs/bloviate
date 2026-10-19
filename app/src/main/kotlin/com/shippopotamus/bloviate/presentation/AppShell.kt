@@ -49,6 +49,10 @@ fun MainRoute(
                 onWhisperDownloadClick = viewModel::onWhisperDownloadClick,
                 onParakeetDownloadClick = viewModel::onParakeetDownloadClick,
                 onSelectEngine = viewModel::onSelectEngine,
+                onBubbleOpacityChange = viewModel::onBubbleOpacityChange,
+                onBubbleSizeChange = viewModel::onBubbleSizeChange,
+                onBubbleShapeChange = viewModel::onBubbleShapeChange,
+                onBubbleTintChange = viewModel::onBubbleTintChange,
             )
         },
         styleContent = { StyleRoute() },
