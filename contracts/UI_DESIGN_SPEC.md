@@ -1,5 +1,5 @@
 # UI_DESIGN_SPEC.md
-**Bloviate – UI Design Contract v1.3**
+**Bloviate – UI Design Contract v1.4**
 (Adapted from Enclave `UI_DESIGN_SPEC.md` v2.6 — its theme-token, preview, and rigor rules; Enclave's product-specific theme families and chat shapes do not apply here.)
 
 > **v1.1 amendment (2026-10-19, ENC-75, under the user's explicit direction):**
@@ -31,6 +31,23 @@
 > "update all repository UI style contracts to contain all of this
 > information so we never lose it and it gets enforced no matter where
 > I work on things."
+>
+> **v1.4 amendment (2026-10-19, ENC-90, under the user's explicit
+> direction — his fast-follow approval):** the M3 Expressive adoption
+> staged in v1.3 has landed. The version catalog pins material3
+> **1.5.0-beta01** — the newest milestone whose Expressive API
+> (`MotionScheme`, `MaterialExpressiveTheme`, the morphable
+> `MaterialShapes`) is public; the latest stable (1.4.0) still marks
+> that API internal, and the latest Compose BOM (2026.09.00, also
+> adopted) still maps material3 to 1.4.0, so the milestone is pinned
+> explicitly in the catalog. `BloviateTheme` is now a
+> `MaterialExpressiveTheme` with `MotionScheme.expressive()` as the
+> app's motion source, and the morphable polygon vocabulary lives in
+> `BloviateMorphShapes` beside the (unchanged) gospel shape scale.
+> The bubble overlay's per-transition springs (ENC-93) are untouched.
+> This repo's pins now deliberately diverge from Enclave's catalog
+> (BOM 2026.05.01 / material3 1.4.0), flagged for the user's
+> ratification on ENC-90; Enclave's own bump is a separate follow-up.
 
 UI contract for Bloviate's two surfaces: the in-app screens (onboarding, settings, model manager) and the floating bubble. Always enforce together with `ARCHITECTURE_RULES.md` (which defines the structural Scaffold/navigation patterns and the overlay service rules).
 
@@ -51,7 +68,7 @@ UI contract for Bloviate's two surfaces: the in-app screens (onboarding, setting
 ## 1. Design Language & Theme
 
 - Material 3; **one fixed dark color scheme for the whole app** — dark-only (v1.1 amendment, ENC-75): no light scheme, no dynamic color, screens never branch on theme internals. Hex values live only in the theme definition.
-- Spacing, shapes, typography, elevation, component defaults, and motion follow the **Compose Gospel**, embedded in full in §6 (v1.3, ENC-86): the `BloviateSpacing` object is the only spacing source in screens and shared components, and the theme carries the gospel type and shape scales. The M3 Expressive motion scheme is **staged** — in the pinned material3 1.4.0 it exists in the artifact but is internal, not public API (see the adoption notes in §6.2 and §6.7); adopting it waits on a deliberate cross-repo version bump.
+- Spacing, shapes, typography, elevation, component defaults, and motion follow the **Compose Gospel**, embedded in full in §6 (v1.3, ENC-86): the `BloviateSpacing` object is the only spacing source in screens and shared components, and the theme carries the gospel type and shape scales. The M3 Expressive motion scheme is **adopted** (ENC-90): the catalog pins material3 1.5.0-beta01, the newest milestone with the Expressive API public, and the theme runs `MotionScheme.expressive()` (see the adoption notes in §6.2 and §6.7).
 - The bubble overlay wears the same fixed scheme (v1.2, ENC-85): it renders over other apps but no longer follows the system theme — one canonical palette for screens and overlay alike.
 
 ### Canonical palette — the Shippopotamus Palette Gospel (v1.2, ENC-85)
@@ -164,7 +181,7 @@ Declared canonical for Bloviate / Stratum / Enclave by the user, 2026-10-19 (Mat
 | full (pill) | 100% | Buttons, FABs, toggle track, active nav indicator, status pill |
 
 - Nested rule: child radius = parent radius − padding (e.g. 28dp sheet + 12dp padding = 16dp inner card).
-- Expressive shapes (Cookie4Sided, Clover, Squircle, Arch) are for loaders, FAB morph, and button press morph; buttons morph pill → 16dp + scale 0.96 on press with high-stiffness springs. *Adoption note (ENC-86): the pinned material3 1.4.0 (Compose BOM 2026.05.01) ships the Expressive classes (`MotionScheme`, `MaterialExpressiveTheme`, the polygon shapes) inside the artifact but marks them **internal** in its Kotlin metadata — they are not public API in this version, so both the Expressive motion scheme and the morphable shapes are **staged** until a deliberate version bump (a cross-repo decision: this repo's pins align with Enclave's catalog). No Bloviate component calls for the polygons yet.*
+- Expressive shapes (Cookie4Sided, Clover, Squircle, Arch) are for loaders, FAB morph, and button press morph; buttons morph pill → 16dp + scale 0.96 on press with high-stiffness springs. *Adoption note (ENC-90): adopted. The catalog pins material3 1.5.0-beta01 (Compose BOM 2026.09.00), the milestone line whose Expressive classes are public API; `BloviateTheme` is a `MaterialExpressiveTheme` on `MotionScheme.expressive()`, stock buttons inherit the library's pressed-shape morph under it, and the polygon presets (Cookie4Sided, Clover4Leaf, Arch — plus the design system's own Circle and Pill) are exposed as `BloviateMorphShapes` for the first component whose spec calls for a hand-driven morph; no Bloviate component calls for one yet. (The pinned artifact has no preset literally named Squircle; its Square preset is the square member of the family.) The pin diverges from Enclave's catalog under the user's ENC-90 direction — see the v1.4 amendment.*
 
 ### 6.3 Typography
 
@@ -222,11 +239,11 @@ Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` toke
 
 - Touch: 48×48dp minimum for EVERY interactive element. Use `Modifier.minimumInteractiveComponentSize()` on custom interactives (e.g. dashboard rows); radio/checkbox hit areas expand to 48×48 even when the visible control is smaller. This is Material behavior parity.
 - Text: mobile default bodyLarge 16sp is the readable floor with the weights above.
-- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: staged in the pinned version — see the §6.2 adoption note; until the bump, stock M3 components animate with their built-in springs/ripple and no custom motion language is invented locally.*
+- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: adopted (ENC-90) — the theme provides `MotionScheme.expressive()` via `MaterialExpressiveTheme` (material3 1.5.0-beta01; see the §6.2 adoption note). Stock components that read the theme's motion scheme inherit it; any component the library has not yet migrated to the scheme keeps its built-in springs, and no custom motion language is invented locally. The bubble overlay's per-transition springs remain overlay-owned (ENC-93) and are not replaced by the scheme.*
 - Haptics: light click on toggle/switch, medium on FAB press, via `HapticFeedback`.
 
 ### 6.7 Theme wiring (how §6 reaches code)
 
-- `BloviateTheme` (a `MaterialTheme`) provides: the §1 color scheme, the §6.2 shape scale (`BloviateShapes.Scale`, plus `BloviateShapes.Pill`), and the §6.3 type scale (`BloviateTypography`). When the Expressive bump lands, this function switches to `MaterialExpressiveTheme` with `MotionScheme.expressive()` — the swap is local to the theme definition by design.
+- `BloviateTheme` (a `MaterialExpressiveTheme`) provides: the §1 color scheme, the §6.2 shape scale (`BloviateShapes.Scale`, plus `BloviateShapes.Pill`), the §6.3 type scale (`BloviateTypography`), and the motion scheme — `MotionScheme.expressive()` (ENC-90; see the v1.4 amendment for the version facts). The morphable polygon vocabulary (`BloviateMorphShapes`) sits beside the corner scale for components whose spec calls for a morph. The Expressive swap stayed local to the theme definition by design.
 - Stock M3 components inherit the gospel defaults from the theme (button 40dp pill + labelLarge, field 56dp, card 12dp tonal, chip geometry where M3 chips are used, switch 52×32/24, navigation bar 80dp + pill indicator + labelMedium). Custom components (dashboard rows/cards, status chip/pill) implement their §6.5 specs directly and draw spacing only from `BloviateSpacing`.
 - The bubble overlay (§3) wears the same theme: it consumes the type scale and the shape scale (the recording bar's corner is extraLarge) and the spacing scale where an equivalent exists; its window geometry (bubble/bar sizes, waveform measurements, gesture slots) is overlay-specific and stays defined in the overlay code.
