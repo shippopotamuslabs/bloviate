@@ -17,8 +17,18 @@ import com.shippopotamus.bloviate.domain.evaluator.PromptMessage
 object OpenRouterPayload {
 
     const val ENDPOINT_PATH: String = "https://openrouter.ai/api/v1/chat/completions"
-    const val PRIMARY_MODEL: String = "anthropic/claude-haiku-5.5"
-    const val FALLBACK_MODEL: String = "google/gemini-2.5-flash-lite"
+
+    /**
+     * Style chain primary (ENC-84, Sean's decision 2026-10-19): the
+     * floating `~` alias for the latest Grok on OpenRouter — the
+     * underlying model rolls forward when xAI ships a new flagship, no
+     * app update needed. Pinning to a fixed slug is a one-line revert
+     * if a future roll changes styling behavior.
+     */
+    const val PRIMARY_MODEL: String = "~x-ai/grok-latest"
+
+    /** Style chain fallback #1 (ENC-84): Haiku 5.5, then the local text. */
+    const val FALLBACK_MODEL: String = "anthropic/claude-haiku-5.5"
     const val TEMPERATURE: Double = 0.3
     const val MAX_TOKENS: Int = 1024
 
