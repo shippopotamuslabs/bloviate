@@ -1,10 +1,13 @@
 package com.shippopotamus.bloviate.service
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -19,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,6 +55,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
@@ -60,6 +63,7 @@ import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.presentation.BloviateColors
+import com.shippopotamus.bloviate.presentation.BloviateSpacing
 import com.shippopotamus.bloviate.presentation.BloviateTheme
 import kotlin.math.hypot
 import kotlinx.coroutines.currentCoroutineContext
@@ -70,10 +74,11 @@ private val BUBBLE_SIZE: Dp = 56.dp
 private val BUBBLE_ICON_SIZE: Dp = 28.dp
 private val BUBBLE_ELEVATION: Dp = 6.dp
 private val BAR_HEIGHT: Dp = 56.dp
-private val BAR_CORNER: Dp = 28.dp
 private val BAR_SLOT_SIZE: Dp = 48.dp
 private val BAR_ICON_SIZE: Dp = 24.dp
-private val BAR_HORIZONTAL_PADDING: Dp = 4.dp
+
+/** The bar's inner horizontal inset is the gospel's micro spacing (ENC-86). */
+private val BAR_HORIZONTAL_PADDING: Dp = BloviateSpacing.s4
 private val SEND_CIRCLE_SIZE: Dp = 36.dp
 private val SEND_ICON_SIZE: Dp = 22.dp
 private val WAVEFORM_HEIGHT: Dp = 28.dp
@@ -110,6 +115,20 @@ private const val ERROR_DISPLAY_MS: Long = 1_500L
 private val WAVEFORM_WIDTH: Dp =
     WAVEFORM_BAR_WIDTH * WaveformHistory.DEFAULT_BAR_COUNT +
         WAVEFORM_BAR_SPACING * (WaveformHistory.DEFAULT_BAR_COUNT - 1)
+
+/**
+ * The width-morph spring between bar states (ENC-89): a state change
+ * swaps the whole content (bubble ↔ recording bar ↔ the hugged
+ * processing pill), and the root's `animateContentSize` settles the
+ * window to the new width on this spring — no bounce, low stiffness,
+ * calm by design (the Compose Gospel's spring motion, §6.6). Each
+ * state's own geometry is exactly what it was; only the transition
+ * animates.
+ */
+private val BAR_MORPH_SPRING = spring<IntSize>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMediumLow,
+)
 
 /**
  * The floating dictation bubble and the recording bar it transforms into —
@@ -188,40 +207,44 @@ fun BubbleContent(
             onTransientStateElapsed()
         }
     }
-    when (barState) {
-        RecordingBarState.Idle -> MicBubble(
-            inDismissZone = inDismissZone,
-            onTap = onTap,
-            onDragStart = onDragStart,
-            onDrag = onDrag,
-            onDragEnd = onDragEnd,
-            onDragCancel = onDragCancel,
-            modifier = modifier,
-        )
-        is RecordingBarState.Recording -> RecordingBar(
-            elapsedMs = barState.elapsedMs,
-            waveformLevels = waveformLevels,
-            inDismissZone = inDismissZone,
-            onCancelRecording = onCancelRecording,
-            onSendRecording = onSendRecording,
-            onDragStart = onDragStart,
-            onDrag = onDrag,
-            onDragEnd = onDragEnd,
-            onDragCancel = onDragCancel,
-            modifier = modifier,
-        )
-        RecordingBarState.Transcribing,
-        RecordingBarState.Polishing,
-        -> ProcessingBar(
-            label = stringResource(
-                requireNotNull(barState.processingLabelRes()) {
-                    "Only the pipeline stages carry a stage label: $barState"
-                },
-            ),
-            modifier = modifier,
-        )
-        RecordingBarState.Done -> DoneBubble(modifier = modifier)
-        RecordingBarState.Error -> ErrorBubble(modifier = modifier)
+    // One root for every state, sized by its content: the window is
+    // WRAP_CONTENT, so this Box IS the window's size, and its
+    // animateContentSize springs the width between state geometries
+    // (ENC-89) — the wide recording bar settles into the hugged
+    // processing pill and back without a jump.
+    Box(modifier = modifier.animateContentSize(animationSpec = BAR_MORPH_SPRING)) {
+        when (barState) {
+            RecordingBarState.Idle -> MicBubble(
+                inDismissZone = inDismissZone,
+                onTap = onTap,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragCancel,
+            )
+            is RecordingBarState.Recording -> RecordingBar(
+                elapsedMs = barState.elapsedMs,
+                waveformLevels = waveformLevels,
+                inDismissZone = inDismissZone,
+                onCancelRecording = onCancelRecording,
+                onSendRecording = onSendRecording,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragCancel,
+            )
+            RecordingBarState.Transcribing,
+            RecordingBarState.Polishing,
+            -> ProcessingBar(
+                label = stringResource(
+                    requireNotNull(barState.processingLabelRes()) {
+                        "Only the pipeline stages carry a stage label: $barState"
+                    },
+                ),
+            )
+            RecordingBarState.Done -> DoneBubble()
+            RecordingBarState.Error -> ErrorBubble()
+        }
     }
 }
 
@@ -334,7 +357,7 @@ private fun RecordingBar(
                 scaleY = scale
             }
             .semantics { contentDescription = recordingDescription },
-        shape = RoundedCornerShape(BAR_CORNER),
+        shape = MaterialTheme.shapes.extraLarge,
         color = containerColor,
         contentColor = contentColor,
         shadowElevation = BUBBLE_ELEVATION,
@@ -427,9 +450,18 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
 }
 
 /**
- * The bar while the send pipeline runs: the recording bar's skeleton with
- * the current stage's name as small shimmering text where the waveform
- * sat (ENC-76). Not interactive — the pipeline owns this window.
+ * The bar while the send pipeline runs: the current stage's name as
+ * small shimmering text (ENC-76). Not interactive — the pipeline owns
+ * this window.
+ *
+ * The pill HUGS its content (ENC-89): the processing states carry no
+ * waveform and no buttons, so the recording bar's wide skeleton (two
+ * slots + a weighted center) stretched a nearly full-width pill around
+ * one short word. Here the width is the label plus gospel padding
+ * (s24 each side, the button-grade horizontal inset); the root's
+ * [BAR_MORPH_SPRING] animates the width change between this and the
+ * recording bar. Height stays the bar's, and the word stays the
+ * content description, so TalkBack still announces the stage.
  */
 @Composable
 private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
@@ -437,29 +469,22 @@ private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
         modifier = modifier
             .height(BAR_HEIGHT)
             .semantics { contentDescription = label },
-        shape = RoundedCornerShape(BAR_CORNER),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         shadowElevation = BUBBLE_ELEVATION,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = BAR_HORIZONTAL_PADDING),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier.padding(horizontal = BloviateSpacing.s24),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(modifier = Modifier.size(BAR_SLOT_SIZE))
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                ShimmerText(
-                    text = label,
-                    baseColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    highlightColor =
-                        MaterialTheme.colorScheme.primary.copy(alpha = SHIMMER_HIGHLIGHT_ALPHA),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-            Box(modifier = Modifier.size(BAR_SLOT_SIZE))
+            ShimmerText(
+                text = label,
+                baseColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                highlightColor =
+                    MaterialTheme.colorScheme.primary.copy(alpha = SHIMMER_HIGHLIGHT_ALPHA),
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }

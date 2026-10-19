@@ -9,7 +9,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 
 /**
  * A dashboard section label (ENC-75): small-caps, letter-spaced, muted —
@@ -23,7 +22,7 @@ fun DashboardSectionHeader(
     trailingText: String? = null,
 ) {
     Row(
-        modifier = modifier.padding(horizontal = 4.dp),
+        modifier = modifier.padding(horizontal = BloviateSpacing.s4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -50,7 +49,7 @@ private fun DashboardSectionHeaderPreview() {
         DashboardSectionHeader(
             text = "Words",
             trailingText = "3",
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(BloviateSpacing.s16),
         )
     }
 }
