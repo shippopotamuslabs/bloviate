@@ -35,6 +35,29 @@ object OpenRouterPayload {
     const val MAX_TOKENS: Int = 1024
 
     /**
+     * Reasoning control for style requests (ENC-94). A restyle is a
+     * surface transformation — it needs no deliberation — but the
+     * primary's default effort is HIGH: Sean's 2026-10-19 tirade test
+     * burned 3,282 completion tokens in 41.1s, ~3.1k of them reasoning,
+     * for a ~180-token answer. OpenRouter's unified `reasoning` shape
+     * (docs/guides/best-practices/reasoning-tokens) offers
+     * `effort: "none"` ("disables reasoning entirely"), but the alias's
+     * current resolution, Grok 4.7, does not honor it: xAI's chat API
+     * for Grok 4.7/4.6 accepts `reasoning_effort` low/medium/high/
+     * xhigh only — reasoning cannot be disabled on 4.7 (contrast
+     * Grok 4.3, which accepts "none"). `exclude: true` is not a
+     * latency lever either: the model still reasons, the tokens are
+     * just withheld from the response. So the shipped setting is the
+     * strongest control 4.7 honors: effort LOW, plus a hard
+     * [REASONING_MAX_TOKENS] cap — which OpenRouter maps onto the
+     * effort allocation for effort-only models and enforces directly
+     * for token-allocation models, so the cap binds either way a
+     * future alias roll resolves.
+     */
+    const val REASONING_EFFORT: String = "low"
+    const val REASONING_MAX_TOKENS: Int = 512
+
+    /**
      * Provider pin for the primary (ENC-80). Queried from OpenRouter's
      * endpoints API at implementation time (2026-10-19): the
      * `~x-ai/grok-latest` alias exposes no endpoint list of its own (it
@@ -62,7 +85,11 @@ object OpenRouterPayload {
      * When [providerOrder] is given, a `provider` routing block is
      * appended (ENC-80): try those provider slugs in order,
      * `allow_fallbacks` on, minus any [providerIgnore] slugs. [stream]
-     * asks for the SSE form (ENC-81); the client always sets it.
+     * asks for the SSE form (ENC-81) and for usage in the final chunk
+     * (`stream_options.include_usage`, ENC-94) so reasoning-token
+     * counts reach telemetry; the client always sets it. The
+     * [reasoningEffort]/[reasoningMaxTokens] controls ride every
+     * request (ENC-94, see [REASONING_EFFORT]).
      */
     fun buildChatRequest(
         model: String,
@@ -73,13 +100,46 @@ object OpenRouterPayload {
         providerOrder: List<String>? = null,
         providerIgnore: List<String> = emptyList(),
         stream: Boolean = false,
+        reasoningEffort: String? = REASONING_EFFORT,
+        reasoningMaxTokens: Int? = REASONING_MAX_TOKENS,
     ): String =
         "{\"model\":" + escape(model) +
             ",\"temperature\":" + temperature +
             ",\"max_tokens\":" + maxTokens +
             ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]" +
-            (if (stream) ",\"stream\":true" else "") +
-            providerJson(providerOrder, providerIgnore) + "}"
+            (if (stream) ",\"stream\":true,\"stream_options\":{\"include_usage\":true}" else "") +
+            providerJson(providerOrder, providerIgnore) +
+            reasoningJson(reasoningEffort, reasoningMaxTokens) + "}"
+
+    /** The unified OpenRouter `reasoning` block (ENC-94), or "" when effort is unset. */
+    private fun reasoningJson(effort: String?, maxTokens: Int?): String {
+        if (effort == null) return ""
+        val capJson = if (maxTokens == null) "" else ",\"max_tokens\":" + maxTokens
+        return ",\"reasoning\":{\"effort\":" + escape(effort) + capJson + "}"
+    }
+
+    /**
+     * Extracts the reasoning-token count a response reports in its
+     * usage (`usage.completion_tokens_details.reasoning_tokens`), or
+     * null when the chunk/body carries none (ENC-94 telemetry). The
+     * count never leaves the log: it exists so a reasoning blowout is
+     * visible from logcat instead of only in OpenRouter's dashboard.
+     */
+    fun extractReasoningTokens(data: String): Int? {
+        val tokensIndex = findKey(data, "reasoning_tokens", 0) ?: return null
+        return readIntValue(data, tokensIndex)
+    }
+
+    /** Reads the JSON integer starting at [valueStart] (past the colon), or null. */
+    private fun readIntValue(json: String, valueStart: Int): Int? {
+        var index = valueStart
+        while (index < json.length && json[index].isWhitespace()) index++
+        val digitsStart = index
+        if (index < json.length && json[index] == '-') index++
+        while (index < json.length && json[index].isDigit()) index++
+        if (index == digitsStart) return null
+        return json.substring(digitsStart, index).toIntOrNull()
+    }
 
     /**
      * Extracts `choices[0].delta.content` from one streamed chunk (the
