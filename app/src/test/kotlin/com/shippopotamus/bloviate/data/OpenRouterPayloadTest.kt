@@ -13,6 +13,15 @@ class OpenRouterPayloadTest {
     private val user = PromptMessage(role = "user", content = "Say hi.")
 
     @Test
+    fun `the style chain is grok latest then haiku 5 5 then local`() {
+        // ENC-84 (Sean, 2026-10-19): the primary is the floating alias —
+        // pinning the literal strings here is what makes an accidental
+        // slug edit a test failure instead of a silent behavior change.
+        assertEquals("~x-ai/grok-latest", OpenRouterPayload.PRIMARY_MODEL)
+        assertEquals("anthropic/claude-haiku-5.5", OpenRouterPayload.FALLBACK_MODEL)
+    }
+
+    @Test
     fun `request names the model and carries both messages`() {
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,

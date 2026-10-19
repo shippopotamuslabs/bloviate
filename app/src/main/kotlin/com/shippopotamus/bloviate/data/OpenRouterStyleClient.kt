@@ -24,6 +24,12 @@ import java.net.HttpURLConnection
  * one single-shot call per dictation. Every transport or model failure
  * becomes [LlmStyleOutcome.FellBack] with a short reason code; only
  * coroutine cancellation is rethrown. Reasons never carry response text.
+ *
+ * Model chain (ENC-84): [OpenRouterPayload.PRIMARY_MODEL] (the floating
+ * `~x-ai/grok-latest` alias) first; on a model-unavailable answer, one
+ * retry on [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that
+ * the caller keeps the local text. Each attempt logs its `model=` so
+ * dogfood telemetry shows which link of the chain actually answered.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -71,8 +77,16 @@ class OpenRouterStyleClient(
     ): LlmStyleOutcome? {
         val request = OpenRouterPayload.buildChatRequest(model = model, system = prompt.system, user = prompt.user)
         val result = transport.postChatCompletion(apiKey = key, requestJson = request)
-        if (result.status == HttpURLConnection.HTTP_OK) return finish(body = result.body, startedMs = startedMs)
-        if (OpenRouterPayload.isModelUnavailable(status = result.status, body = result.body)) return null
+        if (result.status == HttpURLConnection.HTTP_OK) {
+            val outcome = finish(body = result.body, startedMs = startedMs)
+            Log.d(TAG, "style attempt model=$model outcome=${outcome.logLabel()}")
+            return outcome
+        }
+        if (OpenRouterPayload.isModelUnavailable(status = result.status, body = result.body)) {
+            Log.d(TAG, "style attempt model=$model outcome=model-unavailable")
+            return null
+        }
+        Log.d(TAG, "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status}")
         return LlmStyleOutcome.FellBack(reason = REASON_HTTP_PREFIX + result.status)
     }
 
@@ -87,9 +101,21 @@ class OpenRouterStyleClient(
             user = prompt.user,
         )
         val result = transport.postChatCompletion(apiKey = key, requestJson = request)
-        if (result.status == HttpURLConnection.HTTP_OK) return finish(body = result.body, startedMs = startedMs)
+        if (result.status == HttpURLConnection.HTTP_OK) {
+            val outcome = finish(body = result.body, startedMs = startedMs)
+            Log.d(TAG, "style attempt model=${OpenRouterPayload.FALLBACK_MODEL} outcome=${outcome.logLabel()}")
+            return outcome
+        }
+        Log.d(TAG, "style attempt model=${OpenRouterPayload.FALLBACK_MODEL} outcome=failed status=${result.status}")
         return null
     }
+
+    /** Short telemetry label for an outcome; never carries response text. */
+    private fun LlmStyleOutcome.logLabel(): String =
+        when (this) {
+            is LlmStyleOutcome.Styled -> "styled"
+            is LlmStyleOutcome.FellBack -> "fell-back:$reason"
+        }
 
     private fun finish(body: String, startedMs: Long): LlmStyleOutcome {
         val content = OpenRouterPayload.extractAssistantContent(body)
