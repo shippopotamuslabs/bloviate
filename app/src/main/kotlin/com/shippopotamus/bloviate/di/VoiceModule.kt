@@ -13,12 +13,22 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.data.AndroidKeystoreCipher
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
+import com.shippopotamus.bloviate.data.EncryptedApiKeyStore
+import com.shippopotamus.bloviate.data.HttpURLConnectionStyleTransport
+import com.shippopotamus.bloviate.data.KeyCipher
+import com.shippopotamus.bloviate.data.OpenRouterStyleClient
+import com.shippopotamus.bloviate.data.StyleHttpTransport
+import com.shippopotamus.bloviate.domain.evaluator.LlmResponseCleaner
 import com.shippopotamus.bloviate.domain.evaluator.StyleAwareTextPostProcessor
+import com.shippopotamus.bloviate.domain.evaluator.StylePromptBuilder
 import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
+import com.shippopotamus.bloviate.domain.port.ApiKeyPort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
 import com.shippopotamus.bloviate.domain.port.DictionaryPort
 import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
+import com.shippopotamus.bloviate.domain.port.LlmStylePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
@@ -38,7 +48,13 @@ import kotlinx.coroutines.SupervisorJob
 import java.io.File
 import javax.inject.Singleton
 
-/** Binds the voice-plumbing ports (model store, capture, session, engine) to their implementations. */
+/**
+ * Binds the voice-plumbing ports (model store, capture, session, engine)
+ * to their implementations. The style pipeline's LLM stage (ENC-73) lives
+ * here too — not in BubbleModule, which only provides the shared DataStore
+ * file — because VoiceModule owns the cleanup pipeline and everything the
+ * send path runs through.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class VoiceModule {
@@ -78,7 +94,41 @@ abstract class VoiceModule {
     @Binds
     abstract fun bindStylePreferencePort(store: DataStoreStylePreferenceStore): StylePreferencePort
 
+    @Binds
+    abstract fun bindApiKeyPort(store: EncryptedApiKeyStore): ApiKeyPort
+
+    @Binds
+    abstract fun bindKeyCipher(cipher: AndroidKeystoreCipher): KeyCipher
+
     companion object {
+
+        /**
+         * The LLM styling client (ENC-73): provided rather than bound so
+         * the clock stays a defaulted constructor parameter — unit tests
+         * pass a fake clock while production reads the device clock.
+         */
+        @Provides
+        @Singleton
+        fun provideLlmStylePort(
+            transport: StyleHttpTransport,
+            prompts: StylePromptBuilder,
+            cleaner: LlmResponseCleaner,
+            apiKeys: ApiKeyPort,
+        ): LlmStylePort =
+            OpenRouterStyleClient(
+                transport = transport,
+                prompts = prompts,
+                cleaner = cleaner,
+                apiKeys = apiKeys,
+            )
+
+        /**
+         * Plain `HttpURLConnection` transport: provided rather than bound
+         * so the IO dispatcher stays a defaulted constructor parameter.
+         */
+        @Provides
+        @Singleton
+        fun provideStyleHttpTransport(): StyleHttpTransport = HttpURLConnectionStyleTransport()
 
         @Provides
         @Singleton

@@ -13,12 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,24 +48,32 @@ fun StyleRoute(
     StyleScreen(
         uiState = uiState,
         onStyleSelected = viewModel::onStyleSelected,
+        onApiKeyDraftChange = viewModel::onApiKeyDraftChange,
+        onSaveApiKeyClick = viewModel::onSaveApiKeyClick,
+        onClearApiKeyClick = viewModel::onClearApiKeyClick,
         modifier = modifier,
     )
 }
 
 /**
- * The Style tab (ENC-72): the writing-style presets Bloviate shapes
- * dictation into. Each row is a radio-button selectable at least 48.dp
- * tall; the two mechanical styles apply on-device today, while the LLM
- * styles say plainly that they need the ENC-73 AI setup — picking one now
- * is remembered but changes nothing until then.
+ * The Style tab (ENC-72 + ENC-73): the writing-style presets Bloviate
+ * shapes dictation into, plus the AI-styles key card. Each row is a
+ * radio-button selectable at least 48.dp tall; LLM rows stay
+ * non-selectable until an OpenRouter key is saved — the note on the row
+ * says so. The key field is a password field whose draft is transient;
+ * only the encrypted key is ever stored.
  *
- * The column scrolls: nine rows must stay reachable on short viewports.
+ * The column scrolls: the card plus nine rows must stay reachable on
+ * short viewports.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StyleScreen(
     uiState: StyleUiState,
     onStyleSelected: (String) -> Unit,
+    onApiKeyDraftChange: (String) -> Unit,
+    onSaveApiKeyClick: () -> Unit,
+    onClearApiKeyClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -80,12 +92,80 @@ fun StyleScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            AiKeyCard(
+                apiKeyDraft = uiState.apiKeyDraft,
+                hasApiKey = uiState.hasApiKey,
+                onApiKeyDraftChange = onApiKeyDraftChange,
+                onSaveApiKeyClick = onSaveApiKeyClick,
+                onClearApiKeyClick = onClearApiKeyClick,
+            )
             uiState.options.forEach { option ->
                 StyleRow(
                     option = option,
                     onSelect = { onStyleSelected(option.id) },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun AiKeyCard(
+    apiKeyDraft: String,
+    hasApiKey: Boolean,
+    onApiKeyDraftChange: (String) -> Unit,
+    onSaveApiKeyClick: () -> Unit,
+    onClearApiKeyClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.style_ai_card_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.style_ai_card_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextField(
+                value = apiKeyDraft,
+                onValueChange = onApiKeyDraftChange,
+                label = { Text(text = stringResource(R.string.style_api_key_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onSaveApiKeyClick,
+                    enabled = apiKeyDraft.isNotBlank(),
+                ) {
+                    Text(text = stringResource(R.string.style_api_key_save))
+                }
+                OutlinedButton(
+                    onClick = onClearApiKeyClick,
+                    enabled = hasApiKey,
+                ) {
+                    Text(text = stringResource(R.string.style_api_key_clear))
+                }
+            }
+            Text(
+                text = stringResource(
+                    if (hasApiKey) R.string.style_api_key_saved else R.string.style_api_key_missing,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -105,6 +185,7 @@ private fun StyleRow(
                 .semantics { contentDescription = selectLabel }
                 .selectable(
                     selected = option.isSelected,
+                    enabled = option.isEnabled,
                     onClick = onSelect,
                     role = Role.RadioButton,
                 )
@@ -114,6 +195,7 @@ private fun StyleRow(
         ) {
             RadioButton(
                 selected = option.isSelected,
+                enabled = option.isEnabled,
                 onClick = null,
             )
             Column(
@@ -133,9 +215,9 @@ private fun StyleRow(
                     text = option.sample,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                if (option.requiresAi) {
+                if (option.requiresAi && !option.isEnabled) {
                     Text(
-                        text = stringResource(R.string.style_requires_ai_note),
+                        text = stringResource(R.string.style_needs_key_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -147,8 +229,9 @@ private fun StyleRow(
 
 private val ROW_MIN_HEIGHT = 48.dp
 
-private fun previewUiState(): StyleUiState =
+private fun previewUiState(hasApiKey: Boolean): StyleUiState =
     StyleUiState(
+        hasApiKey = hasApiKey,
         options = listOf(
             StyleOptionUi(
                 id = "lowercase-casual",
@@ -157,6 +240,7 @@ private fun previewUiState(): StyleUiState =
                 sample = "yeah so i was thinking we could just go tomorrow",
                 requiresAi = false,
                 isSelected = false,
+                isEnabled = true,
             ),
             StyleOptionUi(
                 id = "normal-caps-casual",
@@ -165,6 +249,7 @@ private fun previewUiState(): StyleUiState =
                 sample = "Yeah, so I was thinking we could just go tomorrow.",
                 requiresAi = false,
                 isSelected = true,
+                isEnabled = true,
             ),
             StyleOptionUi(
                 id = "seneca",
@@ -173,6 +258,7 @@ private fun previewUiState(): StyleUiState =
                 sample = "You act as if you will live forever; you never read the terms.",
                 requiresAi = true,
                 isSelected = false,
+                isEnabled = hasApiKey,
             ),
         ),
     )
@@ -188,8 +274,31 @@ private fun previewUiState(): StyleUiState =
 private fun StyleScreenPopulatedPreview() {
     PreviewTheme {
         StyleScreen(
-            uiState = previewUiState(),
+            uiState = previewUiState(hasApiKey = false),
             onStyleSelected = {},
+            onApiKeyDraftChange = {},
+            onSaveApiKeyClick = {},
+            onClearApiKeyClick = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Style with key - Light", showBackground = true)
+@Preview(
+    name = "Style with key - Dark",
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+)
+@Composable
+private fun StyleScreenWithKeyPreview() {
+    PreviewTheme {
+        StyleScreen(
+            uiState = previewUiState(hasApiKey = true),
+            onStyleSelected = {},
+            onApiKeyDraftChange = {},
+            onSaveApiKeyClick = {},
+            onClearApiKeyClick = {},
         )
     }
 }
@@ -207,6 +316,9 @@ private fun StyleScreenEmptyPreview() {
         StyleScreen(
             uiState = StyleUiState(),
             onStyleSelected = {},
+            onApiKeyDraftChange = {},
+            onSaveApiKeyClick = {},
+            onClearApiKeyClick = {},
         )
     }
 }

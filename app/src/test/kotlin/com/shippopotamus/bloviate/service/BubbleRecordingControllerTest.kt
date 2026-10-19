@@ -3,10 +3,14 @@ package com.shippopotamus.bloviate.service
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
+import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
+import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
 import com.shippopotamus.bloviate.testing.FakeRecordingSessionPort
+import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.FakeTextPostProcessor
 import com.shippopotamus.bloviate.testing.FakeTranscriptSinkPort
 import com.shippopotamus.bloviate.testing.FakeTranscriptionEngine
@@ -39,7 +43,12 @@ class BubbleRecordingControllerTest {
         BubbleRecordingController(
             session = fakeSession,
             transcriptionEngine = fakeEngine,
-            textPostProcessor = fakePostProcessor,
+            stylingProcessor = StylingTextPostProcessor(
+                local = fakePostProcessor,
+                stylePreference = FakeStylePreferencePort(),
+                llm = FakeLlmStylePort(),
+                apiKeys = FakeApiKeyPort(),
+            ),
             transcriptSink = fakeSink,
             enginePreference = fakeEnginePreference,
             whisperStore = fakeWhisperStore,

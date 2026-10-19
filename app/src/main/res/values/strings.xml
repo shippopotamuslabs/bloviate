@@ -60,7 +60,14 @@
     <string name="bubble_look_title">Bubble look</string>
     <string name="bubble_look_soon">Change the bubble’s color, size, and shape — coming soon.</string>
     <string name="style_row_select">Use %1$s style</string>
-    <string name="style_requires_ai_note">Needs the AI setup to run — it’s coming in a later update. You can pick this style now; until then your dictation comes out unchanged.</string>
+    <string name="style_ai_card_title">AI styles</string>
+    <string name="style_ai_card_body">AI styles rewrite your dictation through OpenRouter using your own key. The key is stored encrypted on this phone and is only ever sent to OpenRouter — never anywhere else.</string>
+    <string name="style_api_key_label">OpenRouter API key</string>
+    <string name="style_api_key_save">Save</string>
+    <string name="style_api_key_clear">Clear</string>
+    <string name="style_api_key_saved">Key saved on this phone — AI styles are on.</string>
+    <string name="style_api_key_missing">No key — AI styles stay off until you add one.</string>
+    <string name="style_needs_key_note">Add your OpenRouter key above to use this style.</string>
     <string name="dictionary_words_title">Words</string>
     <string name="dictionary_words_body">Words with their correct spelling and capitalization. Whenever one of these shows up in your dictation, Bloviate writes it exactly like this.</string>
     <string name="dictionary_words_empty">No words yet. Add the names and words Bloviate keeps getting wrong.</string>
