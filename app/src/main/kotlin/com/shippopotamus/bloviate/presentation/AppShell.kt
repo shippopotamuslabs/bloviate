@@ -52,7 +52,7 @@ fun MainRoute(
                 onSelectEngine = viewModel::onSelectEngine,
             )
         },
-        styleContent = { StylePlaceholderScreen() },
+        styleContent = { StyleRoute() },
         dictionaryContent = { DictionaryRoute() },
         modifier = modifier,
     )

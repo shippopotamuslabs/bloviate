@@ -13,7 +13,8 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
-import com.shippopotamus.bloviate.domain.evaluator.DictionaryAwareTextPostProcessor
+import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
+import com.shippopotamus.bloviate.domain.evaluator.StyleAwareTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
 import com.shippopotamus.bloviate.domain.port.DictionaryPort
@@ -22,6 +23,7 @@ import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.StylePreferencePort
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import dagger.Binds
@@ -61,15 +63,20 @@ abstract class VoiceModule {
     abstract fun bindRecordingSessionPort(session: RecordingSessionManager): RecordingSessionPort
 
     /**
-     * The bound cleanup chain (ENC-74): dictionary corrections + casing
-     * over the live dictionary, then the baseline — see
-     * [DictionaryAwareTextPostProcessor] for the ordering contract.
+     * The bound cleanup chain (ENC-72): dictionary corrections + casing
+     * over the live dictionary, then the baseline, then the user's style —
+     * see [StyleAwareTextPostProcessor] for the ordering contract. The
+     * dictionary-aware processor stays injectable as the style processor's
+     * delegate; it is simply no longer the bound seam.
      */
     @Binds
-    abstract fun bindTextPostProcessor(processor: DictionaryAwareTextPostProcessor): TextPostProcessor
+    abstract fun bindTextPostProcessor(processor: StyleAwareTextPostProcessor): TextPostProcessor
 
     @Binds
     abstract fun bindDictionaryPort(store: DataStoreDictionaryStore): DictionaryPort
+
+    @Binds
+    abstract fun bindStylePreferencePort(store: DataStoreStylePreferenceStore): StylePreferencePort
 
     companion object {
 

@@ -59,8 +59,8 @@
     <string name="engine_attribution">Parakeet TDT 0.6B v3 © NVIDIA, licensed CC-BY-4.0; recognition by sherpa-onnx (Apache-2.0). Whisper base.en via whisper.cpp (MIT).</string>
     <string name="bubble_look_title">Bubble look</string>
     <string name="bubble_look_soon">Change the bubble’s color, size, and shape — coming soon.</string>
-    <string name="style_placeholder_headline">Dictation with a voice</string>
-    <string name="style_placeholder_body">Soon you’ll pick how your words come out — relaxed and lowercase, crisp and professional, or even in the voice of Seneca. Choose a style here, and Bloviate will shape everything you dictate to match. Styles are still being built; dictation works as usual until they arrive.</string>
+    <string name="style_row_select">Use %1$s style</string>
+    <string name="style_requires_ai_note">Needs the AI setup to run — it’s coming in a later update. You can pick this style now; until then your dictation comes out unchanged.</string>
     <string name="dictionary_words_title">Words</string>
     <string name="dictionary_words_body">Words with their correct spelling and capitalization. Whenever one of these shows up in your dictation, Bloviate writes it exactly like this.</string>
     <string name="dictionary_words_empty">No words yet. Add the names and words Bloviate keeps getting wrong.</string>
