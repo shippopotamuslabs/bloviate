@@ -2,9 +2,13 @@ package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
+import com.shippopotamus.bloviate.domain.usecase.ClearApiKeyUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveHasApiKeyUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveStyleCatalogUseCase
+import com.shippopotamus.bloviate.domain.usecase.SaveApiKeyUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectStyleUseCase
+import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.flow.collect
@@ -13,6 +17,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -24,6 +29,7 @@ class StyleViewModelTest {
     val mainDispatcherExtension = MainDispatcherExtension()
 
     private val fakeStyle = FakeStylePreferencePort()
+    private val fakeKeys = FakeApiKeyPort()
     private lateinit var viewModel: StyleViewModel
 
     @BeforeEach
@@ -32,6 +38,9 @@ class StyleViewModelTest {
             observeCatalog = ObserveStyleCatalogUseCase(),
             observeSelectedStyle = ObserveSelectedStyleUseCase(fakeStyle),
             selectStyle = SelectStyleUseCase(fakeStyle),
+            observeHasApiKey = ObserveHasApiKeyUseCase(fakeKeys),
+            saveApiKey = SaveApiKeyUseCase(fakeKeys),
+            clearApiKey = ClearApiKeyUseCase(fakeKeys),
         )
     }
 
@@ -74,6 +83,8 @@ class StyleViewModelTest {
     fun `selecting a style moves the selection and writes through the fake`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             keepUiStateHot()
+            fakeKeys.setKey("test-key")
+            advanceUntilIdle()
             viewModel.onStyleSelected("seneca")
             advanceUntilIdle()
 
@@ -98,5 +109,76 @@ class StyleViewModelTest {
                 assertTrue(updated.options.size == StyleCatalog.ALL.size)
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `llm rows are disabled until a key is stored`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                val initial = awaitItem()
+                val byId = initial.options.associateBy { option -> option.id }
+                assertFalse(byId.getValue("seneca").isEnabled)
+                assertTrue(byId.getValue("lowercase-casual").isEnabled)
+                assertFalse(initial.hasApiKey)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `selecting an llm style without a key is ignored`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            keepUiStateHot()
+
+            viewModel.onStyleSelected("seneca")
+            advanceUntilIdle()
+
+            assertEquals(StyleCatalog.DEFAULT.id, fakeStyle.selectedStyleId.value)
+        }
+
+    @Test
+    fun `saving a key enables llm rows and clears the draft`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            keepUiStateHot()
+            viewModel.onApiKeyDraftChange("test-key")
+            advanceUntilIdle()
+            assertEquals("test-key", viewModel.uiState.value.apiKeyDraft)
+
+            viewModel.onSaveApiKeyClick()
+            advanceUntilIdle()
+
+            assertEquals("", viewModel.uiState.value.apiKeyDraft)
+            assertTrue(viewModel.uiState.value.hasApiKey)
+            assertTrue(viewModel.uiState.value.options.first { it.id == "seneca" }.isEnabled)
+
+            viewModel.onStyleSelected("seneca")
+            advanceUntilIdle()
+            assertEquals("seneca", fakeStyle.selectedStyleId.value)
+        }
+
+    @Test
+    fun `clearing the key disables llm rows again`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            keepUiStateHot()
+            viewModel.onApiKeyDraftChange("test-key")
+            viewModel.onSaveApiKeyClick()
+            advanceUntilIdle()
+
+            viewModel.onClearApiKeyClick()
+            advanceUntilIdle()
+
+            assertFalse(viewModel.uiState.value.hasApiKey)
+            assertFalse(viewModel.uiState.value.options.first { it.id == "seneca" }.isEnabled)
+        }
+
+    @Test
+    fun `a blank draft never reaches the store`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            keepUiStateHot()
+            viewModel.onApiKeyDraftChange("   ")
+            viewModel.onSaveApiKeyClick()
+            advanceUntilIdle()
+
+            assertEquals(0, fakeKeys.saveCallCount)
+            assertFalse(viewModel.uiState.value.hasApiKey)
         }
 }

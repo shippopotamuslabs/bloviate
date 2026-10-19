@@ -3,6 +3,7 @@ package com.shippopotamus.bloviate.service
 import android.os.SystemClock
 import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
+import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.InsertionResult
@@ -12,7 +13,6 @@ import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
-import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
 import kotlinx.coroutines.CancellationException
@@ -34,7 +34,8 @@ import kotlinx.coroutines.withContext
  * State machine behind the recording bar (ENC-61): translates the recording
  * session's state (ENC-60) and the bar's button taps into [RecordingBarState]
  * for the overlay composition, and drives the send pipeline — stop →
- * transcribe (whole utterance, one pass) → [TextPostProcessor] cleanup →
+ * transcribe (whole utterance, one pass) → [StylingTextPostProcessor]
+ * styling (local chain, plus the LLM for AI styles when a key is stored) →
  * [TranscriptSinkPort] insertion (ENC-62). The bar shows Done only when the
  * sink reports the text actually inserted; a refused/failed insertion
  * surfaces Error.
@@ -68,7 +69,7 @@ import kotlinx.coroutines.withContext
 class BubbleRecordingController(
     private val session: RecordingSessionPort,
     private val transcriptionEngine: TranscriptionEngine,
-    private val textPostProcessor: TextPostProcessor,
+    private val stylingProcessor: StylingTextPostProcessor,
     private val transcriptSink: TranscriptSinkPort,
     private val enginePreference: EnginePreferencePort,
     private val whisperStore: ModelStorePort,
@@ -328,7 +329,7 @@ class BubbleRecordingController(
     }
 
     /**
-     * The send pipeline: transcribe → cleanup → insert. Done is shown only
+     * The send pipeline: transcribe → style → insert. Done is shown only
      * when the sink reports the text inserted (or nothing insertable
      * remained after cleanup). Any failure keeps [samples] for the one
      * retry tap — unless this run already is the retry — and shows Error.
@@ -369,7 +370,12 @@ class BubbleRecordingController(
                 raw
             }
             val transcribedAtMs = nowMs()
-            val cleaned = textPostProcessor.process(rawTranscript)
+            val styled = withContext(workDispatcher) { stylingProcessor.process(rawTranscript) }
+            Log.d(
+                TAG,
+                "style id=${styled.styleId} llmMs=${styled.llmMs ?: "-"} fellBack=${styled.fellBack}",
+            )
+            val cleaned = styled.text
             if (cleaned.isBlank()) {
                 Log.d(TAG, "Transcript was empty after cleanup; nothing to insert")
                 retainedSamples = null
