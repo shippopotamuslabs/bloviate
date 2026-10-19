@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.service
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -117,18 +118,59 @@ private val WAVEFORM_WIDTH: Dp =
         WAVEFORM_BAR_SPACING * (WaveformHistory.DEFAULT_BAR_COUNT - 1)
 
 /**
- * The width-morph spring between bar states (ENC-89): a state change
- * swaps the whole content (bubble ↔ recording bar ↔ the hugged
+ * The calm width-morph spring between bar states (ENC-89): a state
+ * change swaps the whole content (bubble ↔ recording bar ↔ the hugged
  * processing pill), and the root's `animateContentSize` settles the
  * window to the new width on this spring — no bounce, low stiffness,
  * calm by design (the Compose Gospel's spring motion, §6.6). Each
  * state's own geometry is exactly what it was; only the transition
- * animates.
+ * animates. Since ENC-93 this spring governs the SETTLE transitions
+ * (into the processing pill, the transient bubbles, and back to
+ * idle); the recording-start expansion has its own spec below.
  */
 private val BAR_MORPH_SPRING = spring<IntSize>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = Spring.StiffnessMediumLow,
 )
+
+/**
+ * The recording-start expansion spring (ENC-93): tapping the bubble
+ * must SNAP the bar out to its full width — inside half a second, not
+ * on ENC-89's calm settle, which the expansion originally inherited
+ * (Sean's acceptance test: "it expands very, very slowly... it should
+ * snap out to the full pill"). High stiffness (the gospel's
+ * high-stiffness spring language, §6.2), still no bounce: the spring's
+ * displacement envelope is under 1% by ~250 ms, and a shorter
+ * animation also means fewer per-frame window relayouts in the
+ * overlay. Only the transition INTO [RecordingBarState.Recording]
+ * uses it — see [RecordingBarState.sizeAnimationSpec].
+ */
+private val BAR_EXPANSION_SPRING = spring<IntSize>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessHigh,
+)
+
+/**
+ * The size-animation spec for a transition INTO this state (ENC-93).
+ * Motion is per-transition, not per-root: the recording-start
+ * expansion snaps on [BAR_EXPANSION_SPRING]; every other state
+ * change — the Listening → Processing settle ENC-89 made calm, the
+ * transient Done/Error bubbles, the return to idle — keeps
+ * [BAR_MORPH_SPRING]. `BubbleContent` reads this off the incoming
+ * state on every recomposition, and `animateContentSize` animates a
+ * size change with the spec in its current composition, so the spec
+ * that governs a transition is the destination state's.
+ */
+internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize> =
+    when (this) {
+        is RecordingBarState.Recording -> BAR_EXPANSION_SPRING
+        RecordingBarState.Idle,
+        RecordingBarState.Transcribing,
+        RecordingBarState.Polishing,
+        RecordingBarState.Done,
+        RecordingBarState.Error,
+        -> BAR_MORPH_SPRING
+    }
 
 /**
  * The floating dictation bubble and the recording bar it transforms into —
@@ -209,10 +251,11 @@ fun BubbleContent(
     }
     // One root for every state, sized by its content: the window is
     // WRAP_CONTENT, so this Box IS the window's size, and its
-    // animateContentSize springs the width between state geometries
-    // (ENC-89) — the wide recording bar settles into the hugged
-    // processing pill and back without a jump.
-    Box(modifier = modifier.animateContentSize(animationSpec = BAR_MORPH_SPRING)) {
+    // animateContentSize springs the width between state geometries.
+    // The spec is per-transition (ENC-93): the incoming state picks
+    // it — the recording expansion snaps, the processing settle and
+    // the transient bubbles stay on ENC-89's calm spring.
+    Box(modifier = modifier.animateContentSize(animationSpec = barState.sizeAnimationSpec())) {
         when (barState) {
             RecordingBarState.Idle -> MicBubble(
                 inDismissZone = inDismissZone,
@@ -458,10 +501,12 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
  * waveform and no buttons, so the recording bar's wide skeleton (two
  * slots + a weighted center) stretched a nearly full-width pill around
  * one short word. Here the width is the label plus gospel padding
- * (s24 each side, the button-grade horizontal inset); the root's
- * [BAR_MORPH_SPRING] animates the width change between this and the
- * recording bar. Height stays the bar's, and the word stays the
- * content description, so TalkBack still announces the stage.
+ * (s24 each side, the button-grade horizontal inset); the root's calm
+ * [BAR_MORPH_SPRING] animates the settle from the recording bar into
+ * this pill (ENC-93 keeps that direction calm — only the expansion
+ * out of the bubble snaps). Height stays the bar's, and the word
+ * stays the content description, so TalkBack still announces the
+ * stage.
  */
 @Composable
 private fun ProcessingBar(label: String, modifier: Modifier = Modifier) {
