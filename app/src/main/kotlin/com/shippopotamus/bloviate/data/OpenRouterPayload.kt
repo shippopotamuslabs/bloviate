@@ -21,13 +21,28 @@ object OpenRouterPayload {
     const val ENDPOINT_PATH: String = "https://openrouter.ai/api/v1/chat/completions"
 
     /**
-     * Style chain primary (ENC-84, Sean's decision 2026-10-19): the
-     * floating `~` alias for the latest Grok on OpenRouter — the
-     * underlying model rolls forward when xAI ships a new flagship, no
-     * app update needed. Pinning to a fixed slug is a one-line revert
-     * if a future roll changes styling behavior.
+     * Style chain primary (ENC-96, Sean's decision 2026-10-19):
+     * Llama 3.3 70B Instruct — a non-reasoning instruct model, pinned
+     * to fast-silicon providers below. It supersedes ENC-84's
+     * Grok-primary (see [GROK_MODEL]): Grok's styled output was
+     * excellent, but its reasoning latency outran every dictation
+     * budget, and a restyle is a surface transformation that wants
+     * throughput, not deliberation. "Llama 3.3 on Groq dumb fast
+     * speeds" — Sean.
      */
-    const val PRIMARY_MODEL: String = "~x-ai/grok-latest"
+    const val PRIMARY_MODEL: String = "meta-llama/llama-3.3-70b-instruct"
+
+    /**
+     * The demoted primary (ENC-84 → ENC-96). This floating `~` alias
+     * for the latest Grok WAS the chain primary on 2026-10-19
+     * (ENC-84, Sean's pick) and produced excellent styled text — but
+     * even at effort low it emits ~1,000 reasoning tokens per restyle
+     * and took ~19.3s end to end for a ~90-token answer on device
+     * (ENC-94/95), over any sane stop-to-text budget. It is retained,
+     * unreferenced by the default chain, so a future per-style engine
+     * choice can revive it deliberately where latency is acceptable.
+     */
+    const val GROK_MODEL: String = "~x-ai/grok-latest"
 
     /** Style chain fallback #1 (ENC-84): Haiku 5.5, then the local text. */
     const val FALLBACK_MODEL: String = "anthropic/claude-haiku-5.5"
@@ -68,20 +83,29 @@ object OpenRouterPayload {
      * retry (ENC-95) is the structural guardrail that replaces the
      * cap: if any provider still rejects the block, the same model is
      * retried once with no optional parameters at all.
+     *
+     * ENC-96: the primary is a non-reasoning model now, so NO chain
+     * link currently passes this — [buildChatRequest] defaults to no
+     * block, and this constant remains as the leash value a future
+     * reasoning-model link opts into explicitly.
      */
     const val REASONING_EFFORT: String = "low"
 
     /**
-     * Provider pin for the primary (ENC-80). Queried from OpenRouter's
-     * endpoints API at implementation time (2026-10-19): the
-     * `~x-ai/grok-latest` alias exposes no endpoint list of its own (it
-     * redirects), and its current resolution `x-ai/grok-4.7` is served
-     * ONLY by xAI's own endpoints (slugs `xai`, `xai/zdr`, `xai/zdr/us`,
-     * `xai/priority`, `xai/zdr/priority`). Ordering the base slug `xai`
-     * therefore pins the whole first-party family and keeps any future
-     * third-party endpoint from silently joining the pool.
+     * Provider pin for the primary (ENC-80's mechanism, ENC-96's
+     * pool). Queried live from OpenRouter's endpoints + providers
+     * APIs at implementation time (2026-10-19): Llama 3.3 70B
+     * Instruct is served by many upstreams, and the order names the
+     * fast-silicon class first — Groq (LPU), SambaNova, Together,
+     * DeepInfra — all at 100% 30-day uptime in the live data, Groq
+     * the head per Sean's pick. Slugs are the providers API's
+     * canonical `slug` values, the same form ENC-80 pinned for the
+     * old pool. `allow_fallbacks` stays on (see [buildChatRequest]),
+     * so the wider pool still serves if all four are down; the order
+     * just keeps slow endpoints from silently becoming the default
+     * route.
      */
-    val PRIMARY_PROVIDER_ORDER: List<String> = listOf("xai")
+    val PRIMARY_PROVIDER_ORDER: List<String> = listOf("groq", "sambanova", "together", "deepinfra")
 
     /**
      * Provider pin for the fallback (ENC-80): prefer Anthropic's
@@ -103,7 +127,8 @@ object OpenRouterPayload {
      * off — for usage in the final chunk
      * (`stream_options.include_usage`, ENC-94) so reasoning-token
      * counts reach telemetry. [reasoningEffort] adds the unified
-     * `reasoning` block (ENC-94/95, see [REASONING_EFFORT]); null
+     * `reasoning` block (ENC-94/95, see [REASONING_EFFORT]); null —
+     * the default since ENC-96, whose primary does not reason —
      * omits it. The client's degraded retry (ENC-95) passes
      * `reasoningEffort = null, includeUsage = false`: a bare streamed
      * request carrying nothing a provider could reject.
@@ -117,7 +142,7 @@ object OpenRouterPayload {
         providerOrder: List<String>? = null,
         providerIgnore: List<String> = emptyList(),
         stream: Boolean = false,
-        reasoningEffort: String? = REASONING_EFFORT,
+        reasoningEffort: String? = null,
         includeUsage: Boolean = true,
     ): String =
         "{\"model\":" + escape(model) +

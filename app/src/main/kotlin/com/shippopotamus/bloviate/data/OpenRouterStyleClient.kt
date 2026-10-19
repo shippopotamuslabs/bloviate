@@ -33,9 +33,10 @@ import java.net.HttpURLConnection
  * short reason code; only coroutine cancellation is rethrown. Reasons
  * never carry response text.
  *
- * Model chain (ENC-84): [OpenRouterPayload.PRIMARY_MODEL] (the floating
- * `~x-ai/grok-latest` alias) first; on ANY attempt failure, one retry
- * on [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that the
+ * Model chain (ENC-96; ENC-84 before it): [OpenRouterPayload.PRIMARY_MODEL]
+ * (Llama 3.3 70B Instruct, provider-pinned to the fast-silicon pool)
+ * first; on ANY attempt failure, one retry on
+ * [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that the
  * caller keeps the local text. Each attempt pins its OpenRouter
  * provider routing (ENC-80) and logs its `model=` / `provider=` so
  * dogfood telemetry shows which link actually answered.
@@ -64,15 +65,16 @@ import java.net.HttpURLConnection
  * client has already fallen back.
  *
  * Reasoning control (ENC-94): ENC-91 taught the client to tolerate
- * Grok's thinking; ENC-94 stops the thinking from being the problem.
- * The primary's request carries OpenRouter's unified `reasoning`
- * control at effort low (see [OpenRouterPayload.REASONING_EFFORT]
- * for why "off" is not honored by Grok 4.7 and "exclude" saves no
- * time), so a restyle's generation is content-dominated and the
- * healthy path lands in seconds. The chain cap is re-tuned to that
- * constrained profile, and the usage chunk's reasoning-token count
- * is logged with each attempt's outcome, so a future blowout is
- * visible in telemetry, not just in OpenRouter's dashboard.
+ * Grok's thinking; ENC-94 stopped the thinking from being the
+ * problem while Grok headed the chain: its request carried
+ * OpenRouter's unified `reasoning` control at effort low (see
+ * [OpenRouterPayload.REASONING_EFFORT] for why "off" is not honored
+ * by Grok 4.7 and "exclude" saves no time). The chain cap was
+ * re-tuned to that constrained profile, and the usage chunk's
+ * reasoning-token count is logged with each attempt's outcome, so a
+ * future blowout is visible in telemetry, not just in OpenRouter's
+ * dashboard. ENC-96 retired the control from the chain (below);
+ * the machinery stays for any future reasoning-model link.
  *
  * Degraded retry (ENC-95): ENC-94's first shape shipped
  * `reasoning: {effort, max_tokens}` on every attempt — a combination
@@ -89,6 +91,21 @@ import java.net.HttpURLConnection
  * by one round trip; it can no longer zero the style pass. Failed
  * attempts log their HTTP status and the provider's error code/type,
  * so the next rejection is diagnosable from logcat alone.
+ *
+ * Primary switch (ENC-96, Sean's decision 2026-10-19): the saga
+ * ended in physics — even leashed to effort low, Grok 4.7 emitted
+ * ~1,000 reasoning tokens and took ~19.3s end to end for a ~90-token
+ * restyle on device, over any sane dictation budget, while its
+ * output quality was never the problem. The chain head is now
+ * Llama 3.3 70B Instruct — a non-reasoning instruct model —
+ * provider-pinned to Groq and the fast-silicon pool behind it, so
+ * the healthy path lands in about a second and the liveness budgets
+ * and chain cap sit as pure headroom again. No attempt carries a
+ * reasoning block; Grok's slug is retained as
+ * [OpenRouterPayload.GROK_MODEL] for a future per-style engine
+ * choice to revive deliberately. Everything else is inherited
+ * unchanged: Haiku fallback with its ENC-80 ignore, the ENC-82
+ * guard, ENC-95's degraded retry, and all budgets.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -177,7 +194,11 @@ class OpenRouterStyleClient(
         val model: String,
         val providerOrder: List<String>?,
         val providerIgnore: List<String>,
-        /** The unified `reasoning` effort for this link, or null for no block (ENC-95). */
+        /**
+         * The unified `reasoning` effort for this link, or null for
+         * no block. No current link sets one (ENC-96); the field is
+         * how a future reasoning-model link opts in (ENC-94/95).
+         */
         val reasoningEffort: String?,
     )
 
@@ -499,17 +520,19 @@ class OpenRouterStyleClient(
         const val TAG: String = "OpenRouterStyle"
 
         /**
-         * The chain, in order (ENC-84/95). The reasoning block rides
-         * the primary only: Grok's default effort is the blowout risk
-         * ENC-94 leashed, while Haiku's proven shape is the pre-ENC-94
-         * payload with no block — and a block on the Anthropic route
-         * is one translation away from an invalid request (ENC-95).
+         * The chain, in order (ENC-96; ENC-84/95 before it). Neither
+         * link carries a reasoning block: the primary is a
+         * non-reasoning instruct model (ENC-96), and Haiku's proven
+         * shape is the pre-ENC-94 payload with no block — a block on
+         * the Anthropic route is one translation away from an invalid
+         * request (ENC-95). The effort machinery stays for a future
+         * reasoning-model link to opt into deliberately.
          */
         private val PRIMARY_LINK: ChainLink = ChainLink(
             model = OpenRouterPayload.PRIMARY_MODEL,
             providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
             providerIgnore = emptyList(),
-            reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
+            reasoningEffort = null,
         )
         private val FALLBACK_LINK: ChainLink = ChainLink(
             model = OpenRouterPayload.FALLBACK_MODEL,

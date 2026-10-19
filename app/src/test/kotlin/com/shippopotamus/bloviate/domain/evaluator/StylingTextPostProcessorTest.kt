@@ -81,25 +81,25 @@ class StylingTextPostProcessorTest {
         fakeLlm.outcome = LlmStyleOutcome.Styled(
             text = "Polished words.",
             llmMs = 900L,
-            model = "~x-ai/grok-latest",
-            provider = "xAI",
+            model = "meta-llama/llama-3.3-70b-instruct",
+            provider = "Groq",
         )
 
         val styled = processor.process("raw words")
 
-        assertEquals("~x-ai/grok-latest", styled.model)
-        assertEquals("xAI", styled.provider)
+        assertEquals("meta-llama/llama-3.3-70b-instruct", styled.model)
+        assertEquals("Groq", styled.provider)
 
         fakeLlm.outcome = LlmStyleOutcome.FellBack(
             reason = "http-500",
-            model = "~x-ai/grok-latest",
+            model = "meta-llama/llama-3.3-70b-instruct",
             provider = "Claude Platform on AWS",
         )
 
         val fellBack = processor.process("raw words")
 
         assertTrue(fellBack.fellBack)
-        assertEquals("~x-ai/grok-latest", fellBack.model)
+        assertEquals("meta-llama/llama-3.3-70b-instruct", fellBack.model)
         assertEquals("Claude Platform on AWS", fellBack.provider)
     }
 
