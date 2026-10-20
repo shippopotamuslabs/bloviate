@@ -49,6 +49,9 @@ sealed interface ModelUiStatus {
 /** The first thing standing between the user and dictation, in gate order (ENC-75). */
 enum class SetupBlocker {
     WATCHER,
+
+    /** The watcher is enabled in settings but its service is not connected (ENC-129 supervision). */
+    WATCHER_DISCONNECTED,
     OVERLAY,
     MICROPHONE,
     MODEL,
@@ -73,14 +76,16 @@ sealed interface SetupStatusUi {
 /**
  * Derives the header-pill verdict from this state. Gate order is the
  * order a user must fix things in: the watcher (without it no field is
- * ever spotted), the overlay permission (without it the bubble cannot
- * draw), the microphone, a downloaded model (either engine counts —
- * dictation works on whichever is ready), and finally the bubble
- * switch itself, which is a tap rather than a setup errand.
+ * ever spotted), its connection (an enabled-but-disconnected watcher
+ * spots nothing either, ENC-129), the overlay permission (without it
+ * the bubble cannot draw), the microphone, a downloaded model (either
+ * engine counts — dictation works on whichever is ready), and finally
+ * the bubble switch itself, which is a tap rather than a setup errand.
  */
 fun MainUiState.setupStatus(): SetupStatusUi =
     when {
         !watcherEnabled -> SetupStatusUi.Blocked(SetupBlocker.WATCHER)
+        !watcherConnected -> SetupStatusUi.Blocked(SetupBlocker.WATCHER_DISCONNECTED)
         !overlayPermissionGranted -> SetupStatusUi.Blocked(SetupBlocker.OVERLAY)
         !micPermissionGranted -> SetupStatusUi.Blocked(SetupBlocker.MICROPHONE)
         whisperModelStatus !is ModelUiStatus.Ready &&
@@ -196,10 +201,19 @@ internal fun BubbleAppearance.toUi(): BubbleAppearanceUi =
  */
 data class MainUiState(
     val watcherEnabled: Boolean = false,
+
+    /** Whether the watcher service is connected right now (ENC-129 supervision). */
+    val watcherConnected: Boolean = false,
     val focusClassification: FocusClassification = FocusClassification.NONE,
     val focusPackageName: String? = null,
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
+
+    /** Whether battery optimization leaves Bloviate alone (ENC-129). */
+    val batteryExempt: Boolean = false,
+
+    /** Whether the bubble service may start itself at boot and restart after a kill (ENC-129). */
+    val autoStartEnabled: Boolean = true,
     val micPermissionGranted: Boolean = false,
     val whisperModelStatus: ModelUiStatus = ModelUiStatus.Absent,
     val parakeetModelStatus: ModelUiStatus = ModelUiStatus.Absent,

@@ -13,6 +13,7 @@ class SetupStatusTest {
 
     private fun readyState() = MainUiState(
         watcherEnabled = true,
+        watcherConnected = true,
         overlayPermissionGranted = true,
         micPermissionGranted = true,
         whisperModelStatus = ModelUiStatus.Ready,
@@ -29,6 +30,16 @@ class SetupStatusTest {
     fun `watcher off blocks first, ahead of every other failure`() {
         val state = MainUiState()
         assertEquals(SetupStatusUi.Blocked(SetupBlocker.WATCHER), state.setupStatus())
+    }
+
+    @Test
+    fun `watcher enabled but disconnected blocks ahead of overlay and microphone`() {
+        val state = readyState().copy(
+            watcherConnected = false,
+            overlayPermissionGranted = false,
+            micPermissionGranted = false,
+        )
+        assertEquals(SetupStatusUi.Blocked(SetupBlocker.WATCHER_DISCONNECTED), state.setupStatus())
     }
 
     @Test

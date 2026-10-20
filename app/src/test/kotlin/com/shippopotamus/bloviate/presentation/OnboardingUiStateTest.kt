@@ -8,7 +8,9 @@ import org.junit.jupiter.api.Test
  * The wizard's step-gating derivations (ENC-67): pure functions of the
  * UI state, tested directly — each gate step passes on exactly its own
  * live condition, the model step on either engine, and the test step
- * only on the whole chain at once.
+ * only on the whole dictation chain at once. ENC-129: the watcher gate
+ * is supervised (enabled and connected), and the battery step passes
+ * on the exemption alone.
  */
 class OnboardingUiStateTest {
 
@@ -24,7 +26,8 @@ class OnboardingUiStateTest {
 
         assertFalse(state.stepSatisfied(OnboardingStepUi.WATCHER))
         assertTrue(
-            state.copy(watcherEnabled = true).stepSatisfied(OnboardingStepUi.WATCHER),
+            state.copy(watcherEnabled = true, watcherConnected = true)
+                .stepSatisfied(OnboardingStepUi.WATCHER),
         )
 
         assertFalse(state.stepSatisfied(OnboardingStepUi.OVERLAY))
@@ -38,6 +41,19 @@ class OnboardingUiStateTest {
             state.copy(micPermissionGranted = true)
                 .stepSatisfied(OnboardingStepUi.MICROPHONE),
         )
+
+        assertFalse(state.stepSatisfied(OnboardingStepUi.BATTERY))
+        assertTrue(
+            state.copy(batteryExempt = true).stepSatisfied(OnboardingStepUi.BATTERY),
+        )
+    }
+
+    @Test
+    fun `the watcher step is supervised - enabled but disconnected does not satisfy it`() {
+        val disconnected = OnboardingUiState(watcherEnabled = true, watcherConnected = false)
+
+        assertFalse(disconnected.stepSatisfied(OnboardingStepUi.WATCHER))
+        assertFalse(disconnected.stepSatisfied(OnboardingStepUi.TEST))
     }
 
     @Test
@@ -63,10 +79,14 @@ class OnboardingUiStateTest {
     }
 
     @Test
-    fun `the test step needs every gate and the bubble at once`() {
+    fun `the test step needs every dictation gate and the bubble at once`() {
         assertTrue(allGatesOn().stepSatisfied(OnboardingStepUi.TEST))
+        // The battery exemption is a presence gate, not a dictation
+        // gate (ENC-129): the test chain passes without it.
+        assertFalse(allGatesOn().batteryExempt)
 
         assertFalse(allGatesOn().copy(watcherEnabled = false).stepSatisfied(OnboardingStepUi.TEST))
+        assertFalse(allGatesOn().copy(watcherConnected = false).stepSatisfied(OnboardingStepUi.TEST))
         assertFalse(
             allGatesOn().copy(overlayPermissionGranted = false)
                 .stepSatisfied(OnboardingStepUi.TEST),
@@ -94,6 +114,7 @@ class OnboardingUiStateTest {
 
     private fun allGatesOn(): OnboardingUiState = OnboardingUiState(
         watcherEnabled = true,
+        watcherConnected = true,
         overlayPermissionGranted = true,
         micPermissionGranted = true,
         bubbleServiceRunning = true,

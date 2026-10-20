@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.service
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -26,14 +27,19 @@ import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
+import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.evaluator.EngineWarmingEvaluator
+import com.shippopotamus.bloviate.domain.evaluator.WatcherSupervisionEvaluator
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import com.shippopotamus.bloviate.domain.model.BubbleForegroundType
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
+import com.shippopotamus.bloviate.domain.model.BubbleServiceStartOrigin
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
+import com.shippopotamus.bloviate.domain.model.WatcherSupervisionState
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
 import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
@@ -42,6 +48,9 @@ import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
+import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
+import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
@@ -86,8 +95,18 @@ import javax.inject.Inject
  * [BubbleRecordingController] drives the session from the bar's taps and
  * feeds the bar state back into the same composition.
  *
- * Started explicitly by the user from the main screen; it never starts
- * itself. Without overlay permission every show command is a safe no-op
+ * Resident presence (ENC-129): the service is started explicitly from
+ * the app, by the boot receiver once setup is finished, or by the
+ * system itself after a kill (sticky restart) — the persisted
+ * [ResidentPresencePort] record gates the automatic starts, and a
+ * user-pressed Stop is honored by all of them until the next explicit
+ * in-app start. Every start begins as `specialUse` (the only type
+ * legal in every context, boot included) and promotes per
+ * [BubbleServiceStartPolicy] once the start's origin is known. The
+ * notification doubles as the watcher-supervision surface: its text
+ * reports the field watcher's supervised state, so an
+ * enabled-but-disconnected watcher is visible instead of silent.
+ * Without overlay permission every show command is a safe no-op
  * (logged), and the notification's Stop action remains available.
  */
 @AndroidEntryPoint
@@ -138,7 +157,25 @@ class BubbleOverlayService : Service() {
     @Inject
     lateinit var recordingSession: RecordingSessionPort
 
+    @Inject
+    lateinit var residentPresence: ResidentPresencePort
+
+    @Inject
+    lateinit var watcherAccess: WatcherAccessPort
+
+    @Inject
+    lateinit var watcherConnection: WatcherConnectionPort
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** The foreground type the service currently runs under; every start begins `specialUse` (ENC-129). */
+    private var currentForegroundType: BubbleForegroundType = BubbleForegroundType.SPECIAL_USE
+
+    /** The supervision state the notification currently shows; the text refreshes only on change. */
+    private var lastNotificationStatus: WatcherSupervisionState? = null
+
+    /** False once stopping begins: a torn-down service must never re-post its notification. */
+    private var notificationUpdatesEnabled: Boolean = true
 
     private lateinit var windowManager: WindowManager
     private var lifecycleOwner: ServiceLifecycleOwner? = null
@@ -187,23 +224,24 @@ class BubbleOverlayService : Service() {
         windowManager = getSystemService(WindowManager::class.java)
         createNotificationChannel()
         micPermission.refresh()
-        val micGranted = micPermission.isGrantedNow()
+        // ENC-129: every start begins as specialUse — onCreate runs
+        // before the starting intent arrives, so the origin is unknown
+        // here, and specialUse is the only type legal in every start
+        // context (a microphone-typed start from the boot receiver is
+        // refused on Android 15). onStartCommand promotes per
+        // BubbleServiceStartPolicy once the origin is known.
+        currentForegroundType = BubbleServiceStartPolicy.initialType()
+        val initialStatus = currentSupervision
+        lastNotificationStatus = initialStatus
         startForeground(
             NOTIFICATION_ID,
-            buildNotification(),
-            if (micGranted) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            },
+            buildNotification(initialStatus),
+            currentForegroundType.toServiceInfoType(),
         )
         Log.d(
             TAG,
-            if (micGranted) {
-                "Foreground service started with the microphone type"
-            } else {
-                "Foreground service started with the specialUse type (microphone permission not granted)"
-            },
+            "Foreground service started with the ${currentForegroundType} type; " +
+                "microphone permission granted: ${micPermission.isGrantedNow()}",
         )
         bubbleServiceState.publishServiceRunning(true)
         if (!bubbleOverlayAccess.canDrawOverlays()) {
@@ -238,6 +276,12 @@ class BubbleOverlayService : Service() {
         }
         serviceScope.launch {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
+        }
+        serviceScope.launch {
+            // Watcher supervision (ENC-129): the notification text
+            // follows the watcher's connection state for the service's
+            // whole lifetime, so a silent disconnect surfaces there too.
+            watcherConnection.isConnected.collect { refreshNotificationStatus() }
         }
         serviceScope.launch {
             observeBubbleAppearance().collect { appearance -> appearanceSnapshot.value = appearance }
@@ -289,11 +333,63 @@ class BubbleOverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             Log.d(TAG, "Stop requested from notification")
+            // The user's Stop is final (ENC-129): record it before
+            // tearing down, so neither a sticky restart nor the boot
+            // receiver resurrects the bubble behind the user's back.
+            // The save is fire-and-forget on a fresh scope — stopSelf()
+            // follows immediately and serviceScope dies with the service
+            // (same pattern as the engine release in onDestroy).
+            notificationUpdatesEnabled = false
+            val presence = residentPresence.state.value
+            if (!presence.userStopped) {
+                CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                    residentPresence.save(presence.copy(userStopped = true))
+                }
+            }
             hideBubble()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+            return START_NOT_STICKY
         }
-        return START_NOT_STICKY
+        val origin = when (intent?.action) {
+            ACTION_USER_START -> BubbleServiceStartOrigin.USER
+            ACTION_BOOT_START -> BubbleServiceStartOrigin.BOOT
+            // A null intent is the system's sticky-restart delivery; any
+            // other unrecognized action is treated the same conservative
+            // way — promotion is attempted under a guard, never assumed.
+            else -> BubbleServiceStartOrigin.RESTART
+        }
+        promoteForegroundType(origin)
+        refreshNotificationStatus()
+        val sticky = BubbleServiceStartPolicy.restartIsSticky(residentPresence.state.value)
+        Log.d(TAG, "Start handled: origin $origin, foreground type $currentForegroundType, sticky $sticky")
+        return if (sticky) START_STICKY else START_NOT_STICKY
+    }
+
+    /**
+     * Promotes the running foreground type per [BubbleServiceStartPolicy]
+     * for this start's [origin]. The attempt is guarded: a restart the
+     * platform refuses (background-start restrictions) leaves the
+     * service running as `specialUse` — bubble visible, recording
+     * unavailable — instead of crashing, and the next eligible start
+     * (the user's next in-app start) promotes again.
+     */
+    private fun promoteForegroundType(origin: BubbleServiceStartOrigin) {
+        val target = BubbleServiceStartPolicy.promotionType(
+            origin = origin,
+            micPermissionGranted = micPermission.isGrantedNow(),
+        ) ?: return
+        if (target == currentForegroundType) return
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(currentSupervision), target.toServiceInfoType())
+            currentForegroundType = target
+            lastNotificationStatus = currentSupervision
+            Log.d(TAG, "Foreground type promoted to $target for origin $origin")
+        } catch (exception: ForegroundServiceStartNotAllowedException) {
+            Log.w(TAG, "Promotion to $target refused for origin $origin; staying $currentForegroundType", exception)
+        } catch (exception: SecurityException) {
+            Log.w(TAG, "Promotion to $target denied for origin $origin; staying $currentForegroundType", exception)
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -305,6 +401,7 @@ class BubbleOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        notificationUpdatesEnabled = false
         hideBubble()
         recordingController?.shutdown()
         recordingController = null
@@ -708,7 +805,29 @@ class BubbleOverlayService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
+    /** The watcher's supervised state right now (ENC-129), from its two live signals. */
+    private val currentSupervision: WatcherSupervisionState
+        get() = WatcherSupervisionEvaluator.resolve(
+            watcherEnabled = watcherAccess.isFieldWatcherEnabled(),
+            watcherConnected = watcherConnection.isConnected.value,
+        )
+
+    /**
+     * Re-posts the foreground notification when the watcher's supervised
+     * state has changed, so the persistent notification reads as an
+     * honest status surface (ENC-129): watching, watcher off, or watcher
+     * disconnected. No-op once stopping has begun.
+     */
+    private fun refreshNotificationStatus() {
+        if (!notificationUpdatesEnabled) return
+        val status = currentSupervision
+        if (status == lastNotificationStatus) return
+        lastNotificationStatus = status
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
+        Log.d(TAG, "Notification status refreshed: $status")
+    }
+
+    private fun buildNotification(status: WatcherSupervisionState): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             REQUEST_CODE_OPEN_APP,
@@ -721,17 +840,22 @@ class BubbleOverlayService : Service() {
             Intent(this, BubbleOverlayService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val statusText = when (status) {
+            WatcherSupervisionState.CONNECTED -> R.string.bubble_notification_text
+            WatcherSupervisionState.DISABLED -> R.string.bubble_notification_text_watcher_off
+            WatcherSupervisionState.DISCONNECTED -> R.string.bubble_notification_text_watcher_disconnected
+        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mic)
             .setContentTitle(getString(R.string.bubble_notification_title))
-            .setContentText(getString(R.string.bubble_notification_text))
+            .setContentText(getString(statusText))
             .setContentIntent(openAppIntent)
             .addAction(0, getString(R.string.bubble_notification_stop), stopIntent)
             .setOngoing(true)
             .build()
     }
 
-    private companion object {
+    companion object {
         const val TAG: String = "BubbleOverlay"
 
         /** Clearance kept between the recording bar and the screen's right edge. */
@@ -741,5 +865,18 @@ class BubbleOverlayService : Service() {
         const val REQUEST_CODE_OPEN_APP: Int = 0
         const val REQUEST_CODE_STOP: Int = 1
         const val ACTION_STOP: String = "com.shippopotamus.bloviate.action.STOP_BUBBLE"
+
+        /** Explicit in-app start (ENC-129): always eligible for the microphone type. */
+        const val ACTION_USER_START: String = "com.shippopotamus.bloviate.action.START_BUBBLE_USER"
+
+        /** Boot-receiver start (ENC-129): specialUse only, never promoted at boot. */
+        const val ACTION_BOOT_START: String = "com.shippopotamus.bloviate.action.START_BUBBLE_BOOT"
     }
 }
+
+/** Maps the framework-free foreground type onto the platform's `ServiceInfo` constants. */
+private fun BubbleForegroundType.toServiceInfoType(): Int =
+    when (this) {
+        BubbleForegroundType.MICROPHONE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        BubbleForegroundType.SPECIAL_USE -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+    }
