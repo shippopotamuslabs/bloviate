@@ -117,6 +117,69 @@ class OpenRouterPayloadTest {
     }
 
     @Test
+    fun `the reasoning controls pin to effort low with a hard token cap`() {
+        // ENC-94: the shipped control values, pinned literally for the
+        // same reason as the model slugs — a silent edit here changes
+        // every style call's latency profile. Effort LOW because the
+        // alias's current model (Grok 4.7) does not honor "none"; the
+        // cap is the hard bound behind it.
+        assertEquals("low", OpenRouterPayload.REASONING_EFFORT)
+        assertEquals(512, OpenRouterPayload.REASONING_MAX_TOKENS)
+    }
+
+    @Test
+    fun `a request carries the reasoning controls by default`() {
+        val request = OpenRouterPayload.buildChatRequest(
+            model = OpenRouterPayload.PRIMARY_MODEL,
+            system = system,
+            user = user,
+        )
+
+        assertTrue(request.contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
+    }
+
+    @Test
+    fun `a streamed request asks for usage so reasoning tokens reach telemetry`() {
+        // ENC-94: without include_usage the final chunk may carry no
+        // usage object, and the reasoning spend stays invisible.
+        val plain = OpenRouterPayload.buildChatRequest(model = "m", system = system, user = user)
+        val streamed = OpenRouterPayload.buildChatRequest(model = "m", system = system, user = user, stream = true)
+
+        assertFalse(plain.contains("\"stream_options\""))
+        assertTrue(streamed.contains("\"stream_options\":{\"include_usage\":true}"))
+    }
+
+    @Test
+    fun `reasoning tokens are extracted from a streamed usage chunk`() {
+        // ENC-94: the closing usage chunk OpenRouter appends when
+        // include_usage is on — empty choices, the spend in details.
+        val data = "{\"choices\":[],\"usage\":{\"prompt_tokens\":1603,\"completion_tokens\":3282," +
+            "\"completion_tokens_details\":{\"reasoning_tokens\":3102}}}"
+
+        assertEquals(3102, OpenRouterPayload.extractReasoningTokens(data))
+    }
+
+    @Test
+    fun `reasoning tokens are extracted from a non-streamed body`() {
+        val body = "{\"choices\":[{\"message\":{\"content\":\"Done.\"}}]," +
+            "\"usage\":{\"completion_tokens_details\":{\"reasoning_tokens\":48}}}"
+
+        assertEquals(48, OpenRouterPayload.extractReasoningTokens(body))
+    }
+
+    @Test
+    fun `a chunk without usage reports no reasoning tokens`() {
+        assertNull(OpenRouterPayload.extractReasoningTokens("{\"choices\":[{\"delta\":{\"content\":\"Hi.\"}}]}"))
+    }
+
+    @Test
+    fun `a reasoning tokens decoy inside a string value does not resolve`() {
+        val data = "{\"choices\":[{\"delta\":{\"content\":\"see \\\"reasoning_tokens\\\": 9999 here\"}}]}"
+
+        assertNull(OpenRouterPayload.extractReasoningTokens(data))
+    }
+
+    @Test
     fun `a stream delta is extracted from a chunk`() {
         val data = "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Pol\"}}]}"
 

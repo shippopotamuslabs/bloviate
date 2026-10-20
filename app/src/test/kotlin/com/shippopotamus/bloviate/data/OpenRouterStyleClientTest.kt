@@ -18,6 +18,7 @@ import java.io.IOException
 class OpenRouterStyleClientTest {
 
     private val professional = StyleCatalog.byId("professional")
+    private val seneca = StyleCatalog.byId("seneca")
     private val fakeTransport = FakeStyleHttpTransport()
     private val fakeKeys = FakeApiKeyPort(initialKey = "test-key")
     private var nowMs = 1_000L
@@ -467,6 +468,87 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `both chain attempts carry the reasoning controls`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-94: the constraint rides the whole chain — the Haiku
+        // fallback gets the same profile, so a fallback answer is as
+        // prompt as a primary one.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 404, body = "model not found")
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        client.style(style = professional, text = SOURCE_TEXT)
+
+        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
+        assertTrue(fakeTransport.requests[1].contains("\"reasoning\":{\"effort\":\"low\",\"max_tokens\":512}"))
+    }
+
+    @Test
+    fun `a long reasoning phase stream completes and inserts the styled text`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-94's repro, compressed: a reasoning-heavy Grok stream —
+        // two dozen reasoning deltas across ~6s of virtual time, then
+        // the answer trickling in, then a usage chunk reporting the
+        // reasoning spend. The ENC-91 liveness rules carry it and the
+        // ENC-94 chain cap (14s) leaves it room: the styled text must
+        // be what lands. The fallback is scripted to 499 so any
+        // wrongful retry shows.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                repeat(REASONING_BURST_CHUNKS) { beat ->
+                    emit(reasoningChunkXai("Deliberating, beat $beat."))
+                    delay(REASONING_BEAT_MS)
+                }
+                emit(chunk("The meeting "))
+                delay(TRICKLE_GAP_MS)
+                emit(chunk("is moved "))
+                delay(TRICKLE_GAP_MS)
+                emit(chunk("to Friday afternoon."))
+                emit(usageChunk(reasoningTokens = 183))
+                emit(DONE_LINE)
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `the seneca tirade restyles and inserts with its profanity intact`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-94's acceptance scenario in fixture form: Sean's tirade
+        // test — long, first-person, profanity-bearing — restyled by
+        // the primary in Seneca's voice. The hard tier (the profanity,
+        // the names) survives, the speaker stays the speaker (ENC-92),
+        // and the styled text is the outcome of a single call.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(TIRADE_STYLED), provider = "SpaceXAI")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = seneca, text = TIRADE_SOURCE)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(TIRADE_STYLED, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
     fun `a stream with no content falls back as an empty response`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // A 200 stream that delivers no tokens at all (the streamed form
@@ -584,6 +666,11 @@ class OpenRouterStyleClientTest {
     private fun reasoningChunkOpenRouter(reasoning: String): String =
         "data: {\"choices\":[{\"delta\":{\"reasoning\":" + OpenRouterPayload.escape(reasoning) + "}}]}"
 
+    /** The closing usage chunk reporting the attempt's reasoning spend (ENC-94). */
+    private fun usageChunk(reasoningTokens: Int): String =
+        "data: {\"choices\":[],\"usage\":{\"completion_tokens\":228," +
+            "\"completion_tokens_details\":{\"reasoning_tokens\":$reasoningTokens}}}"
+
     /** A whole non-streamed chat-completion body as ONE raw line (no SSE framing) (ENC-91). */
     private fun nonStreamedCompletion(content: String): String =
         "{\"id\":\"gen-enc91\",\"provider\":\"SpaceXAI\",\"model\":\"x-ai/grok-4.7\"," +
@@ -616,6 +703,24 @@ class OpenRouterStyleClientTest {
         /** A reasoning-phase silence/pause longer than the old 2s liveness budgets (ENC-91). */
         const val SLOW_REASONING_MS: Long = 3_500L
         const val NEVER_STARTS_MS: Long = 30_000L
+
+        /** ENC-94's long reasoning phase: chunks and beat, ~6s of virtual deliberation. */
+        const val REASONING_BURST_CHUNKS: Int = 24
+        const val REASONING_BEAT_MS: Long = 250L
+
+        /** Sean's ENC-94 tirade test, transcript-shaped (ENC-94). */
+        const val TIRADE_SOURCE: String =
+            "alright i'm ready to dictate some fucking shit do you hear what i'm saying bro " +
+                "i'm saying all kinds of things that you really want to hear and the reason " +
+                "you want to hear them is because you want to know if this fucking dictation's " +
+                "gonna work and if gronk is gonna convert this profanity laced tirade into " +
+                "something seneca would say i wanna know that too so here goes"
+        const val TIRADE_STYLED: String =
+            "I am ready to dictate some fucking shit. You hear what I am saying, bro — " +
+                "I am saying all kinds of things that you want to hear, and the reason you " +
+                "want to hear them is that you want to know whether this fucking dictation " +
+                "will work, and whether Gronk will convert this profanity-laced tirade into " +
+                "something Seneca would say. I want to know that too. So here goes."
 
         /** A guard-safe source/restyle pair: same content words, new casing. */
         const val SOURCE_TEXT: String = "the meeting is moved to friday afternoon"
