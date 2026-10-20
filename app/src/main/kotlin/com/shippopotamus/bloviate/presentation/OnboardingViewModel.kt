@@ -11,7 +11,6 @@ import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
-import com.shippopotamus.bloviate.domain.usecase.IsStoreInstallUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
@@ -39,9 +38,7 @@ import javax.inject.Inject
  * the user's place in the walk. Navigation (continue/back/skip/
  * finish/re-run) only ever writes that record; the shell shows the
  * wizard whenever the record is unfinished, so progress, resume, and
- * re-runs are the same mechanism. [restrictedSettingsLikely] is the
- * blocked-state read for sideload installs: not from a store, and a
- * restricted gate (watcher or overlay) still off.
+ * re-runs are the same mechanism.
  */
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
@@ -58,9 +55,7 @@ class OnboardingViewModel @Inject constructor(
     private val ensureParakeetModel: EnsureParakeetModelUseCase,
     observeEnginePreference: ObserveEnginePreferenceUseCase,
     private val selectEngine: SelectEngineUseCase,
-    isStoreInstall: IsStoreInstallUseCase,
 ) : ViewModel() {
-    private val storeInstall: Boolean = isStoreInstall()
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())
@@ -87,7 +82,6 @@ class OnboardingViewModel @Inject constructor(
             overlayPermissionGranted = overlayGranted,
             micPermissionGranted = micGranted,
             bubbleServiceRunning = bubbleRunning,
-            restrictedSettingsLikely = !storeInstall && (!watcherOn || !overlayGranted),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -100,8 +94,6 @@ class OnboardingViewModel @Inject constructor(
                 overlayPermissionGranted = isOverlayPermissionGranted(),
                 micPermissionGranted = isMicPermissionGranted(),
                 bubbleServiceRunning = observeBubbleServiceRunning().value,
-                restrictedSettingsLikely = !storeInstall &&
-                    (!isFieldWatcherEnabled() || !isOverlayPermissionGranted()),
             )
         },
     )

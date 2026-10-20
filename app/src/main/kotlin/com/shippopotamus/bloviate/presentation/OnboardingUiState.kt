@@ -51,7 +51,6 @@ data class OnboardingUiState(
     val parakeetModelStatus: ModelUiStatus = ModelUiStatus.Absent,
     val selectedEngine: DictationEngineUi = DictationEngineUi.PARAKEET,
     val engineFallback: EngineFallbackUi? = null,
-    val restrictedSettingsLikely: Boolean = false,
     val testFieldText: String = "",
 )
 

@@ -139,12 +139,6 @@
     <string name="onboarding_mic_sub">Your voice is transcribed on this phone. Nothing is recorded or sent anywhere.</string>
     <string name="onboarding_open_settings">Open Settings</string>
     <string name="onboarding_allow_mic">Allow microphone</string>
-    <string name="onboarding_restricted_title">Installed from a test link or file?</string>
-    <string name="onboarding_restricted_intro">Android keeps this switch off for apps that didn’t come from the Play Store, until you allow it once:</string>
-    <string name="onboarding_restricted_step_1">Open Settings → Apps → Bloviate</string>
-    <string name="onboarding_restricted_step_2">Tap the ⋮ menu in the top right</string>
-    <string name="onboarding_restricted_step_3">Tap “Allow restricted settings”</string>
-    <string name="onboarding_restricted_step_4">Come back here and flip the switch</string>
     <string name="onboarding_model_title">Voice model</string>
     <string name="onboarding_model_sub">Dictation runs on a model downloaded to this phone. Pick one — you can change your mind later in Setup.</string>
     <string name="onboarding_test_title">Try it out</string>
