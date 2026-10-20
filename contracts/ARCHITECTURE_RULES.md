@@ -158,7 +158,7 @@ Android offers exactly one API that can tell whether an editable field in *anoth
 
 - Subscribes to view-focused, window-state, window-content, and text-changed events with `notificationTimeout ≈ 80 ms`.
 - On each event: `findFocus(FOCUS_INPUT)`; treat the field as editable if `isEditable` **or** the class name contains `EditText` (WebView/legacy inputs lie about `isEditable`).
-- Show the bubble when an editable, **non-password** field is focused; hide it otherwise. Password/secure fields: **never** show, never inspect content.
+- Show the bubble when the keyboard is visible **and** an editable, **non-password** field is focused (ENC-125); dismissing the keyboard hides the bubble even if the field keeps focus. Password/secure fields: **never** show, never inspect content. An in-progress recording/processing bar is exempt from keyboard-driven hide — a keyboard dismissal while the bar is up defers and lands when the bar settles to Idle; a password-field hide is never deferred and cancels the recording immediately. Keyboard visibility is derived from the input-method window's presence in the same accessibility window stream (window type only — no content is ever read, and no new permissions are involved).
 - Recycle every `AccessibilityNodeInfo`. No node state survives an event.
 - The service reports field focus through a domain port; it contains no transcription or insertion logic of its own.
 
