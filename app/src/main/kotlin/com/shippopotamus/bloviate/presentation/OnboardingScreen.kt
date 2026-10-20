@@ -391,11 +391,11 @@ private fun MicrophoneStep(
 }
 
 /**
- * Step 5 — stay running (ENC-129): the battery-optimization exemption,
- * deep-linked to the system's battery list. The direct exemption
- * request intent is Play-policy-restricted, so the wizard sends the
- * user to the list to set Bloviate to Unrestricted — the same deep
- * link the Setup battery row uses.
+ * Step 5 — stay running (ENC-129): the battery-optimization exemption.
+ * The action raises the system's one-tap exemption dialog in place
+ * (ENC-139), falling back to the battery-optimization list on builds
+ * that strip the direct intent — the same action the Setup battery
+ * row uses.
  */
 @Composable
 private fun BatteryStep(
