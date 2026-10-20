@@ -21,16 +21,31 @@ object OpenRouterPayload {
     const val ENDPOINT_PATH: String = "https://openrouter.ai/api/v1/chat/completions"
 
     /**
-     * Style chain primary (ENC-96, Sean's decision 2026-10-19):
-     * Llama 3.3 70B Instruct — a non-reasoning instruct model, pinned
-     * to fast-silicon providers below. It supersedes ENC-84's
-     * Grok-primary (see [GROK_MODEL]): Grok's styled output was
-     * excellent, but its reasoning latency outran every dictation
-     * budget, and a restyle is a surface transformation that wants
-     * throughput, not deliberation. "Llama 3.3 on Groq dumb fast
-     * speeds" — Sean.
+     * Style chain primary (ENC-99, as revised by Sean 2026-10-19):
+     * Gemini 3.1 Flash-Lite — the ONLY model in the default chain;
+     * its failure lands on the local text (see [OpenRouterStyleClient]).
+     *
+     * ENC-99 as filed named x-ai/grok-4.1-fast here, but that slug is
+     * not a live OpenRouter model — verified twice at implementation:
+     * the full models list carries no grok-4.1 variant, and its
+     * endpoints route is a delisted remnant with zero servable
+     * endpoints. Shipping against it would have made every primary
+     * attempt 404 into the fallback — a primary that isn't doing the
+     * job, the exact failure this ticket exists to end. Sean's
+     * revision promoted the ticket's own fallback to the head and
+     * left the fallback slot DELIBERATELY EMPTY: openai/gpt-4.1-mini
+     * is the standing candidate from the research, and filling the
+     * slot is his call, not this ticket's.
+     *
+     * The pick's own numbers (ticket research, live-verified):
+     * $0.25 in / $1.50 out per 1M (≈$0.000575/call), TTFT
+     * 0.52–0.93s at 122–185 tok/s. Its known hazard is trained
+     * Gemini refusals / sanitisation on explicit content — the
+     * ticket's adversarial preservation battery is this primary's
+     * acceptance gate, and the ENC-82 guard still judges every
+     * output before it may land.
      */
-    const val PRIMARY_MODEL: String = "meta-llama/llama-3.3-70b-instruct"
+    const val PRIMARY_MODEL: String = "google/gemini-3.1-flash-lite"
 
     /**
      * The demoted primary (ENC-84 → ENC-96). This floating `~` alias
@@ -44,94 +59,107 @@ object OpenRouterPayload {
      */
     const val GROK_MODEL: String = "~x-ai/grok-latest"
 
-    /** Style chain fallback #1 (ENC-84): Haiku 5.5, then the local text. */
-    const val FALLBACK_MODEL: String = "anthropic/claude-haiku-5.5"
+    /**
+     * The demoted primary (ENC-96 → ENC-99). Llama 3.3 70B Instruct
+     * headed the chain for one build (ENC-96, "dumb fast speeds"):
+     * on device it answered in 713ms — with generic persona text
+     * containing nothing from the dictation it was sent (ENC-98).
+     * The fidelity guard caught it, but a primary that does not
+     * restyle is not a primary. Retained, unreferenced by the
+     * default chain, per the [GROK_MODEL] precedent.
+     */
+    const val LLAMA_MODEL: String = "meta-llama/llama-3.3-70b-instruct"
+
+    /**
+     * The demoted fallback (ENC-84 → ENC-99). Haiku 5.5 was the
+     * chain's second link from ENC-73 through ENC-97. It leaves the
+     * default chain on Sean's call (ENC-99): user-verified
+     * sanitisation / dropped words, and Anthropic's Haiku 5.5
+     * system card reports the highest over-refusal of any model in
+     * its audit — the two failure shapes the ENC-82 guard exists to
+     * catch are this model's documented habits. Retained,
+     * unreferenced by the default chain, per the [GROK_MODEL]
+     * precedent.
+     */
+    const val HAIKU_MODEL: String = "anthropic/claude-haiku-5.5"
     const val TEMPERATURE: Double = 0.3
     const val MAX_TOKENS: Int = 1024
 
     /**
-     * Reasoning control for style requests (ENC-94, reshaped by
-     * ENC-95). A restyle is a
-     * surface transformation — it needs no deliberation — but the
-     * primary's default effort is HIGH: Sean's 2026-10-19 tirade test
-     * burned 3,282 completion tokens in 41.1s, ~3.1k of them reasoning,
-     * for a ~180-token answer. OpenRouter's unified `reasoning` shape
-     * (docs/guides/best-practices/reasoning-tokens) offers
-     * `effort: "none"` ("disables reasoning entirely"), but the alias's
-     * current resolution, Grok 4.7, does not honor it: xAI's chat API
-     * for Grok 4.7/4.6 accepts `reasoning_effort` low/medium/high/
-     * xhigh only — reasoning cannot be disabled on 4.7 (contrast
-     * Grok 4.3, which accepts "none"). `exclude: true` is not a
-     * latency lever either: the model still reasons, the tokens are
-     * just withheld from the response. So the shipped setting is the
-     * strongest control 4.7 honors: effort LOW.
+     * Reasoning control for style requests (ENC-99; ENC-94/95 before
+     * it). A restyle is a surface transformation — it needs no
+     * deliberation — but the ENC-99 primary DOES reason by default:
+     * Gemini 3.1 Flash-Lite's models-API reasoning metadata
+     * (live-verified 2026-10-19) reports `default_enabled: true` at
+     * `default_effort: "minimal"`, with `supported_efforts` running
+     * high → none and `mandatory: false`. An explicit setting is
+     * therefore REQUIRED on every attempt, and the setting is the
+     * strongest one the model honors: effort "none" — reasoning
+     * disabled entirely, so the happy path's telemetry reads
+     * reasoningTokens=0 and no thought tokens bill against
+     * [MAX_TOKENS]. It rides BOTH payload shapes (full and the
+     * client's ENC-95 degraded retry): the degraded shape drops
+     * `stream_options`, never this block, because a retry that
+     * silently re-enabled the model's default reasoning would
+     * re-open the latency wound the whole saga was about.
      *
-     * ENC-95 (the regression that reshaped this): ENC-94 shipped
-     * `reasoning: {effort, max_tokens: 512}` on EVERY attempt, and on
-     * device both attempts began dying instantly, where the pre-ENC-94
-     * payload had completed the same calls. OpenRouter's docs are
-     * explicit that the unified parameter takes either `effort` or
-     * `max_tokens`, not both — and the fallback's arithmetic is worse:
-     * translated to Anthropic, an effort request derives
-     * `budget_tokens = max(min(max_tokens * 0.2, 128000), 1024)` =
-     * 1024 from this payload's `max_tokens: 1024`, while Anthropic
-     * requires max_tokens STRICTLY greater than the budget, so the
-     * fallback request was invalid by construction. The block is
-     * therefore effort-only, and it rides the PRIMARY only: Haiku has
-     * no reasoning blowout to leash, and its proven shape is the
-     * pre-ENC-94 one with no block at all. The client's degraded
-     * retry (ENC-95) is the structural guardrail that replaces the
-     * cap: if any provider still rejects the block, the same model is
-     * retried once with no optional parameters at all.
-     *
-     * ENC-96: the primary is a non-reasoning model now, so NO chain
-     * link currently passes this — [buildChatRequest] defaults to no
-     * block, and this constant remains as the leash value a future
-     * reasoning-model link opts into explicitly.
+     * The block stays effort-only, always: ENC-95's regression was
+     * ENC-94's `reasoning: {effort, max_tokens: 512}` — OpenRouter's
+     * unified parameter accepts either `effort` or `max_tokens`,
+     * not both, and the combination was rejected 400-class on
+     * device. [buildChatRequest] has no way to emit the pair.
      */
-    const val REASONING_EFFORT: String = "low"
+    const val REASONING_EFFORT: String = "none"
 
     /**
-     * Provider pin for the primary (ENC-80's mechanism, ENC-96's
-     * pool). Queried live from OpenRouter's endpoints + providers
-     * APIs at implementation time (2026-10-19): Llama 3.3 70B
-     * Instruct is served by many upstreams, and the order names the
-     * fast-silicon class first — Groq (LPU), SambaNova, Together,
-     * DeepInfra — all at 100% 30-day uptime in the live data, Groq
-     * the head per Sean's pick. Slugs are the providers API's
-     * canonical `slug` values, the same form ENC-80 pinned for the
-     * old pool. `allow_fallbacks` stays on (see [buildChatRequest]),
-     * so the wider pool still serves if all four are down; the order
-     * just keeps slow endpoints from silently becoming the default
-     * route.
+     * Provider pin for the primary (ENC-80's mechanism, ENC-99's
+     * pool): an `only` allow-list of Gemini 3.1 Flash-Lite's
+     * STANDARD endpoints, sorted by live latency ([PRIMARY_PROVIDER_SORT]).
+     * Queried from OpenRouter's endpoints API at implementation
+     * time (2026-10-19); every standard endpoint sat at 100% 30-day
+     * uptime:
+     *
+     * - `google-vertex/global`, `google-vertex/us`,
+     *   `google-vertex/eu`, `google-ai-studio` — the pool.
+     * - `google-vertex/global/flex` (status −5, 64% uptime) and
+     *   `google-ai-studio/flex` — the Flex service tier: batch-class
+     *   latency at half price, the opposite of a dictation profile.
+     *   They are excluded by ABSENCE: an allow-list positively
+     *   enumerates the pool, so Flex, priority, and any future
+     *   endpoint shape stay out by construction — where an `ignore`
+     *   list would admit anything it forgot to name.
+     * - The `/priority` tier endpoints are likewise unlisted: not
+     *   requested by the ticket, at +80% price.
+     *
+     * Slugs are the endpoints API's `tag` values, the same form
+     * ENC-80 pinned. `allow_fallbacks` stays on (see
+     * [buildChatRequest]): within the allow-list, the router may
+     * still fail over endpoint to endpoint.
      */
-    val PRIMARY_PROVIDER_ORDER: List<String> = listOf("groq", "sambanova", "together", "deepinfra")
+    val PRIMARY_PROVIDER_ONLY: List<String> =
+        listOf("google-vertex/global", "google-ai-studio", "google-vertex/us", "google-vertex/eu")
 
-    /**
-     * Provider pin for the fallback (ENC-80): prefer Anthropic's
-     * first-party endpoint (slug `anthropic`) and skip
-     * `claude-on-aws` ("Claude Platform on AWS") — the upstream behind
-     * the 2026-10-19 dogfood 499 + degraded-retry incident. Fallbacks
-     * stay enabled, so Bedrock/Vertex/Azure still serve if Anthropic's
-     * own endpoint is down.
-     */
-    val FALLBACK_PROVIDER_ORDER: List<String> = listOf("anthropic")
-    val FALLBACK_PROVIDER_IGNORE: List<String> = listOf("claude-on-aws")
+    /** Sort the allow-listed endpoints by live-measured latency (ENC-99). */
+    const val PRIMARY_PROVIDER_SORT: String = "latency"
 
     /**
      * Builds the chat-completions request body for [model] and [prompt].
-     * When [providerOrder] is given, a `provider` routing block is
-     * appended (ENC-80): try those provider slugs in order,
-     * `allow_fallbacks` on, minus any [providerIgnore] slugs. [stream]
+     * When any routing input is given, a `provider` routing block is
+     * appended (ENC-80): [providerOrder] tries those provider slugs
+     * in order, [providerOnly] allow-lists exactly those endpoints,
+     * [providerIgnore] skips named slugs, [providerSort] orders the
+     * pool by a live metric ("latency" / "throughput" / "price");
+     * `allow_fallbacks` is on whenever a block is emitted. [stream]
      * asks for the SSE form (ENC-81) and — unless [includeUsage] is
      * off — for usage in the final chunk
      * (`stream_options.include_usage`, ENC-94) so reasoning-token
      * counts reach telemetry. [reasoningEffort] adds the unified
-     * `reasoning` block (ENC-94/95, see [REASONING_EFFORT]); null —
-     * the default since ENC-96, whose primary does not reason —
-     * omits it. The client's degraded retry (ENC-95) passes
-     * `reasoningEffort = null, includeUsage = false`: a bare streamed
-     * request carrying nothing a provider could reject.
+     * `reasoning` block (effort only, never a token cap — ENC-95;
+     * see [REASONING_EFFORT]); null omits it. The client's degraded
+     * retry (ENC-95, reshaped by ENC-99) passes `includeUsage = false`
+     * with the link's reasoning effort intact: a streamed request
+     * carrying nothing optional but the one control that defines the
+     * link.
      */
     fun buildChatRequest(
         model: String,
@@ -141,6 +169,8 @@ object OpenRouterPayload {
         maxTokens: Int = MAX_TOKENS,
         providerOrder: List<String>? = null,
         providerIgnore: List<String> = emptyList(),
+        providerOnly: List<String> = emptyList(),
+        providerSort: String? = null,
         stream: Boolean = false,
         reasoningEffort: String? = null,
         includeUsage: Boolean = true,
@@ -151,7 +181,7 @@ object OpenRouterPayload {
             ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]" +
             (if (stream && includeUsage) ",\"stream\":true,\"stream_options\":{\"include_usage\":true}" else "") +
             (if (stream && !includeUsage) ",\"stream\":true" else "") +
-            providerJson(providerOrder, providerIgnore) +
+            providerJson(providerOrder, providerIgnore, providerOnly, providerSort) +
             // The unified `reasoning` block — effort only (ENC-95), or absent when unset.
             (if (reasoningEffort == null) "" else ",\"reasoning\":{\"effort\":" + escape(reasoningEffort) + "}") +
             "}"
@@ -263,9 +293,9 @@ object OpenRouterPayload {
     }
 
     /**
-     * Whether [status]/[body] means "this model id is not servable" and the
-     * fallback model is worth one try: a 404, or an error body naming the
-     * model as missing/unsupported with no usable endpoint.
+     * Whether [status]/[body] means "this model id is not servable",
+     * reported as its own reason class: a 404, or an error body naming
+     * the model as missing/unsupported with no usable endpoint.
      */
     fun isModelUnavailable(status: Int, body: String): Boolean {
         if (status == MODEL_NOT_FOUND_STATUS) return true
@@ -273,15 +303,30 @@ object OpenRouterPayload {
         return MODEL_UNAVAILABLE_MARKERS.any { marker -> marker in lowered }
     }
 
-    private fun providerJson(order: List<String>?, ignore: List<String>): String {
-        if (order == null) return ""
-        val orderJson = order.joinToString(separator = ",") { slug -> escape(slug) }
-        val ignoreJson = if (ignore.isEmpty()) {
-            ""
-        } else {
-            ",\"ignore\":[" + ignore.joinToString(separator = ",") { slug -> escape(slug) } + "]"
+    private fun providerJson(
+        order: List<String>?,
+        ignore: List<String>,
+        only: List<String>,
+        sort: String?,
+    ): String {
+        val parts = mutableListOf<String>()
+        if (order != null) {
+            parts += "\"order\":[" + order.joinToString(separator = ",") { slug -> escape(slug) } + "]"
         }
-        return ",\"provider\":{\"order\":[" + orderJson + "],\"allow_fallbacks\":true" + ignoreJson + "}"
+        if (ignore.isNotEmpty()) {
+            parts += "\"ignore\":[" + ignore.joinToString(separator = ",") { slug -> escape(slug) } + "]"
+        }
+        if (only.isNotEmpty()) {
+            parts += "\"only\":[" + only.joinToString(separator = ",") { slug -> escape(slug) } + "]"
+        }
+        if (sort != null) {
+            parts += "\"sort\":" + escape(sort)
+        }
+        if (parts.isEmpty()) return ""
+        // `allow_fallbacks` rides every emitted block, directly after
+        // the order list when there is one (the ENC-80 wire shape).
+        parts.add(if (order != null) 1 else 0, "\"allow_fallbacks\":true")
+        return ",\"provider\":{" + parts.joinToString(separator = ",") + "}"
     }
 
     private fun messageJson(message: PromptMessage): String =

@@ -34,22 +34,31 @@ import java.net.HttpURLConnection
  * short reason code; only coroutine cancellation is rethrown. Reasons
  * never carry response text.
  *
- * Model chain (ENC-96; ENC-84 before it): [OpenRouterPayload.PRIMARY_MODEL]
- * (Llama 3.3 70B Instruct, provider-pinned to the fast-silicon pool)
- * first; on ANY attempt failure, one retry on
- * [OpenRouterPayload.FALLBACK_MODEL] (Haiku 5.5); after that the
- * caller keeps the local text. Each attempt pins its OpenRouter
- * provider routing (ENC-80) and logs its `model=` / `provider=` so
- * dogfood telemetry shows which link actually answered.
+ * Model chain (ENC-99, as revised; the saga is in
+ * [OpenRouterPayload.PRIMARY_MODEL]'s doc): ONE model —
+ * [OpenRouterPayload.PRIMARY_MODEL] (Gemini 3.1 Flash-Lite),
+ * allow-listed to its standard endpoints and latency-sorted
+ * (ENC-80's routing mechanism). There is deliberately NO second
+ * model: ENC-99 as filed named a Grok primary that turned out not
+ * to be a live OpenRouter slug, Sean's revision promoted Gemini to
+ * the head, and the fallback slot stays empty pending his call on
+ * the standing candidate — it is not this client's to fill. A
+ * failed attempt therefore ends the chain: the outcome is
+ * [LlmStyleOutcome.FellBack] carrying the attempt's reason, and the
+ * caller keeps the local text — the pre-LLM behavior, which never
+ * blocks insertion. (The ENC-95 degraded retry below is the chain's
+ * only second chance, and it is the same model.) Each attempt logs
+ * its `model=` / `provider=` so dogfood telemetry shows which
+ * endpoint actually answered.
  *
  * Output guard (ENC-82): every attempt's cleaned output passes
  * [StyleOutputGuard] before it may become a result. A refusal-shaped
  * response is a failure (reason `refusal`), never inserted; a response
  * that silently drops protected content (names, numbers, the profanity
- * class) or most content words fails as `fidelity`. Both join every
- * other failure class — HTTP errors, transport failures, liveness
- * deaths, stream errors, empty responses — in retrying once on the
- * other model; the final fallback reports the last attempt's reason.
+ * class) or most content words fails as `fidelity`. Both are failure
+ * classes like any other — HTTP errors, transport failures, liveness
+ * deaths, stream errors, empty responses — and the reported fallback
+ * reason is the (single) attempt's.
  *
  * Streaming (ENC-81): the response is consumed as an SSE stream, but
  * insertion semantics do not change — chunks are assembled in memory,
@@ -65,66 +74,54 @@ import java.net.HttpURLConnection
  * from death kills healthy calls — the server completes them, the
  * client has already fallen back.
  *
- * Reasoning control (ENC-94): ENC-91 taught the client to tolerate
- * Grok's thinking; ENC-94 stopped the thinking from being the
- * problem while Grok headed the chain: its request carried
- * OpenRouter's unified `reasoning` control at effort low (see
- * [OpenRouterPayload.REASONING_EFFORT] for why "off" is not honored
- * by Grok 4.7 and "exclude" saves no time). The chain cap was
- * re-tuned to that constrained profile, and the usage chunk's
- * reasoning-token count is logged with each attempt's outcome, so a
- * future blowout is visible in telemetry, not just in OpenRouter's
- * dashboard. ENC-96 retired the control from the chain (below);
- * the machinery stays for any future reasoning-model link.
+ * Reasoning control (ENC-99; ENC-94/95 before it): the unified
+ * `reasoning` block rides EVERY attempt at effort "none" (see
+ * [OpenRouterPayload.REASONING_EFFORT]) — the ENC-99 primary
+ * reasons by default at minimal effort, so the off setting must be
+ * explicit or every restyle pays a thinking tax. The usage chunk's
+ * reasoning-token count is logged with each attempt's outcome
+ * (ENC-94), so a route that ignores the setting is visible in
+ * telemetry, not just in OpenRouter's dashboard: on the happy path
+ * it reads 0. The ENC-91 liveness machinery that tolerates a
+ * reasoning phase stays — a misbehaving route can still think out
+ * loud, and thinking is not death.
  *
- * Degraded retry (ENC-95): ENC-94's first shape shipped
- * `reasoning: {effort, max_tokens}` on every attempt — a combination
- * OpenRouter's unified parameter does not accept, with fallback
- * arithmetic that was invalid by construction (see the payload
- * docs) — and both attempts began dying instantly with 400-class
- * rejections. The block is now effort-only and primary-only, and
- * the client is structurally hardened against the whole class: when
- * an attempt fails with a 400-class rejection (an HTTP 4xx, or an
- * in-stream error chunk carrying a 4xx code), that same model is
- * retried ONCE with a degraded payload — no reasoning block, no
- * `stream_options`, nothing optional left to reject — before the
- * chain advances. Provider parameter pickiness can slow the chain
- * by one round trip; it can no longer zero the style pass. Failed
- * attempts log their HTTP status and the provider's error code/type,
- * so the next rejection is diagnosable from logcat alone.
+ * Degraded retry (ENC-95, reshaped by ENC-99): ENC-94's first shape
+ * shipped `reasoning: {effort, max_tokens}` on every attempt — a
+ * combination OpenRouter's unified parameter does not accept (see
+ * the payload docs) — and the attempts began dying instantly with
+ * 400-class rejections. The client is structurally hardened against
+ * the whole class: when an attempt fails with a 400-class rejection
+ * (an HTTP 4xx, or an in-stream error chunk carrying a 4xx code),
+ * the same model is retried ONCE with a degraded payload before
+ * the chain gives up. In the ENC-99 shape, degraded means
+ * `stream_options` (the one purely-optional block) is dropped,
+ * while the reasoning-off block — the control that defines the
+ * link — is kept: on Gemini it is a plain supported parameter,
+ * not the ENC-95 poison shape, and a retry that dropped it would
+ * silently re-enable the model's default reasoning. Provider
+ * parameter pickiness can slow the pass by one round trip; it can
+ * no longer zero it. Failed attempts log their HTTP status and the
+ * provider's error code/type, so the next rejection is diagnosable
+ * from logcat alone.
  *
- * Primary switch (ENC-96, Sean's decision 2026-10-19): the saga
- * ended in physics — even leashed to effort low, Grok 4.7 emitted
- * ~1,000 reasoning tokens and took ~19.3s end to end for a ~90-token
- * restyle on device, over any sane dictation budget, while its
- * output quality was never the problem. The chain head is now
- * Llama 3.3 70B Instruct — a non-reasoning instruct model —
- * provider-pinned to Groq and the fast-silicon pool behind it, so
- * the healthy path lands in about a second and the liveness budgets
- * and chain cap sit as pure headroom again. No attempt carries a
- * reasoning block; Grok's slug is retained as
- * [OpenRouterPayload.GROK_MODEL] for a future per-style engine
- * choice to revive deliberately. Everything else is inherited
- * unchanged: Haiku fallback with its ENC-80 ignore, the ENC-82
- * guard, ENC-95's degraded retry, and all budgets.
- *
- * Per-attempt budgets (ENC-97): until now the whole chain shared
+ * Per-attempt budgets (ENC-97): until then the whole chain shared
  * one absolute cap ([ABSOLUTE_CAP_MS] as was, 14s) — designed in
  * ENC-94 to bound ONE reasoning attempt's worst case. Sean's
- * ENC-96 retest exposed the structural flaw: the Llama primary
- * hallucinated (ENC-98), the guard failed it, and the Haiku
- * fallback then produced the faithful restyle server-side — but
+ * ENC-96 retest exposed the structural flaw: the primary
+ * hallucinated (ENC-98), the guard failed it, and the fallback
+ * model then produced the faithful restyle server-side — but
  * the chain deadline, partly spent by the primary, killed the
  * slow-but-healthy fallback stream mid-flight and the local text
  * landed. Budgets are now per attempt: each attempt (full and
  * degraded alike) runs under its own liveness rules plus its own
- * [ATTEMPT_ABSOLUTE_CAP_MS]; a per-attempt timeout advances the
- * chain carrying that attempt's `timeout` reason instead of
- * killing the chain, and telemetry names the attempt (model +
- * payload shape) and the reason on every death. The only
- * chain-wide bound left is [CHAIN_BACKSTOP_MS] — the four attempt
- * caps plus slack — which exists purely as pathology insurance
- * and can only fire if an attempt's own cap somehow fails to.
+ * [ATTEMPT_ABSOLUTE_CAP_MS]; a per-attempt timeout ends the chain
+ * carrying that attempt's `timeout` reason instead of being
+ * masked by a chain deadline, and telemetry names the attempt
+ * (model + payload shape) and the reason on every death. The only
+ * chain-wide bound left is [CHAIN_BACKSTOP_MS] — the attempt caps
+ * plus slack — which exists purely as pathology insurance and can
+ * only fire if an attempt's own cap somehow fails to.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -150,14 +147,24 @@ class OpenRouterStyleClient(
         val prompt = prompts.build(style = style, transcript = text)
         val startedMs = clock()
         return try {
-            // Pathology insurance only (ENC-97): the sum of the four
-            // per-attempt caps plus slack. The attempts' own caps and
-            // liveness budgets do the real judging (ENC-81/97); this
-            // bound can only fire if one of them somehow fails to.
+            // Pathology insurance only (ENC-97): the sum of the two
+            // per-attempt caps (full + degraded) plus slack. The
+            // attempts' own caps and liveness budgets do the real
+            // judging (ENC-81/97); this bound can only fire if one of
+            // them somehow fails to.
             withTimeout(CHAIN_BACKSTOP_MS) {
-                when (val first = attemptPrimary(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)) {
-                    is AttemptResult.Done -> first.outcome
-                    is AttemptResult.Retry -> retryOutcome(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)
+                when (
+                    val only = attemptPrimary(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)
+                ) {
+                    is AttemptResult.Done -> only.outcome
+                    // No second model exists to advance to (ENC-99):
+                    // the primary's failure IS the chain's report, and
+                    // the caller keeps the local text.
+                    is AttemptResult.Retry -> LlmStyleOutcome.FellBack(
+                        reason = only.reason,
+                        model = OpenRouterPayload.PRIMARY_MODEL,
+                        provider = only.provider,
+                    )
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
@@ -172,29 +179,6 @@ class OpenRouterStyleClient(
             LlmStyleOutcome.FellBack(reason = REASON_TRANSPORT_ERROR)
         }
     }
-
-    private suspend fun retryOutcome(
-        key: String,
-        prompt: StylePrompt,
-        sourceText: String,
-        startedMs: Long,
-    ): LlmStyleOutcome =
-        when (
-            val second = attempt(
-                key = key,
-                link = FALLBACK_LINK,
-                prompt = prompt,
-                sourceText = sourceText,
-                startedMs = startedMs,
-            )
-        ) {
-            is AttemptResult.Done -> second.outcome
-            is AttemptResult.Retry -> LlmStyleOutcome.FellBack(
-                reason = second.reason,
-                model = OpenRouterPayload.FALLBACK_MODEL,
-                provider = second.provider,
-            )
-        }
 
     private suspend fun attemptPrimary(
         key: String,
@@ -213,27 +197,30 @@ class OpenRouterStyleClient(
     /** One chain step: a model, its provider pin, and its reasoning profile. */
     private data class ChainLink(
         val model: String,
-        val providerOrder: List<String>?,
-        val providerIgnore: List<String>,
+        /** Allow-listed endpoint slugs for this link, or empty for no `only` pin. */
+        val providerOnly: List<String>,
+        /** Live-metric ordering for the link's endpoint pool, or null for none. */
+        val providerSort: String?,
         /**
          * The unified `reasoning` effort for this link, or null for
-         * no block. No current link sets one (ENC-96); the field is
-         * how a future reasoning-model link opts in (ENC-94/95).
+         * no block. The ENC-99 link sets "none" (its model reasons
+         * by default); the field is how a future link states its own
+         * profile (ENC-94/95 machinery).
          */
         val reasoningEffort: String?,
     )
 
     /**
-     * One chain step, streamed. Success is [AttemptResult.Done];
-     * EVERY failure class is [AttemptResult.Retry] — worth the other
-     * model's one try (ENC-82). The chain gives up only when the
-     * fallback attempt also fails, reporting its reason.
+     * The chain's one step, streamed. Success is [AttemptResult.Done];
+     * EVERY failure class is [AttemptResult.Retry] (ENC-82) — and
+     * with no second model in the chain (ENC-99), a retry verdict
+     * ends the pass: the caller keeps the local text.
      *
      * ENC-95 hardening: a 400-class rejection (the request itself was
      * refused — see [AttemptResult.Retry.clientError]) earns ONE
-     * degraded retry on the SAME model before the chain advances:
-     * whatever optional parameter the provider objected to, the
-     * degraded payload doesn't carry it.
+     * degraded retry on the SAME model before the chain gives up:
+     * the optional block the provider could object to does not ride
+     * the degraded payload.
      */
     private suspend fun attempt(
         key: String,
@@ -249,9 +236,11 @@ class OpenRouterStyleClient(
     }
 
     /**
-     * A single call against one model. [degraded] strips the payload
-     * to the bare streamed request (ENC-95): no reasoning block, no
-     * `stream_options` — nothing left for a provider to reject.
+     * A single call against the model. [degraded] strips the one
+     * purely-optional block (ENC-95, reshaped by ENC-99): no
+     * `stream_options`. The link's reasoning setting rides both
+     * shapes — it defines the link, and dropping it would silently
+     * re-enable the model's default reasoning on the retry.
      */
     private suspend fun attemptOnce(
         key: String,
@@ -266,10 +255,10 @@ class OpenRouterStyleClient(
             model = model,
             system = prompt.system,
             user = prompt.user,
-            providerOrder = link.providerOrder,
-            providerIgnore = link.providerIgnore,
+            providerOnly = link.providerOnly,
+            providerSort = link.providerSort,
             stream = true,
-            reasoningEffort = if (degraded) null else link.reasoningEffort,
+            reasoningEffort = link.reasoningEffort,
             includeUsage = !degraded,
         )
         val lines = Channel<String>(Channel.RENDEZVOUS)
@@ -286,8 +275,8 @@ class OpenRouterStyleClient(
         // The attempt's own absolute cap (ENC-97): the liveness budgets
         // inside judge silence; this bounds an attempt that never goes
         // silent yet never finishes (an endless keep-alive stream).
-        // Expiry advances the chain with this attempt's reason — it
-        // never kills the chain the way the old shared cap did.
+        // Expiry ends the chain with this attempt's own reason — it
+        // never masks the attempt the way the old shared cap did.
         val result = withTimeoutOrNull(ATTEMPT_ABSOLUTE_CAP_MS) {
             runStream(
                 call = call,
@@ -342,7 +331,7 @@ class OpenRouterStyleClient(
             throw cancellation
         } catch (exception: Exception) {
             // The producer died mid-stream (socket, IO): a provider
-            // failure like any other — worth the other model's try.
+            // failure like any other — a retry verdict.
             Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_TRANSPORT_ERROR detail=${exception.javaClass.simpleName}")
             return AttemptResult.Retry(reason = REASON_TRANSPORT_ERROR)
         }
@@ -553,7 +542,7 @@ class OpenRouterStyleClient(
         /**
          * A failed attempt. [clientError] marks a 400-class rejection
          * — the request itself was refused — which arms the same
-         * model's one degraded retry before the chain advances
+         * model's one degraded retry before the chain gives up
          * (ENC-95). Server failures, liveness deaths, and guard
          * verdicts are not request rejections and never set it.
          */
@@ -581,25 +570,21 @@ class OpenRouterStyleClient(
         const val TAG: String = "OpenRouterStyle"
 
         /**
-         * The chain, in order (ENC-96; ENC-84/95 before it). Neither
-         * link carries a reasoning block: the primary is a
-         * non-reasoning instruct model (ENC-96), and Haiku's proven
-         * shape is the pre-ENC-94 payload with no block — a block on
-         * the Anthropic route is one translation away from an invalid
-         * request (ENC-95). The effort machinery stays for a future
-         * reasoning-model link to opt into deliberately.
+         * The chain (ENC-99): exactly one link. Gemini 3.1
+         * Flash-Lite, allow-listed to its standard endpoints and
+         * latency-sorted, with reasoning explicitly off — its
+         * models-API metadata has reasoning ON by default, so the
+         * effort block is a load-bearing part of this link, not an
+         * optional extra (see [OpenRouterPayload]). There is no
+         * FALLBACK_LINK: the second slot is Sean's to fill (ENC-99
+         * revision), and until he does, a failed primary is the
+         * chain's end.
          */
         private val PRIMARY_LINK: ChainLink = ChainLink(
             model = OpenRouterPayload.PRIMARY_MODEL,
-            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
-            providerIgnore = emptyList(),
-            reasoningEffort = null,
-        )
-        private val FALLBACK_LINK: ChainLink = ChainLink(
-            model = OpenRouterPayload.FALLBACK_MODEL,
-            providerOrder = OpenRouterPayload.FALLBACK_PROVIDER_ORDER,
-            providerIgnore = OpenRouterPayload.FALLBACK_PROVIDER_IGNORE,
-            reasoningEffort = null,
+            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
+            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+            reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
         )
 
         /** HTTP statuses that mean "your request was refused" — the degraded retry's trigger (ENC-95). */
@@ -640,18 +625,18 @@ class OpenRouterStyleClient(
          * 20s clears the slowest legitimate attempt in the device
          * evidence (a long restyle streaming at a reasoning-era
          * route's pace) with room, while a pathological attempt still
-         * dies young enough for the chain to advance usefully.
+         * dies young enough for its failure to surface usefully.
          */
         const val ATTEMPT_ABSOLUTE_CAP_MS: Long = 20_000L
 
         /**
-         * The chain's only outer bound (ENC-97): the four possible
-         * attempts (primary/fallback × full/degraded) at
-         * [ATTEMPT_ABSOLUTE_CAP_MS] each, plus slack for the
-         * non-network work between them (guard, cleaning, channel
-         * hand-offs). Pure pathology insurance — every attempt's own
-         * cap fires first by construction, so this bound can only
-         * catch a failure of the caps themselves.
+         * The chain's only outer bound (ENC-97): the two possible
+         * attempts (the one link × full/degraded) at
+         * [ATTEMPT_ABSOLUTE_CAP_MS] each, plus generous slack for
+         * the non-network work between them (guard, cleaning,
+         * channel hand-offs). Pure pathology insurance — every
+         * attempt's own cap fires first by construction, so this
+         * bound can only catch a failure of the caps themselves.
          */
         const val CHAIN_BACKSTOP_MS: Long = 90_000L
 
