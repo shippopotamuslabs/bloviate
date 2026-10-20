@@ -6,7 +6,9 @@ import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
 import com.shippopotamus.bloviate.testing.FakeKeyboardVisibilityPort
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -115,6 +117,93 @@ class ObserveBubbleVisibilityUseCaseTest {
     @Test
     fun `dismiss while hidden returns no command`() {
         assertNull(useCase.onBubbleDismissed())
+    }
+
+    // --- Keyboard-hide hysteresis (ENC-127) ---------------------------------
+
+    @Test
+    fun `a keyboard flap inside the hysteresis window never hides the bubble`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            // Keyboard reported hidden, then visible again 300 ms later —
+            // a window-churn flap, well inside the sustain window.
+            fakeKeyboardVisibilityPort.publish(false)
+            advanceTimeBy(300)
+            fakeKeyboardVisibilityPort.publish(true)
+
+            advanceUntilIdle()
+            expectNoEvents()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a sustained keyboard hide hides the bubble once the hysteresis elapses`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            fakeKeyboardVisibilityPort.publish(false)
+            runCurrent()
+            // Still inside the sustain window: the hide has not landed.
+            advanceTimeBy(499)
+            expectNoEvents()
+
+            advanceTimeBy(1)
+            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a password focus hides immediately while a keyboard hide is still sustaining`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            // The keyboard hide starts sustaining; before it can land,
+            // a password field takes focus — that hide is NOT debounced
+            // (the mid-recording password cancel depends on it).
+            fakeKeyboardVisibilityPort.publish(false)
+            runCurrent()
+            fakeFieldFocusPort.publish(FieldFocusState.PasswordFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
+
+            // The sustained keyboard hide lands later and owes nothing more.
+            advanceUntilIdle()
+            expectNoEvents()
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // --- Window-presence reconciliation (ENC-127) ---------------------------
+
+    @Test
+    fun `a swallowed show re-shows on the next focus transition after the presence resync`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            // The service applied the show but no window materialized;
+            // its presence report resyncs the machine's belief.
+            assertNull(useCase.onWindowPresenceChanged(false))
+
+            // The next focus transition commands a fresh show instead of
+            // being swallowed by the stale belief.
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_B))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private companion object {

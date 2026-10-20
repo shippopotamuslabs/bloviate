@@ -33,6 +33,15 @@ import javax.inject.Inject
  * Duplicate or equivalent inputs produce no command, keeping show/hide
  * idempotent across rapid transitions.
  *
+ * Reconciliation (ENC-127): commands are one-shot, so if a command's
+ * effect does not materialize — a show swallowed because overlay
+ * permission was missing at apply time, say — the belief in
+ * [bubbleVisible] would otherwise stick and swallow every later show.
+ * The overlay service reports the window's actual presence back through
+ * [onWindowPresenceChanged] after applying each command, and the belief
+ * resyncs to reality; re-driving a show is left to the next transition
+ * so a persistently unshowable window cannot spin a command loop.
+ *
  * Stateful but single-threaded in practice: driven from the bubble
  * service's main-thread collection. Not a singleton — each service
  * instance owns one through the use case.
@@ -93,6 +102,31 @@ class BubbleVisibilityReducer @Inject constructor() {
     fun onBubbleDismissed(): BubbleVisibilityCommand? {
         dismissedThisFieldSession = true
         return hideIfVisible()
+    }
+
+    /**
+     * The overlay service reports the window's actual presence after
+     * applying a command (ENC-127 reconciliation). A mismatch resyncs
+     * the visibility belief to reality:
+     *
+     * - Window absent but believed visible: a show was swallowed. The
+     *   belief silently forgets "visible" so the next show-worthy
+     *   transition commands a fresh show; no command is returned here —
+     *   re-driving immediately could loop against a window that cannot
+     *   be shown at all (e.g. overlay permission still missing).
+     * - Window present but believed hidden and not desired: the one
+     *   divergence worth an active correction — [BubbleVisibilityCommand.HideBubble]
+     *   is returned for the service to apply.
+     */
+    fun onWindowPresenceChanged(present: Boolean): BubbleVisibilityCommand? {
+        if (present == bubbleVisible) return null
+        bubbleVisible = present
+        return if (present && !shouldBeVisible()) {
+            bubbleVisible = false
+            BubbleVisibilityCommand.HideBubble
+        } else {
+            null
+        }
     }
 
     /** Forget visibility, dismissal, and both signal states; called when the owning service is destroyed. */
