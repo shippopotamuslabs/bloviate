@@ -205,8 +205,9 @@ private fun SetupStatusPill(
  * the fix when one exists — the accessibility row always opens
  * Settings (that is also how a user turns it back off), the microphone
  * and overlay rows act only while their permission is missing, and the
- * battery row opens the battery-optimization list only while Bloviate
- * is not exempt. The detection row's sub-line doubles as the live
+ * battery row raises the system's one-tap exemption dialog (the
+ * settings list on builds without it) only while Bloviate is not
+ * exempt. The detection row's sub-line doubles as the live
  * focus readout while the watcher is on and connected: which kind of
  * field is focused, never its content or the app it belongs to. An
  * enabled-but-disconnected watcher (ENC-129 supervision) reads

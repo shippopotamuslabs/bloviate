@@ -1,16 +1,20 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import com.shippopotamus.bloviate.domain.evaluator.BatteryExemptionIntentPolicy
+import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
 import com.shippopotamus.bloviate.service.BubbleOverlayService
 import com.shippopotamus.whisper.WhisperEngine
 import dagger.hilt.android.AndroidEntryPoint
@@ -25,6 +29,11 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private companion object {
+        const val TAG: String = "MainActivity"
+    }
+
     @Inject
     lateinit var whisperEngine: WhisperEngine
 
@@ -83,14 +92,47 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The battery-optimization list (ENC-129). The direct exemption
-     * request (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) is
-     * Play-policy-restricted, so the user is sent to the list to set
-     * Bloviate to Unrestricted instead.
+     * The battery-exemption ask (ENC-139), walked per
+     * [BatteryExemptionIntentPolicy]: the one-tap system dialog first
+     * (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` with our package
+     * URI — the system asks in place and the user never leaves the
+     * app), falling back to the battery-optimization settings list
+     * when an OEM build strips the direct intent and starting it
+     * throws [ActivityNotFoundException]. The direct intent is
+     * Play-policy-restricted; the flag is recorded on ENC-139 for the
+     * launch checklist and deliberately does not degrade this
+     * sideload-first flow back to the list (ENC-129's behavior).
+     * Neither intent needs a manifest permission to fire.
      */
     private fun openBatteryOptimizationSettings() {
-        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        var attempt: BatteryExemptionAttempt? = BatteryExemptionIntentPolicy.firstAttempt()
+        while (attempt != null) {
+            try {
+                startActivity(attempt.intent())
+                return
+            } catch (notFound: ActivityNotFoundException) {
+                // A build that strips this attempt's intent is the
+                // signal to advance the plan — logged because the
+                // fallback being exercised is field evidence about
+                // the device, not an error in the flow.
+                Log.w(TAG, "Battery exemption attempt $attempt unavailable; advancing the plan", notFound)
+                attempt = BatteryExemptionIntentPolicy.attemptAfter(attempt)
+            }
+        }
     }
+
+    /** The platform intent a [BatteryExemptionAttempt] names. */
+    private fun BatteryExemptionAttempt.intent(): Intent =
+        when (this) {
+            BatteryExemptionAttempt.DIRECT_REQUEST ->
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName"),
+                )
+
+            BatteryExemptionAttempt.SETTINGS_LIST ->
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        }
 
     private fun startBubbleService() {
         // An explicit in-app start lifts a previous Stop in the
