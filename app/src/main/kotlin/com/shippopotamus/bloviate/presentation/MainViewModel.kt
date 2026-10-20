@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
-import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
@@ -16,7 +15,6 @@ import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCa
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveResidentPresenceUseCase
@@ -39,13 +37,14 @@ import javax.inject.Inject
 
 /**
  * Status-screen ViewModel. Depends on use cases only; maps the domain
- * [FieldFocusState] and [ModelState] into the presentation-only [MainUiState]
- * so no domain types reach composables.
+ * [ModelState] into the presentation-only [MainUiState] so no domain
+ * types reach composables. The live field-focus stream is not one of
+ * its inputs (ENC-142): the bubble pipeline consumes it directly, and
+ * Setup no longer renders a focus readout.
  */
 @Suppress("LongParameterList") // One injected use case per capability, per the ViewModel rules.
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    observeFieldFocus: ObserveFieldFocusUseCase,
     private val isFieldWatcherEnabled: IsFieldWatcherEnabledUseCase,
     private val isOverlayPermissionGranted: IsOverlayPermissionGrantedUseCase,
     observeBubbleServiceRunning: ObserveBubbleServiceRunningUseCase,
@@ -79,14 +78,12 @@ class MainViewModel @Inject constructor(
     }
 
     private val baseUiState: StateFlow<MainUiState> = combine(
-        observeFieldFocus(),
         watcherSignals,
         overlayPermissionGranted,
         observeBubbleServiceRunning(),
         micPermissionGranted,
-    ) { focusState, (watcherOn, watcherConnected), overlayGranted, bubbleRunning, micGranted ->
+    ) { (watcherOn, watcherConnected), overlayGranted, bubbleRunning, micGranted ->
         mapToUiState(
-            focusState = focusState,
             watcherEnabled = watcherOn,
             watcherConnected = watcherConnected,
             overlayPermissionGranted = overlayGranted,
@@ -97,7 +94,6 @@ class MainViewModel @Inject constructor(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
         initialValue = mapToUiState(
-            focusState = FieldFocusState.NoEditableFocus,
             watcherEnabled = isFieldWatcherEnabled(),
             watcherConnected = observeWatcherConnection().value,
             overlayPermissionGranted = isOverlayPermissionGranted(),
@@ -261,28 +257,19 @@ class MainViewModel @Inject constructor(
     }
 
     private fun mapToUiState(
-        focusState: FieldFocusState,
         watcherEnabled: Boolean,
         watcherConnected: Boolean,
         overlayPermissionGranted: Boolean,
         bubbleServiceRunning: Boolean,
         micPermissionGranted: Boolean,
-    ): MainUiState {
-        val (classification, packageName) = when (focusState) {
-            FieldFocusState.NoEditableFocus -> FocusClassification.NONE to null
-            is FieldFocusState.EditableFocus -> FocusClassification.EDITABLE to focusState.packageName
-            is FieldFocusState.PasswordFocus -> FocusClassification.PASSWORD to focusState.packageName
-        }
-        return MainUiState(
+    ): MainUiState =
+        MainUiState(
             watcherEnabled = watcherEnabled,
             watcherConnected = watcherConnected,
-            focusClassification = classification,
-            focusPackageName = packageName,
             overlayPermissionGranted = overlayPermissionGranted,
             bubbleServiceRunning = bubbleServiceRunning,
             micPermissionGranted = micPermissionGranted,
         )
-    }
 
     private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
         when (modelState) {
