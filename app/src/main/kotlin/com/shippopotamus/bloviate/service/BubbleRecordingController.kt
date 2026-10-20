@@ -81,6 +81,7 @@ class BubbleRecordingController(
     private val doneDisplayMs: Long = DONE_DISPLAY_MS,
     private val errorDisplayMs: Long = ERROR_DISPLAY_MS,
     private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
+    private val isEngineWarming: () -> Boolean = { false },
 ) {
 
     /** Rolling amplitude window rendered by the bar's waveform. */
@@ -131,8 +132,16 @@ class BubbleRecordingController(
      * the session can't. While the Error state is up and a failed send's
      * samples are retained, the tap is the §5.3 retry instead — it re-runs
      * the pipeline from the retained samples (one retry only).
+     *
+     * While the engine is warming (ENC-126) the tap is a clean no-op:
+     * no recording, no error, nothing queued — the bubble's warming
+     * indication is the affordance until the engine is ready.
      */
     fun onBubbleTap() {
+        if (isEngineWarming()) {
+            Log.d(TAG, "Bubble tapped while the speech engine is warming; ignoring")
+            return
+        }
         val retained = retainedSamples
         if (mutableBarState.value == RecordingBarState.Error && retained != null) {
             Log.d(TAG, "Retrying the failed send from the retained recording")

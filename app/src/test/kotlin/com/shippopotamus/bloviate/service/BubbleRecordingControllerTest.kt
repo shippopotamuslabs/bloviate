@@ -43,7 +43,10 @@ class BubbleRecordingControllerTest {
     private val fakeLlm = FakeLlmStylePort()
     private val fakeApiKeys = FakeApiKeyPort()
 
-    private fun createController(scope: CoroutineScope): BubbleRecordingController =
+    private fun createController(
+        scope: CoroutineScope,
+        isEngineWarming: () -> Boolean = { false },
+    ): BubbleRecordingController =
         BubbleRecordingController(
             session = fakeSession,
             transcriptionEngine = fakeEngine,
@@ -61,6 +64,7 @@ class BubbleRecordingControllerTest {
             workDispatcher = UnconfinedTestDispatcher(),
             doneDisplayMs = DONE_DISPLAY_MS,
             errorDisplayMs = ERROR_DISPLAY_MS,
+            isEngineWarming = isEngineWarming,
         )
 
     @Test
@@ -82,6 +86,32 @@ class BubbleRecordingControllerTest {
         // and enveloped (see WaveformHistory). 0.5 raw RMS is loud — it maps
         // to a full-scale target, and one attack frame (0.7) lands at 0.7.
         assertEquals(listOf(0.7f), controller.waveform.levels())
+    }
+
+    @Test
+    fun `tap while the engine is warming is a clean no-op`() = runTest {
+        val controller = createController(backgroundScope, isEngineWarming = { true })
+        runCurrent()
+
+        controller.onBubbleTap()
+
+        // No recording started, no error flashed, nothing queued.
+        assertEquals(0, fakeSession.startCallCount)
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+    }
+
+    @Test
+    fun `tap records once the engine finishes warming`() = runTest {
+        var warming = true
+        val controller = createController(backgroundScope, isEngineWarming = { warming })
+        runCurrent()
+
+        controller.onBubbleTap()
+        assertEquals(0, fakeSession.startCallCount)
+
+        warming = false
+        controller.onBubbleTap()
+        assertEquals(1, fakeSession.startCallCount)
     }
 
     @Test

@@ -26,6 +26,7 @@ import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
+import com.shippopotamus.bloviate.domain.evaluator.EngineWarmingEvaluator
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
@@ -53,6 +54,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -146,6 +148,18 @@ class BubbleOverlayService : Service() {
     private var recordingController: BubbleRecordingController? = null
     private val barStateSnapshot = mutableStateOf<RecordingBarState>(RecordingBarState.Idle)
 
+    // Engine warming (ENC-126): while the effective engine's model is
+    // present but the initial warm-up has not completed, the bubble
+    // renders its warming indication and taps are no-ops — an absent
+    // bubble in that window read as broken. Derived by
+    // EngineWarmingEvaluator from the active model state and the
+    // warm-up bookkeeping below; read by the composition and by the
+    // recording controller's tap gate.
+    private var activeModelState: ModelState = ModelState.Absent
+    private var engineWarmUpCompleted: Boolean = false
+    private var warmUpJob: Job? = null
+    private val warmingSnapshot = mutableStateOf(false)
+
     // The user's bubble look (ENC-68): collected for the service's whole
     // lifetime, so a Setup edit restyles the showing bubble on the next
     // emission — the window is never recreated for an appearance change.
@@ -204,6 +218,7 @@ class BubbleOverlayService : Service() {
             whisperStore = whisperModelStore,
             parakeetStore = parakeetModelStore,
             scope = serviceScope,
+            isEngineWarming = { warmingSnapshot.value },
         )
         recordingController = controller
         serviceScope.launch {
@@ -306,15 +321,46 @@ class BubbleOverlayService : Service() {
 
     private fun onModelStateChanged(state: ModelState) {
         Log.d(TAG, "Model state: $state")
-        if (state is ModelState.Ready && !transcriptionEngine.isWarm()) {
-            if (thermalAllowsModelLoad()) {
-                serviceScope.launch(Dispatchers.Default) {
-                    transcriptionEngine.warmUp()
-                }
-            } else {
-                Log.w(TAG, "Model ready but thermal status is severe; deferring engine warm-up")
-            }
+        activeModelState = state
+        refreshWarmingState()
+        maybeWarmUp()
+    }
+
+    /**
+     * Starts the engine warm-up when the model is Ready and the engine
+     * is not warm yet, unless the device is thermally severe
+     * (TRANSCRIPTION_RULES §4) — a deferred warm-up is retried on the
+     * next model-state change and on every bubble show. Idempotent:
+     * an in-flight warm-up is never doubled.
+     */
+    private fun maybeWarmUp() {
+        if (activeModelState !is ModelState.Ready || transcriptionEngine.isWarm()) {
+            refreshWarmingState()
+            return
         }
+        if (warmUpJob?.isActive == true) return
+        if (!thermalAllowsModelLoad()) {
+            Log.w(TAG, "Model ready but thermal status is severe; deferring engine warm-up")
+            return
+        }
+        warmUpJob = serviceScope.launch(Dispatchers.Default) {
+            transcriptionEngine.warmUp()
+            refreshWarmingState()
+        }
+    }
+
+    /**
+     * Recomputes the bubble's warming indication (ENC-126). Observing
+     * the engine already warm — however it got there — completes the
+     * initial warm-up for this service's lifetime, so a later
+     * memory-pressure release never brings the warming state back.
+     */
+    private fun refreshWarmingState() {
+        if (transcriptionEngine.isWarm()) {
+            engineWarmUpCompleted = true
+        }
+        warmingSnapshot.value =
+            EngineWarmingEvaluator.isWarming(activeModelState, engineWarmUpCompleted)
     }
 
     /** Never start a model load while the device is thermally severe (TRANSCRIPTION_RULES §4). */
@@ -338,6 +384,9 @@ class BubbleOverlayService : Service() {
             Log.w(TAG, "Show requested but overlay permission is not granted; no-op")
             return
         }
+        // A warm-up deferred (thermal) or not yet triggered retries here:
+        // the bubble is about to be on screen, warming indication and all.
+        maybeWarmUp()
         val controller = recordingController
         if (controller == null) {
             Log.w(TAG, "Show requested before the recording controller exists; no-op")
@@ -369,6 +418,7 @@ class BubbleOverlayService : Service() {
                     barState = barStateSnapshot.value,
                     waveformLevels = controller.waveform::levels,
                     inDismissZone = inDismissZone.value,
+                    engineWarming = warmingSnapshot.value,
                     appearance = appearanceSnapshot.value,
                     onTap = dragController::onTap,
                     onCancelRecording = controller::onCancelTap,
