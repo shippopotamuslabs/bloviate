@@ -207,11 +207,12 @@ private fun SetupStatusPill(
  * and overlay rows act only while their permission is missing, and the
  * battery row raises the system's one-tap exemption dialog (the
  * settings list on builds without it) only while Bloviate is not
- * exempt. The detection row's sub-line doubles as the live
- * focus readout while the watcher is on and connected: which kind of
- * field is focused, never its content or the app it belongs to. An
- * enabled-but-disconnected watcher (ENC-129 supervision) reads
- * "Not connected" here instead of a misleading On.
+ * exempt. The detection row's sub-line is a static description of
+ * what the watcher does (ENC-142 removed the live focus readout —
+ * Setup is only ever viewed from inside Bloviate, where no other
+ * app's field can be focused). An enabled-but-disconnected watcher
+ * (ENC-129 supervision) reads "Not connected" here instead of a
+ * misleading On, with the connection-lost sub-line to match.
  */
 @Composable
 private fun PermissionsCard(
@@ -226,11 +227,13 @@ private fun PermissionsCard(
         DashboardRow(
             label = stringResource(R.string.watcher_row_label),
             icon = Icons.Filled.Visibility,
-            sub = when {
-                !uiState.watcherEnabled -> stringResource(R.string.watcher_row_sub)
-                !uiState.watcherConnected -> stringResource(R.string.watcher_row_disconnected_sub)
-                else -> focusSub(uiState.focusClassification)
-            },
+            sub = stringResource(
+                if (uiState.watcherEnabled && !uiState.watcherConnected) {
+                    R.string.watcher_row_disconnected_sub
+                } else {
+                    R.string.watcher_row_sub
+                },
+            ),
             onClick = onOpenAccessibilitySettings,
             trailing = {
                 StatusChip(
@@ -307,16 +310,6 @@ private fun PermissionsCard(
         )
     }
 }
-
-@Composable
-private fun focusSub(classification: FocusClassification): String =
-    stringResource(
-        when (classification) {
-            FocusClassification.NONE -> R.string.focus_sub_none
-            FocusClassification.EDITABLE -> R.string.focus_sub_editable
-            FocusClassification.PASSWORD -> R.string.focus_sub_password
-        },
-    )
 
 /**
  * The dictation card (ENC-75): the bubble is a switch — the control
@@ -947,7 +940,6 @@ private fun SetupScreenPopulatedPreview() {
             uiState = MainUiState(
                 watcherEnabled = true,
                 watcherConnected = true,
-                focusClassification = FocusClassification.EDITABLE,
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
                 batteryExempt = true,

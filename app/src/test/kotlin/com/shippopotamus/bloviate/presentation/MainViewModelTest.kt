@@ -5,7 +5,6 @@ import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
 import com.shippopotamus.bloviate.domain.model.BubbleTint
-import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.ResidentPresenceState
@@ -18,7 +17,6 @@ import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCa
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveResidentPresenceUseCase
@@ -33,7 +31,6 @@ import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
-import com.shippopotamus.bloviate.testing.FakeFieldFocusPort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
@@ -57,7 +54,6 @@ class MainViewModelTest {
     @RegisterExtension
     val mainDispatcherExtension = MainDispatcherExtension()
 
-    private val fakeFieldFocusPort = FakeFieldFocusPort()
     private val fakeWatcherAccessPort = FakeWatcherAccessPort()
     private val fakeBubbleOverlayAccessPort = FakeBubbleOverlayAccessPort()
     private val fakeBubbleServiceStatePort = FakeBubbleServiceStatePort()
@@ -74,7 +70,6 @@ class MainViewModelTest {
     @BeforeEach
     fun setup() {
         viewModel = MainViewModel(
-            observeFieldFocus = ObserveFieldFocusUseCase(fakeFieldFocusPort),
             isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
             isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
             observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
@@ -98,43 +93,11 @@ class MainViewModelTest {
     }
 
     @Test
-    fun `initial state has no focus and reflects disabled watcher`() =
+    fun `initial state reflects disabled watcher`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
                 val initial = awaitItem()
                 assertFalse(initial.watcherEnabled)
-                assertEquals(FocusClassification.NONE, initial.focusClassification)
-                assertNull(initial.focusPackageName)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `editable focus maps to editable classification with package name`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            viewModel.uiState.test {
-                awaitItem()
-
-                fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_NAME))
-
-                val updated = awaitItem()
-                assertEquals(FocusClassification.EDITABLE, updated.focusClassification)
-                assertEquals(PACKAGE_NAME, updated.focusPackageName)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `password focus maps to password classification with package name`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            viewModel.uiState.test {
-                awaitItem()
-
-                fakeFieldFocusPort.publish(FieldFocusState.PasswordFocus(PACKAGE_NAME))
-
-                val updated = awaitItem()
-                assertEquals(FocusClassification.PASSWORD, updated.focusClassification)
-                assertEquals(PACKAGE_NAME, updated.focusPackageName)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -544,8 +507,4 @@ class MainViewModelTest {
             advanceUntilIdle()
             assertFalse(fakeResidentPresencePort.state.value.userStopped)
         }
-
-    private companion object {
-        const val PACKAGE_NAME = "com.example.host"
-    }
 }
