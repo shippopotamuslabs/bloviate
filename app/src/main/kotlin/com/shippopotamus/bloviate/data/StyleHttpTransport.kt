@@ -93,14 +93,15 @@ class HttpURLConnectionStyleTransport(
         const val CONNECT_TIMEOUT_MS: Int = 1_500
 
         /**
-         * Socket backstop for the streamed read (ENC-81). Liveness —
-         * first-token and inter-token budgets — is judged by the client,
-         * so this must sit ABOVE the client's inter-token gap budget
-         * (never bind first, the ENC-83 lesson) and BELOW its absolute
-         * cap. It exists to bound the abandoned IO thread after the
-         * client has already given up on a stalled stream.
+         * Socket backstop for the streamed read (ENC-81, re-based
+         * ENC-91). Liveness — first-token, reasoning-phase, and
+         * inter-token budgets — is judged by the client, so this must
+         * sit ABOVE the client's largest phase budget (never bind
+         * first, the ENC-83 lesson) and BELOW its absolute cap. It
+         * exists to bound the abandoned IO thread after the client has
+         * already given up on a stalled stream.
          */
-        const val READ_TIMEOUT_MS: Int = 5_000
+        const val READ_TIMEOUT_MS: Int = 10_000
 
         val SUCCESS_RANGE: IntRange = HttpURLConnection.HTTP_OK..HttpURLConnection.HTTP_MULT_CHOICE - 1
     }

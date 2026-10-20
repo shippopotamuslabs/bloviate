@@ -53,11 +53,15 @@ import java.net.HttpURLConnection
  * insertion semantics do not change — chunks are assembled in memory,
  * cleaned, and only the complete result is ever returned; any failure
  * yields the complete local text. A fragment can never reach the
- * field. Timeouts judge LIVENESS, not total time: a first-token budget
- * and an inter-token gap budget (any line — token or keep-alive —
- * counts as a sign of life), plus a generous absolute cap as backstop.
- * A healthy stream may therefore run far past the old 4s total cap on
- * long dictations, while a dead route fails in ~2s.
+ * field. Timeouts judge LIVENESS, not total time: a first-token budget,
+ * a reasoning-phase budget, and an inter-token gap budget (any line —
+ * token, reasoning, or keep-alive — counts as a sign of life), plus a
+ * generous absolute cap as backstop. A healthy stream may therefore
+ * run far past the old 4s total cap on long dictations. ENC-91
+ * re-based the pre-content budgets for a reasoning primary: Grok
+ * thinks before it speaks, and a budget that cannot tell thinking
+ * from death kills healthy calls — the server completes them, the
+ * client has already fallen back.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -215,17 +219,32 @@ class OpenRouterStyleClient(
     }
 
     /**
-     * Assembles one stream from its lines, judging liveness as it goes:
-     * the wait for the first content token gets [FIRST_TOKEN_TIMEOUT_MS],
-     * every later wait gets [TOKEN_GAP_TIMEOUT_MS]; any received line
-     * (token or keep-alive) restarts the current window.
+     * Assembles one stream from its lines, judging liveness as it goes.
+     * The wait budget is phase-aware (ENC-91): before the first line,
+     * [FIRST_TOKEN_TIMEOUT_MS] covers connection setup plus a reasoning
+     * model's time-to-first-token; once reasoning deltas have been seen
+     * the model is demonstrably thinking, and pre-content waits get
+     * [REASONING_GAP_TIMEOUT_MS] — a reasoning pause is not a stall.
+     * Only once content flows does the tight [TOKEN_GAP_TIMEOUT_MS]
+     * apply. Any received line (token, reasoning, or keep-alive)
+     * restarts the current window.
+     *
+     * A line that is not SSE at all can still be the whole answer: a
+     * cached replay or a non-streaming gateway may deliver one plain
+     * JSON completion body on the 200, and its message content is
+     * salvaged whole instead of being dropped as an empty stream.
      */
     private suspend fun consumeLines(lines: Channel<String>): StreamAssembly {
         val content = StringBuilder()
         var provider: String? = null
         var sawContent = false
+        var sawReasoning = false
         while (true) {
-            val budget = if (sawContent) TOKEN_GAP_TIMEOUT_MS else FIRST_TOKEN_TIMEOUT_MS
+            val budget = when {
+                sawContent -> TOKEN_GAP_TIMEOUT_MS
+                sawReasoning -> REASONING_GAP_TIMEOUT_MS
+                else -> FIRST_TOKEN_TIMEOUT_MS
+            }
             val received = withTimeoutOrNull(budget) { lines.receiveCatching() }
                 ?: throw LivenessException(
                     if (sawContent) REASON_STREAM_STALL else REASON_FIRST_TOKEN_TIMEOUT,
@@ -234,13 +253,24 @@ class OpenRouterStyleClient(
                 return StreamAssembly(content = content.toString(), provider = provider)
             }
             val line = received.getOrThrow()
-            val data = sseData(line) ?: continue
+            val data = sseData(line)
+            if (data == null) {
+                val wholeBody = OpenRouterPayload.extractMessageContent(line)
+                if (wholeBody != null) {
+                    provider = OpenRouterPayload.extractProvider(line) ?: provider
+                    return StreamAssembly(content = wholeBody, provider = provider, doneReceived = true)
+                }
+                continue
+            }
             if (data == DONE_MARKER) {
                 return StreamAssembly(content = content.toString(), provider = provider, doneReceived = true)
             }
             provider = OpenRouterPayload.extractProvider(data) ?: provider
             if (OpenRouterPayload.isStreamError(data)) {
                 return StreamAssembly(content = content.toString(), provider = provider, errorData = data)
+            }
+            if (OpenRouterPayload.extractReasoningDelta(data) != null) {
+                sawReasoning = true
             }
             val delta = OpenRouterPayload.extractStreamDelta(data)
             if (delta != null) {
@@ -349,8 +379,24 @@ class OpenRouterStyleClient(
     internal companion object {
         const val TAG: String = "OpenRouterStyle"
 
-        /** Time a stream may stay silent before its first content token (ENC-81). */
-        const val FIRST_TOKEN_TIMEOUT_MS: Long = 2_000L
+        /**
+         * Time a stream may stay silent before its first line of any
+         * kind (ENC-81, re-based ENC-91). The 2s Haiku-era value fired
+         * during Grok's reasoning phase — connection setup plus a
+         * reasoning model's time-to-first-token routinely exceeds it
+         * on a phone — so the healthy attempt was declared dead while
+         * the server completed it. 6s still fails a truly dead route
+         * fast against the 20s chain cap.
+         */
+        const val FIRST_TOKEN_TIMEOUT_MS: Long = 6_000L
+
+        /**
+         * Time a stream may pause mid-reasoning, before any content,
+         * once reasoning deltas have shown the model is thinking
+         * (ENC-91). Reasoning arrives in bursts with multi-second
+         * pauses; a pause is thought, not a stall.
+         */
+        const val REASONING_GAP_TIMEOUT_MS: Long = 6_000L
 
         /** Time a stream may go silent between tokens before it is declared dead (ENC-81). */
         const val TOKEN_GAP_TIMEOUT_MS: Long = 2_000L
