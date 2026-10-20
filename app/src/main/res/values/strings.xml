@@ -16,12 +16,9 @@
     <string name="setup_status_model">Download a voice model</string>
     <string name="setup_status_bubble">Turn the bubble on</string>
     <string name="watcher_row_label">Text-field detection</string>
-    <string name="watcher_row_sub">Spots text fields</string>
+    <string name="watcher_row_sub">Allows Bloviate to see text field focus</string>
     <string name="watcher_row_disconnected_sub">Connection lost · tap to fix in Settings</string>
     <string name="chip_not_connected">Not connected</string>
-    <string name="focus_sub_none">No text field right now</string>
-    <string name="focus_sub_editable">You’re in a text field</string>
-    <string name="focus_sub_password">Password field — bubble stays hidden</string>
     <string name="chip_on">On</string>
     <string name="chip_off">Off</string>
     <string name="mic_row_label">Microphone</string>

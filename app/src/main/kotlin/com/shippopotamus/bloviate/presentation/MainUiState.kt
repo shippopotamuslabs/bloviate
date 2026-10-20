@@ -5,13 +5,6 @@ import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
 import com.shippopotamus.bloviate.domain.model.BubbleTint
 
-/** Presentation-only classification of the focused field, mapped from the domain state. */
-enum class FocusClassification {
-    NONE,
-    EDITABLE,
-    PASSWORD,
-}
-
 /** Presentation-only mapping of the user's selected dictation engine. */
 enum class DictationEngineUi {
     WHISPER,
@@ -194,18 +187,18 @@ internal fun BubbleAppearance.toUi(): BubbleAppearanceUi =
     )
 
 /**
- * Home/status screen state: watcher enablement, the live field-focus
- * classification, bubble overlay permission + service state, microphone
- * permission, and both engines' model lifecycles + the engine selection.
- * Carries no domain types and never any field content.
+ * Home/status screen state: watcher enablement + connection, bubble
+ * overlay permission + service state, microphone permission, and both
+ * engines' model lifecycles + the engine selection. Carries no domain
+ * types and never any field content. (The live field-focus state is
+ * deliberately absent, ENC-142: the bubble pipeline consumes it
+ * directly; Setup has no honest use for it.)
  */
 data class MainUiState(
     val watcherEnabled: Boolean = false,
 
     /** Whether the watcher service is connected right now (ENC-129 supervision). */
     val watcherConnected: Boolean = false,
-    val focusClassification: FocusClassification = FocusClassification.NONE,
-    val focusPackageName: String? = null,
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
 
