@@ -119,64 +119,67 @@ class ObserveBubbleVisibilityUseCaseTest {
         assertNull(useCase.onBubbleDismissed())
     }
 
-    // --- Keyboard-hide hysteresis (ENC-127) ---------------------------------
+    // --- Keyboard hides are immediate again (ENC-128) -----------------------
+    //
+    // ENC-127 sustained a keyboard `false` for 500 ms before forwarding
+    // it, insuring against a flapping-keyboard class that was inferred
+    // but never observed. ENC-128's event-starvation model explains the
+    // field reports without a flap, and the watcher's watchdog
+    // re-derivation owns convergence in both directions — so the sustain
+    // was removed with ENC-128. These pins record the new contract: a
+    // keyboard hide lands at once, and a transient mis-reading heals by
+    // re-showing on the next (watchdog-supplied) transition, not by
+    // delaying every real dismissal.
 
     @Test
-    fun `a keyboard flap inside the hysteresis window never hides the bubble`() = runTest {
+    fun `a keyboard hide lands immediately, with no sustain`() = runTest {
         fakeKeyboardVisibilityPort.publish(true)
         useCase().test {
             fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
             assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
 
-            // Keyboard reported hidden, then visible again 300 ms later —
-            // a window-churn flap, well inside the sustain window.
             fakeKeyboardVisibilityPort.publish(false)
-            advanceTimeBy(300)
+            runCurrent()
+            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a transient keyboard mis-reading self-corrects on the next transition`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            // A momentary false reading hides at once — and the
+            // re-derived true that follows (in the field, the watchdog's
+            // next poll) restores the bubble just as promptly. The pair
+            // converges; nothing sticks in either direction.
+            fakeKeyboardVisibilityPort.publish(false)
+            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
             fakeKeyboardVisibilityPort.publish(true)
-
-            advanceUntilIdle()
-            expectNoEvents()
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
 
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `a sustained keyboard hide hides the bubble once the hysteresis elapses`() = runTest {
+    fun `a password focus hides immediately, in the same beat as any keyboard transition`() = runTest {
         fakeKeyboardVisibilityPort.publish(true)
         useCase().test {
             fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
             assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
 
-            fakeKeyboardVisibilityPort.publish(false)
-            runCurrent()
-            // Still inside the sustain window: the hide has not landed.
-            advanceTimeBy(499)
-            expectNoEvents()
-
-            advanceTimeBy(1)
-            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
-
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `a password focus hides immediately while a keyboard hide is still sustaining`() = runTest {
-        fakeKeyboardVisibilityPort.publish(true)
-        useCase().test {
-            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
-            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
-
-            // The keyboard hide starts sustaining; before it can land,
-            // a password field takes focus — that hide is NOT debounced
-            // (the mid-recording password cancel depends on it).
-            fakeKeyboardVisibilityPort.publish(false)
-            runCurrent()
+            // The password hide was never debounced and never will be —
+            // the mid-recording password cancel depends on it landing
+            // with no time advance at all.
             fakeFieldFocusPort.publish(FieldFocusState.PasswordFocus(PACKAGE_A))
+            runCurrent()
             assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
 
-            // The sustained keyboard hide lands later and owes nothing more.
             advanceUntilIdle()
             expectNoEvents()
 
@@ -201,6 +204,69 @@ class ObserveBubbleVisibilityUseCaseTest {
             // being swallowed by the stale belief.
             fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_B))
             assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    // --- Event-starved keyboard derivation (ENC-128) ------------------------
+
+    @Test
+    fun `an event-starved sequence converges to show when the watchdog re-derives the keyboard`() = runTest {
+        useCase().test {
+            // Notification entry: the field is restored already-focused
+            // while the watcher's last derivation read keyboard = false —
+            // the IME window had not joined the window list at any event.
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            expectNoEvents()
+
+            // The tap lands; its re-derivation still enumerates a window
+            // list without the IME, and no further event ever fires. Time
+            // passes: without the watchdog this state is terminal.
+            advanceTimeBy(2_000)
+            expectNoEvents()
+
+            // A watchdog poll re-derives from the live window list, where
+            // the IME window has silently joined: the keyboard transition
+            // publishes, and the machine converges to a show.
+            fakeKeyboardVisibilityPort.publish(true)
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the notification entry path shows once the silently joined keyboard is re-derived`() = runTest {
+        useCase().test {
+            // Service (re)connect on the entry path: initial derivation
+            // publishes keyboard = false before the field is focused.
+            fakeKeyboardVisibilityPort.publish(false)
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            expectNoEvents()
+
+            // Entry completes; the in-app conversation switch in Sean's
+            // repro manufactured the events that healed this — the
+            // watchdog's re-derivation now supplies the same transition
+            // without the user having to navigate anywhere.
+            fakeKeyboardVisibilityPort.publish(true)
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a converged state stays silent, with no watchdog-shaped activity in the pipeline`() = runTest {
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+
+            // Converged (bubble shown, keyboard up): the watchdog never
+            // arms here, and time passing produces nothing.
+            advanceTimeBy(5_000)
+            expectNoEvents()
 
             cancelAndIgnoreRemainingEvents()
         }

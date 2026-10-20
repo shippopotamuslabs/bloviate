@@ -3,11 +3,15 @@ package com.shippopotamus.bloviate.service
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.shippopotamus.bloviate.domain.evaluator.FieldFocusEvaluator
+import com.shippopotamus.bloviate.domain.evaluator.KeyboardWatchdogPolicy
 import com.shippopotamus.bloviate.domain.evaluator.TextSplicer
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
@@ -29,6 +33,16 @@ import javax.inject.Inject
  * (clicks, caret moves), so a tap inside an already-focused field after
  * a transient window-churn flap reconciles a stale keyboard reading
  * instead of leaving it stuck.
+ *
+ * Events alone are not always enough (ENC-128): entering an app by
+ * tapping a notification can leave the derivation event-starved — the
+ * IME window joins the window list after the entry sequence's last
+ * event, and nothing ever re-derives. While the state is starved
+ * (editable, non-password focus held; keyboard reading hidden) a
+ * bounded watchdog re-derives on a timer per [KeyboardWatchdogPolicy]
+ * and stops the moment the state converges. The transition log records
+ * the window-type census and whether the reading came from an event or
+ * a watchdog poll, so the two paths are distinguishable in logcat.
  *
  * Privacy contract: the watcher path reads only the host package name and
  * structural flags. Field text and content descriptions are never read,
@@ -61,6 +75,14 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private var lastPublishedState: FieldFocusState = FieldFocusState.NoEditableFocus
     private var lastKeyboardVisible: Boolean = false
 
+    // Keyboard-derivation watchdog state (ENC-128). Main-looper handler:
+    // accessibility callbacks arrive on the main thread, and `windows`
+    // is read there everywhere else in this service.
+    private val watchdogHandler = Handler(Looper.getMainLooper())
+    private var watchdogArmedAtMs: Long? = null
+    private var watchdogPolls: Int = 0
+    private val watchdogTick = Runnable { onWatchdogTick() }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         insertionBridge.register(this)
@@ -77,11 +99,13 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
 
     override fun onUnbind(intent: Intent?): Boolean {
         insertionBridge.unregister(this)
+        stopKeyboardWatchdog()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         insertionBridge.unregister(this)
+        stopKeyboardWatchdog()
         publish(FieldFocusState.NoEditableFocus)
         keyboardVisibilityPort.publish(false)
         super.onDestroy()
@@ -167,6 +191,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
             lastPublishedState = state
             Log.d(TAG, "focus state -> ${state.describeForLog()}")
         }
+        refreshKeyboardWatchdog()
     }
 
     /**
@@ -176,15 +201,83 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
      * the window-type census that produced the reading is logged with it
      * (types only, no content), so a host app whose window arrangement
      * makes this derivation flap (ENC-127) is diagnosable from logcat.
+     * [fromWatchdog] marks readings produced by the ENC-128 watchdog
+     * rather than an event, so logcat shows which path converged.
      */
-    private fun publishKeyboardVisibility() {
+    private fun publishKeyboardVisibility(fromWatchdog: Boolean = false) {
         val currentWindows = windows
         val visible = currentWindows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
         keyboardVisibilityPort.publish(visible)
         if (visible != lastKeyboardVisible) {
             lastKeyboardVisible = visible
-            Log.d(TAG, "keyboard visible -> $visible (window types: ${currentWindows.typeCensus()})")
+            val origin = if (fromWatchdog) " via watchdog poll $watchdogPolls" else ""
+            Log.d(TAG, "keyboard visible -> $visible$origin (window types: ${currentWindows.typeCensus()})")
         }
+        refreshKeyboardWatchdog()
+    }
+
+    /**
+     * Arm or disarm the ENC-128 watchdog from the latest signals.
+     * Called after every signal publication; arming is idempotent and
+     * disarming removes any pending poll.
+     */
+    private fun refreshKeyboardWatchdog() {
+        val armedAt = watchdogArmedAtMs
+        if (armedAt == null) {
+            if (KeyboardWatchdogPolicy.isStarved(lastPublishedState, lastKeyboardVisible)) {
+                watchdogArmedAtMs = SystemClock.elapsedRealtime()
+                watchdogPolls = 0
+                Log.d(
+                    TAG,
+                    "keyboard watchdog armed: editable focus held, keyboard reads hidden " +
+                        "(window types: ${windows.typeCensus()})",
+                )
+                watchdogHandler.postDelayed(watchdogTick, KeyboardWatchdogPolicy.POLL_INTERVAL_MS)
+            }
+        } else {
+            val reason = KeyboardWatchdogPolicy.stopReason(
+                focusState = lastPublishedState,
+                keyboardVisible = lastKeyboardVisible,
+                armedForMs = SystemClock.elapsedRealtime() - armedAt,
+            )
+            if (reason != null) disarmKeyboardWatchdog(reason)
+        }
+    }
+
+    /**
+     * One watchdog poll: re-derive the keyboard signal from the live
+     * window list (the IME window may have joined silently since the
+     * last event), then keep polling or stop per [KeyboardWatchdogPolicy].
+     */
+    private fun onWatchdogTick() {
+        val armedAt = watchdogArmedAtMs ?: return
+        watchdogPolls += 1
+        publishKeyboardVisibility(fromWatchdog = true)
+        // The publication above refreshes the watchdog; convergence
+        // there already disarmed it — nothing left to schedule.
+        if (watchdogArmedAtMs == null) return
+        val reason = KeyboardWatchdogPolicy.stopReason(
+            focusState = lastPublishedState,
+            keyboardVisible = lastKeyboardVisible,
+            armedForMs = SystemClock.elapsedRealtime() - armedAt,
+        )
+        if (reason == null) {
+            watchdogHandler.postDelayed(watchdogTick, KeyboardWatchdogPolicy.POLL_INTERVAL_MS)
+        } else {
+            disarmKeyboardWatchdog(reason)
+        }
+    }
+
+    private fun disarmKeyboardWatchdog(reason: KeyboardWatchdogPolicy.StopReason) {
+        watchdogHandler.removeCallbacks(watchdogTick)
+        watchdogArmedAtMs = null
+        Log.d(TAG, "keyboard watchdog stopped: $reason after $watchdogPolls polls")
+    }
+
+    /** Stop polling without a policy reason (service unbinding/destroying). */
+    private fun stopKeyboardWatchdog() {
+        watchdogHandler.removeCallbacks(watchdogTick)
+        watchdogArmedAtMs = null
     }
 
     /** Counts by window type, e.g. "APPLICATION x2, INPUT_METHOD x1" — types only, never content. */
