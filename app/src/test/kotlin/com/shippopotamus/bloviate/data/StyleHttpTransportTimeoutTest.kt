@@ -14,7 +14,10 @@ import org.junit.jupiter.api.Test
  * redesign: the socket timeout is a backstop for an abandoned read and
  * must never bind before the client's own gap budget — and it must
  * stay below the absolute cap, or an abandoned stream could outlive
- * the call that gave up on it.
+ * the call that gave up on it. ENC-97 made the absolute cap
+ * per-attempt (the 14s chain-wide shape starved slow-but-healthy
+ * fallbacks); the pins below follow the cap to its new home and add
+ * the backstop arithmetic.
  */
 class StyleHttpTransportTimeoutTest {
 
@@ -47,22 +50,36 @@ class StyleHttpTransportTimeoutTest {
     @Test
     fun `the socket read timeout stays below the client absolute cap`() {
         assertTrue(
-            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS < OpenRouterStyleClient.ABSOLUTE_CAP_MS,
+            HttpURLConnectionStyleTransport.READ_TIMEOUT_MS < OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS,
             "read timeout ${HttpURLConnectionStyleTransport.READ_TIMEOUT_MS}ms would outlive " +
-                "the client's ${OpenRouterStyleClient.ABSOLUTE_CAP_MS}ms absolute cap",
+                "the client's ${OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS}ms per-attempt cap",
         )
     }
 
     @Test
-    fun `the chain cap fits two full first-token budgets with headroom`() {
-        // ENC-94: the cap is sized from the constrained profile, and
-        // the slowest legitimate chain is two full liveness deaths —
-        // the cap must clear both, or the fallback's own death gets
-        // reported as a chain timeout instead of its real reason.
+    fun `the per-attempt cap clears the longest liveness wait with headroom`() {
+        // ENC-97 (replaces the ENC-94 chain-cap pin, whose premise was
+        // the chain-wide shape): an attempt's death must always be
+        // reported by its liveness budgets, never pre-empted by its
+        // own absolute cap — the cap exists only for streams that keep
+        // showing signs of life yet never finish.
         assertTrue(
-            OpenRouterStyleClient.ABSOLUTE_CAP_MS > 2 * OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS,
-            "chain cap ${OpenRouterStyleClient.ABSOLUTE_CAP_MS}ms would swallow " +
-                "the second attempt's ${OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS}ms first-token death",
+            OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS > 3 * OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS,
+            "per-attempt cap ${OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS}ms would swallow " +
+                "an attempt's ${OpenRouterStyleClient.FIRST_TOKEN_TIMEOUT_MS}ms first-token death",
+        )
+    }
+
+    @Test
+    fun `the chain backstop exceeds the sum of the per-attempt caps`() {
+        // ENC-97: the backstop is pathology insurance only. If it
+        // could ever bind inside the sum of the four attempt caps
+        // (primary/fallback × full/degraded), it would reintroduce
+        // the chain-wide starvation this ticket removes.
+        assertTrue(
+            OpenRouterStyleClient.CHAIN_BACKSTOP_MS > 4 * OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS,
+            "chain backstop ${OpenRouterStyleClient.CHAIN_BACKSTOP_MS}ms must exceed the sum of " +
+                "the four ${OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS}ms attempt caps",
         )
     }
 

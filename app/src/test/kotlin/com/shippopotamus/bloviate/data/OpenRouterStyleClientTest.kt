@@ -243,6 +243,93 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
+    fun `a slow but healthy fallback stream lands past the old chain cap`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-97's repro — Sean's device case in fixture form: the
+        // primary fails fast, and the fallback then streams steadily
+        // (every gap inside the token budget) for ~16.5s of virtual
+        // time. The old chain-wide 14s cap killed exactly this stream
+        // mid-flight and the local text landed, even though the
+        // fallback's restyle completed server-side. Per-attempt
+        // budgets leave it its own room: the styled text must land.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                HttpResult(status = 500, body = "boom")
+            } else {
+                val pieces = STYLED_TEXT.chunked(size = 4)
+                emit(chunk(pieces.first()))
+                pieces.drop(1).forEach { piece ->
+                    delay(TRICKLE_GAP_MS)
+                    emit(chunk(piece))
+                }
+                emit(DONE_LINE)
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `an endless keep-alive primary dies on its own attempt cap and the fallback answers`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // The one death liveness cannot see: the stream keeps
+        // producing signs of life (a comment every 5s, inside the 6s
+        // first-token budget) yet never produces content. The
+        // per-attempt absolute cap — not a chain deadline — is what
+        // kills it, and the chain advances to a healthy fallback.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                repeat(KEEP_ALIVE_BEATS) {
+                    emit(KEEP_ALIVE_LINE)
+                    delay(KEEP_ALIVE_GAP_MS)
+                }
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(FALLBACK_STYLED_TEXT))
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(FALLBACK_STYLED_TEXT, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `keep-alive streams on both models fall back with the timeout reason`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // Both attempts stream keep-alives forever: each dies on its
+        // OWN cap, so the chain's report is the fallback attempt's
+        // timeout — under the old chain-wide cap the same scene
+        // reported a bare timeout with no model attached, at 14s,
+        // before the fallback had spent even its own budget.
+        fakeTransport.handler = { _, _, emit ->
+            repeat(KEEP_ALIVE_BEATS) {
+                emit(KEEP_ALIVE_LINE)
+                delay(KEEP_ALIVE_GAP_MS)
+            }
+            HttpResult(status = 200, body = "")
+        }
+
+        val outcome = client.style(style = professional, text = SOURCE_TEXT)
+
+        assertEquals(
+            LlmStyleOutcome.FellBack(reason = "timeout", model = OpenRouterPayload.FALLBACK_MODEL),
+            outcome,
+        )
+        assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
     fun `a stream that never starts falls back on the first token budget`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // Both models stay silent past the first-token budget: the chain
@@ -623,9 +710,10 @@ class OpenRouterStyleClientTest {
         // two dozen reasoning deltas across ~6s of virtual time, then
         // the answer trickling in, then a usage chunk reporting the
         // reasoning spend. The ENC-91 liveness rules carry it and the
-        // ENC-94 chain cap (14s) leaves it room: the styled text must
-        // be what lands. The fallback is scripted to 499 so any
-        // wrongful retry shows.
+        // attempt's own cap (20s since ENC-97 made the budgets
+        // per-attempt; 14s chain-wide before) leaves it room: the
+        // styled text must be what lands. The fallback is scripted to
+        // 499 so any wrongful retry shows.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 repeat(REASONING_BURST_CHUNKS) { beat ->
@@ -859,6 +947,11 @@ class OpenRouterStyleClientTest {
     private companion object {
         const val DONE_LINE: String = "data: [DONE]"
         const val TRICKLE_GAP_MS: Long = 1_500L
+
+        /** ENC-97: an SSE comment keep-alive and its cadence — a beat every 5s, inside the 6s first-token budget, for a minute. */
+        const val KEEP_ALIVE_LINE: String = ": OPENROUTER PROCESSING"
+        const val KEEP_ALIVE_GAP_MS: Long = 5_000L
+        const val KEEP_ALIVE_BEATS: Int = 12
 
         /** A reasoning-phase silence/pause longer than the old 2s liveness budgets (ENC-91). */
         const val SLOW_REASONING_MS: Long = 3_500L
