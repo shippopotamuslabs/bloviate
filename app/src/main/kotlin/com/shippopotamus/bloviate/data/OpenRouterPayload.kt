@@ -138,46 +138,68 @@ object OpenRouterPayload {
     /**
      * Provider pin for the primary (ENC-80's mechanism, ENC-100's
      * pool, ENC-101's shape): a deterministic `order` over
-     * DeepSeek V4.1 Flash's US FAST endpoints, DeepInfra first —
-     * Sean's specification: "through a really fast US provider".
-     * Endpoint tags are the OpenRouter endpoints API's values,
-     * queried at implementation time (2026-10-19); every endpoint
-     * in the pool sat at status 0 / 100% 30-day uptime:
+     * DeepSeek V4.1 Flash's US endpoints, with the same six tags
+     * as the `only` allow-list ([PRIMARY_PROVIDER_ONLY]) so
+     * fallbacks cannot leave the pool — Sean's specification:
+     * "through a really fast US provider", made deterministic
+     * because ENC-100's `sort: latency` led Sean's retest #2 with
+     * the pool's slowest route (Together, ~7.6s to first byte,
+     * client-closed 499). A global sort is not Sean's route
+     * quality; an evidence-ranked order is.
      *
-     * - `deepinfra/fp8/priority`, `deepinfra/fp8` — DeepInfra's
-     *   priority and standard fp8 tiers. DeepInfra served the
-     *   build's accepted on-device landing, so it leads.
-     * - `fireworks`, `baseten`, `parasail/fp8` — the rest of the
-     *   US fast class, in that order.
-     * - `together` — LAST, demoted by ENC-101 rather than removed:
-     *   ENC-100's pin was an `only` allow-list with
-     *   `sort: latency`, and OpenRouter's global latency sort led
-     *   Sean's retest #2 with Together, which took ~7.6s to first
-     *   byte and ate a client-closed 499 while the server ground
-     *   out a 15.4s generation. A global sort is not Sean's route
-     *   quality; a deterministic order is.
-     * - Excluded by ABSENCE (the order positively enumerates the
-     *   pool, so anything it does not name stays out by
-     *   construction): `deepinfra/fp8/flex` — the Flex tier is
-     *   batch-class latency, the opposite of a dictation profile;
-     *   `deepseek` (DeepSeek direct) and `alibaba` — Sean specified
-     *   US providers; and every other listed endpoint (Cloudflare,
-     *   Morph, Crusoe, …) — not in the ticket's fast class.
+     * The ranking is OpenRouter's provider table (P50, past 3
+     * days, queried 2026-10-19 — full table recorded on ENC-101),
+     * which REFUTED the ticket's original DeepInfra-first
+     * hypothesis:
+     *
+     * - `inference-net/fp8` LEADS: 0.42s / 193 tps / 100.00%
+     *   uptime at the largest US-class token share (12.9%) — the
+     *   leader is chosen on 100% uptime at real volume.
+     * - `together` second: the best P50s in the table (0.26s /
+     *   217 tps / 100.00%) — WITH A TAIL-RISK CAVEAT: Sean's
+     *   device drew a 7.6s-TTFT 499 from Together the same day.
+     *   P50 hides tails; the four endpoints behind it, and the
+     *   Gemini link behind them, are the mitigation.
+     * - `baseten`: 0.46s / 243 tps (fastest throughput) / 100.00%,
+     *   on a thin sample (0.0% share) — third, not first.
+     * - `fireworks` (0.88s / 154 tps / 100.00%) and `crusoe/fp8`
+     *   (0.85s / 120 tps / 100.00%) fill the middle.
+     * - `deepinfra/fp8` LAST, for depth: standard tier only
+     *   (0.77s / 60 tps / 99.52%). Its PRIORITY tier is refuted by
+     *   the same table — 1.28s / 65 tps / 99.33%, worse than
+     *   standard on every axis — and stays out, as does Flex
+     *   (5.87s, batch-class).
+     * - REMOVED from ENC-100's pool: `parasail/fp8` — 97.84%
+     *   uptime, the weakest in the table; a fallback you cannot
+     *   rely on is not depth, it is latency waiting to happen.
+     * - Excluded by absence, as before: `deepseek` (DeepSeek
+     *   direct) and `alibaba` — Sean specified US providers.
      *
      * Slugs are the endpoints API's `tag` values, the same form
      * ENC-80 pinned. `allow_fallbacks` stays on (see
-     * [buildChatRequest]): the router walks this order endpoint to
-     * endpoint on failure.
+     * [buildChatRequest]): the router walks this order endpoint
+     * to endpoint on failure.
      */
     val PRIMARY_PROVIDER_ORDER: List<String> =
         listOf(
-            "deepinfra/fp8/priority",
-            "deepinfra/fp8",
-            "fireworks",
-            "baseten",
-            "parasail/fp8",
+            "inference-net/fp8",
             "together",
+            "baseten",
+            "fireworks",
+            "crusoe/fp8",
+            "deepinfra/fp8",
         )
+
+    /**
+     * The primary's allow-list (ENC-101): exactly the
+     * [PRIMARY_PROVIDER_ORDER] set. `order` alone ranks attempts
+     * but does not fence them — with fallbacks on, the router may
+     * wander to any endpoint the model lists; `only` keeps every
+     * attempt inside the evidence-ranked pool (and keeps Parasail,
+     * Priority, Flex, and the non-US endpoints out even on the
+     * fallback walk).
+     */
+    val PRIMARY_PROVIDER_ONLY: List<String> = PRIMARY_PROVIDER_ORDER
 
     /**
      * Provider pin for the fallback (ENC-100): VERTEX-ONLY.

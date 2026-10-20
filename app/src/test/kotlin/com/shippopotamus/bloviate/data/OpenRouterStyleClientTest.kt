@@ -146,12 +146,15 @@ class OpenRouterStyleClientTest {
     fun `each attempt pins its provider routing and requests the stream`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-100 pins + ENC-81 streaming, asserted on the recorded
-        // bodies: the primary's DETERMINISTIC order over the US
-        // fast pool (ENC-101: DeepInfra first, Together last, no
+        // bodies: the primary's DETERMINISTIC, evidence-ranked
+        // order over the US pool (ENC-101, revised by OpenRouter's
+        // provider table: inference.net first, DeepInfra standard
+        // last, the same six tags as the allow-list fence, no
         // latency sort — the sort led with the pool's slowest
-        // route on device; Flex and the non-US endpoints nowhere
-        // in the pool), then the fallback's VERTEX-ONLY list —
-        // google-ai-studio is gone until Sean fixes its BYOK key.
+        // route on device; Parasail, Priority, Flex, and the
+        // non-US endpoints nowhere in the pool), then the
+        // fallback's VERTEX-ONLY list — google-ai-studio is gone
+        // until Sean fixes its BYOK key.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
@@ -168,11 +171,16 @@ class OpenRouterStyleClientTest {
         assertTrue(
             fakeTransport.requests[0].contains(
                 "\"provider\":{\"order\":[" +
-                    "\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"baseten\",\"parasail/fp8\",\"together\"" +
-                    "],\"allow_fallbacks\":true}",
+                    "\"inference-net/fp8\",\"together\",\"baseten\",\"fireworks\",\"crusoe/fp8\",\"deepinfra/fp8\"" +
+                    "],\"allow_fallbacks\":true," +
+                    "\"only\":[" +
+                    "\"inference-net/fp8\",\"together\",\"baseten\",\"fireworks\",\"crusoe/fp8\",\"deepinfra/fp8\"" +
+                    "]}",
             ),
         )
         assertTrue(!fakeTransport.requests[0].contains("\"sort\""))
+        assertTrue(!fakeTransport.requests[0].contains("parasail"))
+        assertTrue(!fakeTransport.requests[0].contains("priority"))
         assertTrue(!fakeTransport.requests[0].contains("flex"))
         assertTrue(!fakeTransport.requests[0].contains("alibaba"))
         assertTrue(

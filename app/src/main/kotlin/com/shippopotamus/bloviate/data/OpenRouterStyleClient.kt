@@ -612,9 +612,10 @@ class OpenRouterStyleClient(
 
         /**
          * The chain's head (ENC-100, routing reshaped by ENC-101):
-         * DeepSeek V4.1 Flash, routed by a DETERMINISTIC provider
-         * order — DeepInfra first, Together last — over its US
-         * fast endpoints, with reasoning explicitly off — its
+         * DeepSeek V4.1 Flash, routed by a DETERMINISTIC,
+         * evidence-ranked provider order — inference.net first,
+         * DeepInfra standard last — fenced by the same six tags as
+         * an allow-list, with reasoning explicitly off — its
          * models-API metadata has reasoning ON by default at high
          * effort, so the effort block is a load-bearing part of
          * this link, not an optional extra (see
@@ -623,7 +624,7 @@ class OpenRouterStyleClient(
         private val PRIMARY_LINK: ChainLink = ChainLink(
             model = OpenRouterPayload.PRIMARY_MODEL,
             providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
-            providerOnly = emptyList(),
+            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
             providerSort = null,
             reasoningEffort = OpenRouterPayload.REASONING_EFFORT,
         )
