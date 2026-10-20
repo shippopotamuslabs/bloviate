@@ -148,7 +148,7 @@
     <string name="onboarding_mic_title">Microphone</string>
     <string name="onboarding_mic_sub">Your voice is transcribed on this phone. Nothing is recorded or sent anywhere.</string>
     <string name="onboarding_battery_title">Allow Bloviate to stay running</string>
-    <string name="onboarding_battery_sub">Android puts apps to sleep to save battery, and a sleeping Bloviate can’t spot your text fields. Allow Bloviate to stay running so the bubble is always ready. On the list that opens, find Bloviate and set it to Unrestricted.</string>
+    <string name="onboarding_battery_sub">Android puts apps to sleep to save battery, and a sleeping Bloviate can’t spot your text fields. Allow Bloviate to stay running so the bubble is always ready. Tap the button below and Android will ask right here — tap Allow.</string>
     <string name="onboarding_open_settings">Open Settings</string>
     <string name="onboarding_allow_mic">Allow microphone</string>
     <string name="onboarding_model_title">Voice model</string>
