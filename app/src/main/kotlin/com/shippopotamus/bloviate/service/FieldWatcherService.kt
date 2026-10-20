@@ -12,9 +12,11 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.shippopotamus.bloviate.domain.evaluator.FieldFocusEvaluator
 import com.shippopotamus.bloviate.domain.evaluator.KeyboardWatchdogPolicy
+import com.shippopotamus.bloviate.domain.evaluator.NotificationShadeFreezePolicy
 import com.shippopotamus.bloviate.domain.evaluator.TextSplicer
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
+import com.shippopotamus.bloviate.domain.model.WatcherWindowSnapshot
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
 import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
 import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
@@ -44,6 +46,19 @@ import javax.inject.Inject
  * and stops the moment the state converges. The transition log records
  * the window-type census and whether the reading came from an event or
  * a watchdog poll, so the two paths are distinguishable in logcat.
+ *
+ * The notification shade is a special case of the same derivation
+ * hazard (ENC-132): while it is expanded, SystemUI's shade is the
+ * active window, so the active-window tree contains no editable node
+ * and the focus derivation would flip to not-editable — an instant
+ * focus-path hide that kills the bubble and any in-progress dictation.
+ * While a shade window is present in the window stream, both signals
+ * are frozen per [NotificationShadeFreezePolicy]: the last published
+ * states are held, nothing new is emitted, and the first event after
+ * the shade leaves re-derives from live state (so a password field
+ * focused meanwhile still hides instantly on that re-derivation).
+ * Shade transitions are logged with the window-type census (types
+ * only), so a shade repro is visible in logcat.
  *
  * Privacy contract: the watcher path reads only the host package name and
  * structural flags. Field text and content descriptions are never read,
@@ -79,6 +94,11 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private var lastPublishedState: FieldFocusState = FieldFocusState.NoEditableFocus
     private var lastKeyboardVisible: Boolean = false
 
+    // Notification-shade freeze state (ENC-132): while true, both
+    // signals are held at their last published values and nothing new
+    // is derived from the shade's window tree.
+    private var shadePresent: Boolean = false
+
     // Keyboard-derivation watchdog state (ENC-128). Main-looper handler:
     // accessibility callbacks arrive on the main thread, and `windows`
     // is read there everywhere else in this service.
@@ -99,6 +119,11 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || event.eventType !in RELEVANT_EVENT_TYPES) return
+        // ENC-132: while the notification shade is present, hold both
+        // signals — the active window is the shade's tree, so any
+        // derivation here would be read from SystemUI, not the host
+        // app. The first event after the shade leaves re-derives.
+        if (updateShadePresence(windows)) return
         publish(FieldFocusEvaluator.evaluate(focusedNodeSnapshot(event)))
         publishKeyboardVisibility()
     }
@@ -216,6 +241,13 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
      */
     private fun publishKeyboardVisibility(fromWatchdog: Boolean = false) {
         val currentWindows = windows
+        // ENC-132: the shade freeze covers watchdog polls too — a poll
+        // that lands while the shade is up holds the last keyboard
+        // reading instead of deriving one from the shade's window
+        // list. The watchdog's own arm/stop bookkeeping is untouched:
+        // the tick that called this still evaluates its stop reason
+        // against the held signals and reschedules per ENC-128.
+        if (updateShadePresence(currentWindows)) return
         val visible = currentWindows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
         keyboardVisibilityPort.publish(visible)
         if (visible != lastKeyboardVisible) {
@@ -290,6 +322,23 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
         watchdogArmedAtMs = null
     }
 
+    /**
+     * Recompute shade presence from [currentWindows] per
+     * [NotificationShadeFreezePolicy] and log transitions with the
+     * window-type census (types only, never content), so a shade
+     * repro is visible in logcat. Returns the current presence.
+     */
+    private fun updateShadePresence(currentWindows: List<AccessibilityWindowInfo>): Boolean {
+        val present = NotificationShadeFreezePolicy.isShadePresent(
+            currentWindows.map { window -> window.toSnapshot() },
+        )
+        if (present != shadePresent) {
+            shadePresent = present
+            Log.d(TAG, "notification shade present -> $present (window types: ${currentWindows.typeCensus()})")
+        }
+        return present
+    }
+
     /** Counts by window type, e.g. "APPLICATION x2, INPUT_METHOD x1" — types only, never content. */
     private fun List<AccessibilityWindowInfo>.typeCensus(): String =
         groupingBy { window -> window.typeName() }
@@ -297,6 +346,20 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
             .entries
             .joinToString(separator = ", ") { (type, count) -> "$type x$count" }
             .ifEmpty { "none" }
+
+    /** Type + active flag only — the shade policy never sees a window's content, title, or package. */
+    private fun AccessibilityWindowInfo.toSnapshot(): WatcherWindowSnapshot =
+        WatcherWindowSnapshot(
+            kind = when (type) {
+                AccessibilityWindowInfo.TYPE_APPLICATION -> WatcherWindowSnapshot.Kind.APPLICATION
+                AccessibilityWindowInfo.TYPE_INPUT_METHOD -> WatcherWindowSnapshot.Kind.INPUT_METHOD
+                AccessibilityWindowInfo.TYPE_SYSTEM -> WatcherWindowSnapshot.Kind.SYSTEM
+                AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> WatcherWindowSnapshot.Kind.ACCESSIBILITY_OVERLAY
+                AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> WatcherWindowSnapshot.Kind.SPLIT_SCREEN_DIVIDER
+                else -> WatcherWindowSnapshot.Kind.OTHER
+            },
+            isActive = isActive,
+        )
 
     private fun AccessibilityWindowInfo.typeName(): String = when (type) {
         AccessibilityWindowInfo.TYPE_APPLICATION -> "APPLICATION"
