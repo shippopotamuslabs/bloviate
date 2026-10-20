@@ -146,10 +146,12 @@ class OpenRouterStyleClientTest {
     fun `each attempt pins its provider routing and requests the stream`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-100 pins + ENC-81 streaming, asserted on the recorded
-        // bodies: the primary's US-only allow-list (latency-sorted,
-        // Flex and the non-US endpoints nowhere in the pool), then
-        // the fallback's VERTEX-ONLY list — google-ai-studio is
-        // gone until Sean fixes its BYOK key.
+        // bodies: the primary's DETERMINISTIC order over the US
+        // fast pool (ENC-101: DeepInfra first, Together last, no
+        // latency sort — the sort led with the pool's slowest
+        // route on device; Flex and the non-US endpoints nowhere
+        // in the pool), then the fallback's VERTEX-ONLY list —
+        // google-ai-studio is gone until Sean fixes its BYOK key.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
@@ -165,11 +167,12 @@ class OpenRouterStyleClientTest {
         assertTrue(fakeTransport.requests[0].contains("\"stream\":true"))
         assertTrue(
             fakeTransport.requests[0].contains(
-                "\"provider\":{\"allow_fallbacks\":true," +
-                    "\"only\":[\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"together\",\"baseten\",\"parasail/fp8\"]," +
-                    "\"sort\":\"latency\"}",
+                "\"provider\":{\"order\":[" +
+                    "\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"baseten\",\"parasail/fp8\",\"together\"" +
+                    "],\"allow_fallbacks\":true}",
             ),
         )
+        assertTrue(!fakeTransport.requests[0].contains("\"sort\""))
         assertTrue(!fakeTransport.requests[0].contains("flex"))
         assertTrue(!fakeTransport.requests[0].contains("alibaba"))
         assertTrue(
@@ -953,6 +956,9 @@ class OpenRouterStyleClientTest {
         // Both links invent unrelated text: the chain's report is
         // fidelity — which since ENC-100 means wholesale
         // replacement only — and the local text is what remains.
+        // ENC-101 keeps this failing: REPLACEMENT_SOURCE carries
+        // ~30 content words, far over the floor's new threshold —
+        // the floor still guards LONG sources exactly as before.
         fakeTransport.handler = { _, _, emit ->
             emitStream(emit, parts = listOf(REPLACEMENT_STYLED))
             HttpResult(status = 200, body = "")
@@ -965,6 +971,45 @@ class OpenRouterStyleClientTest {
             outcome,
         )
         assertEquals(2, fakeTransport.keylessCallCount)
+    }
+
+    @Test
+    fun `a short dictation survives a slow primary death and a zero-overlap gemini seneca restyle lands`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-101's device case, end to end (Sean, build e9ed680,
+        // retest #2, 2026-10-19 ~16:41 EDT): the dictation is
+        // "Damn, that was fucking fast too" — THREE content words
+        // (damn, fucking, fast). Leg 1: the primary's route crawls
+        // — on device Together took ~7.6s to first byte, past the
+        // 6s first-token budget, so the client hung up (499
+        // client-closed server-side); the death was CORRECT,
+        // per-attempt liveness doing its job — scripted here as a
+        // stream that never starts. Leg 2: Gemini's Seneca
+        // transformation completes — "It was over in a breath..." —
+        // faithful in spirit, sharing ZERO literal content words
+        // with the source (fast -> swift, the profanity absorbed
+        // by the persona). Under ENC-100's floor it scored
+        // coverage 0.0 and fell back as fidelity, so the local
+        // text landed and the only styled text this dictation ever
+        // got was thrown away. ENC-101's threshold: below 10
+        // content words the floor does not apply, and the Gemini
+        // text LANDS.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                delay(NEVER_STARTS_MS)
+                HttpResult(status = 200, body = "")
+            } else {
+                emitStream(emit, parts = listOf(SHORT_SENECA_STYLED), provider = "Google")
+                HttpResult(status = 200, body = "")
+            }
+        }
+
+        val outcome = client.style(style = seneca, text = SHORT_SOURCE)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(SHORT_SENECA_STYLED, styled.text)
+        assertEquals(OpenRouterPayload.FALLBACK_MODEL, styled.model)
+        assertEquals(2, fakeTransport.requests.size)
     }
 
     @Test
@@ -1344,6 +1389,17 @@ class OpenRouterStyleClientTest {
         const val REJECTION_400_BODY: String =
             "{\"error\":{\"message\":\"invalid argument: unsupported parameter combination\"," +
                 "\"code\":400,\"type\":\"invalid_request_error\",\"metadata\":{\"provider_name\":\"DeepInfra\"}}}"
+
+        /**
+         * ENC-101's device pair: Sean's three-content-word
+         * dictation and Gemini's zero-literal-overlap Seneca
+         * transformation of it, verbatim from the generation
+         * record (build e9ed680, retest #2).
+         */
+        const val SHORT_SOURCE: String = "damn that was fucking fast too"
+        const val SHORT_SENECA_STYLED: String =
+            "It was over in a breath. Speed is a thief that leaves no time for the mind to " +
+                "settle. What is swift is often soon forgotten."
 
         /** A guard-safe source/restyle pair: same content words, new casing. */
         const val SOURCE_TEXT: String = "the meeting is moved to friday afternoon"

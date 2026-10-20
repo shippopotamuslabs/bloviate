@@ -37,18 +37,22 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `the primary provider pool is the us fast class latency sorted`() {
-        // ENC-100: endpoint tags are the OpenRouter endpoints API's
-        // values, verified live at implementation time (all at
-        // status 0 / 100% 30-day uptime). Sean specified US fast
-        // providers: DeepSeek direct, Alibaba, and the Flex tier
-        // (deepinfra/fp8/flex) are absent on purpose — an allow-list
-        // admits only what it names.
+    fun `the primary provider order is the us fast class with deepinfra first and together last`() {
+        // ENC-100's pool (endpoint tags are the OpenRouter
+        // endpoints API's values, verified live at implementation
+        // time, all at status 0 / 100% 30-day uptime; Sean
+        // specified US fast providers: DeepSeek direct, Alibaba,
+        // and the Flex tier, deepinfra/fp8/flex, are absent on
+        // purpose — the order admits only what it names), reshaped
+        // by ENC-101 from ENC-100's only+sort:latency into a
+        // deterministic order: DeepInfra leads (it served the
+        // accepted on-device landing) and Together drops to last
+        // (the latency sort led Sean's retest #2 with it, and it
+        // took ~7.6s to first byte). Membership is unchanged.
         assertEquals(
-            listOf("deepinfra/fp8/priority", "deepinfra/fp8", "fireworks", "together", "baseten", "parasail/fp8"),
-            OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
+            listOf("deepinfra/fp8/priority", "deepinfra/fp8", "fireworks", "baseten", "parasail/fp8", "together"),
+            OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
         )
-        assertEquals("latency", OpenRouterPayload.PRIMARY_PROVIDER_SORT)
     }
 
     @Test
@@ -65,24 +69,28 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `a request with an only list and a sort carries both in the provider block`() {
-        // ENC-100: the primary's exact wire shape — the US-only
-        // allow-list plus latency sort, fallbacks on within the list.
+    fun `a request with the primary pin carries the deterministic provider order`() {
+        // ENC-101: the primary's exact wire shape — the
+        // deterministic order over the US fast pool, fallbacks on
+        // so the router walks the order on failure. No `only`, no
+        // `sort`: ENC-100's latency sort is what led with the
+        // pool's slowest route on device.
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
-            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
         )
 
         assertTrue(
             request.contains(
-                "\"provider\":{\"allow_fallbacks\":true," +
-                    "\"only\":[\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"together\",\"baseten\",\"parasail/fp8\"]," +
-                    "\"sort\":\"latency\"}",
+                "\"provider\":{\"order\":[" +
+                    "\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"baseten\",\"parasail/fp8\",\"together\"" +
+                    "],\"allow_fallbacks\":true}",
             ),
         )
+        assertFalse(request.contains("\"only\""))
+        assertFalse(request.contains("\"sort\""))
         assertFalse(request.contains("flex"))
         assertFalse(request.contains("alibaba"))
     }
@@ -229,8 +237,7 @@ class OpenRouterPayloadTest {
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
             user = user,
-            providerOnly = OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
-            providerSort = OpenRouterPayload.PRIMARY_PROVIDER_SORT,
+            providerOrder = OpenRouterPayload.PRIMARY_PROVIDER_ORDER,
         )
 
         assertFalse(request.contains("\"reasoning\""))

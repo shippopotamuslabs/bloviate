@@ -23,7 +23,7 @@ object OpenRouterPayload {
     /**
      * Style chain primary (ENC-100, Sean 2026-10-19): DeepSeek
      * V4.1 Flash, the dated 1017 snapshot, pinned to US fast
-     * providers only (see [PRIMARY_PROVIDER_ONLY]). Sean's call on
+     * providers only (see [PRIMARY_PROVIDER_ORDER]). Sean's call on
      * the ENC-99 build's device retest: "probably less censored
      * than Google as a model" — the retest's Gemini completion had
      * euphemized the dictation's profanity ('coarse words') and
@@ -137,20 +137,27 @@ object OpenRouterPayload {
 
     /**
      * Provider pin for the primary (ENC-80's mechanism, ENC-100's
-     * pool): an `only` allow-list of DeepSeek V4.1 Flash's US
-     * FAST endpoints, sorted by live latency
-     * ([PRIMARY_PROVIDER_SORT]) — Sean's specification: "through
-     * a really fast US provider". Endpoint tags are the OpenRouter
-     * endpoints API's values, queried at implementation time
-     * (2026-10-19); every endpoint in the pool sat at status 0 /
-     * 100% 30-day uptime:
+     * pool, ENC-101's shape): a deterministic `order` over
+     * DeepSeek V4.1 Flash's US FAST endpoints, DeepInfra first —
+     * Sean's specification: "through a really fast US provider".
+     * Endpoint tags are the OpenRouter endpoints API's values,
+     * queried at implementation time (2026-10-19); every endpoint
+     * in the pool sat at status 0 / 100% 30-day uptime:
      *
      * - `deepinfra/fp8/priority`, `deepinfra/fp8` — DeepInfra's
-     *   priority and standard fp8 tiers.
-     * - `fireworks`, `together`, `baseten`, `parasail/fp8` — the
-     *   rest of the US fast class.
-     * - Excluded by ABSENCE (an allow-list positively enumerates
-     *   the pool, so anything it does not name stays out by
+     *   priority and standard fp8 tiers. DeepInfra served the
+     *   build's accepted on-device landing, so it leads.
+     * - `fireworks`, `baseten`, `parasail/fp8` — the rest of the
+     *   US fast class, in that order.
+     * - `together` — LAST, demoted by ENC-101 rather than removed:
+     *   ENC-100's pin was an `only` allow-list with
+     *   `sort: latency`, and OpenRouter's global latency sort led
+     *   Sean's retest #2 with Together, which took ~7.6s to first
+     *   byte and ate a client-closed 499 while the server ground
+     *   out a 15.4s generation. A global sort is not Sean's route
+     *   quality; a deterministic order is.
+     * - Excluded by ABSENCE (the order positively enumerates the
+     *   pool, so anything it does not name stays out by
      *   construction): `deepinfra/fp8/flex` — the Flex tier is
      *   batch-class latency, the opposite of a dictation profile;
      *   `deepseek` (DeepSeek direct) and `alibaba` — Sean specified
@@ -159,21 +166,18 @@ object OpenRouterPayload {
      *
      * Slugs are the endpoints API's `tag` values, the same form
      * ENC-80 pinned. `allow_fallbacks` stays on (see
-     * [buildChatRequest]): within the allow-list, the router may
-     * still fail over endpoint to endpoint.
+     * [buildChatRequest]): the router walks this order endpoint to
+     * endpoint on failure.
      */
-    val PRIMARY_PROVIDER_ONLY: List<String> =
+    val PRIMARY_PROVIDER_ORDER: List<String> =
         listOf(
             "deepinfra/fp8/priority",
             "deepinfra/fp8",
             "fireworks",
-            "together",
             "baseten",
             "parasail/fp8",
+            "together",
         )
-
-    /** Sort the allow-listed endpoints by live-measured latency (ENC-100; ENC-99's value). */
-    const val PRIMARY_PROVIDER_SORT: String = "latency"
 
     /**
      * Provider pin for the fallback (ENC-100): VERTEX-ONLY.

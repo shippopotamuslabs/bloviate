@@ -19,7 +19,18 @@ package com.shippopotamus.bloviate.domain.evaluator
  *   restyle of this text at all: it is invented or off-topic text
  *   (the Llama-class failure, ENC-98: generic persona prose at
  *   ~0 coverage). The verdict name stays FIDELITY_LOSS; since
- *   ENC-100 it means wholesale replacement ONLY.
+ *   ENC-100 it means wholesale replacement ONLY. And since
+ *   ENC-101 the floor applies only when the source carries at
+ *   least [MIN_CONTENT_WORDS_FOR_FLOOR] content words: on short
+ *   dictations the premise that some words always survive is
+ *   false — a radical persona restyle of three content words
+ *   legitimately replaces every literal one of them (Sean's
+ *   device datapoint: "damn that was fucking fast too" restyled
+ *   by Seneca at ZERO overlap, guard-killed as fidelity). Below
+ *   the threshold, refusal + non-empty are the only checks;
+ *   invention is indistinguishable from transformation there,
+ *   and the floor's catch (the Llama hallucination) was a
+ *   ~50-word dictation.
  *
  * What was REMOVED, and why (Sean's reasoning, recorded on
  * ENC-100): the original two-tier fidelity judgment — a hard-token
@@ -54,8 +65,26 @@ object StyleOutputGuard {
         if (styled.isBlank()) return Verdict.PASS
         val opening = styled.trim().lowercase().take(OPENING_CHARS)
         if (isRefusal(opening = opening, source = source, styled = styled)) return Verdict.REFUSAL
-        if (coverage(source = source, styled = styled) < MIN_COVERAGE) return Verdict.FIDELITY_LOSS
+        if (isWholesaleReplacement(source = source, styled = styled)) return Verdict.FIDELITY_LOSS
         return Verdict.PASS
+    }
+
+    /**
+     * The wholesale-replacement judgment (ENC-100), gated by
+     * ENC-101: the coverage floor is only meaningful when the
+     * source carries enough content words for invention to be
+     * distinguishable from transformation. Below
+     * [MIN_CONTENT_WORDS_FOR_FLOOR] content words a genuine
+     * radical restyle can replace every literal word, and the
+     * floor would call it invention — Sean's three-content-word
+     * device dictation scored coverage 0.0 on a faithful Seneca
+     * transformation. The count is the coverage computation's
+     * own: distinct lowercase tokens minus [STOPWORDS].
+     */
+    private fun isWholesaleReplacement(source: String, styled: String): Boolean {
+        val sourceContent = wordSet(source) - STOPWORDS
+        if (sourceContent.size < MIN_CONTENT_WORDS_FOR_FLOOR) return false
+        return coverage(source = source, styled = styled) < MIN_COVERAGE
     }
 
     private fun isRefusal(opening: String, source: String, styled: String): Boolean {
@@ -101,6 +130,16 @@ object StyleOutputGuard {
      * longer the guard's job.
      */
     private const val MIN_COVERAGE: Double = 0.10
+
+    /**
+     * The source size below which the wholesale floor does not
+     * apply (ENC-101): distinct content words — the coverage
+     * computation's own count. Ten is where invention and
+     * transformation become distinguishable; the Llama-class
+     * hallucination the floor exists to catch was a ~50-word
+     * dictation, and Sean's guard-killed Seneca restyle was 3.
+     */
+    private const val MIN_CONTENT_WORDS_FOR_FLOOR: Int = 10
 
     private val WORD_REGEX: Regex = Regex("[A-Za-z0-9']+")
 
