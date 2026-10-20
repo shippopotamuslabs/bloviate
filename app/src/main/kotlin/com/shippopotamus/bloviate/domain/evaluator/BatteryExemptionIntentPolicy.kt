@@ -16,14 +16,15 @@ import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
  * start it is the signal to advance the plan), so the step can never
  * dead-end.
  *
- * Session escalation (ENC-141): on Sean's Motorola the direct intent
- * starts without throwing yet shows nothing — a "successful" start
- * into an OEM no-op — so exception-driven fallback alone left the
- * button a dead tap. If a direct attempt already fired this session
- * and the exemption still reads not-granted when the user taps
- * again, the plan starts at the settings list instead. An honest
- * Deny deserves the same escalation as a swallowed dialog: the
- * button must never be a dead end twice.
+ * Session escalation (ENC-141): if a direct attempt already fired
+ * this session and the exemption still reads not-granted when the
+ * user taps again, the plan starts at the settings list instead.
+ * An honest Deny deserves the same escalation as a swallowed
+ * dialog: the button must never be a dead end twice. (The dead
+ * tap that motivated the escalation was re-diagnosed by ENC-143 —
+ * the manifest lacked the permission the direct intent requires —
+ * but the escalation stays as backstop for builds that genuinely
+ * swallow the dialog.)
  *
  * Policy flag, recorded rather than obeyed: the direct-request intent
  * is Play-policy-restricted to core-functionality exemptions with a
@@ -31,7 +32,15 @@ import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
  * decision is deferred), and Wispr Flow ships this same dialog on
  * Play in this category, so the flag rides the launch checklist —
  * it does not degrade the pre-Play experience back to the list.
- * Firing either intent needs no manifest permission.
+ *
+ * Manifest requirement (ENC-143): the direct intent is honored
+ * only because the manifest declares
+ * `android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — a
+ * normal install-time permission with no runtime prompt. Without
+ * the declaration the system refuses the dialog on dispatch and
+ * the button reads as dead; that missing declaration, not the
+ * device, was the ENC-139/ENC-141 dead tap. The settings-list
+ * intent needs no declaration.
  */
 object BatteryExemptionIntentPolicy {
 
