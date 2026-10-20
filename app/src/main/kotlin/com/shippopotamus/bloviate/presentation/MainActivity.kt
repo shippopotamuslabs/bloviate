@@ -118,7 +118,9 @@ class MainActivity : ComponentActivity() {
      * Play-policy-restricted; the flag is recorded on ENC-139 for the
      * launch checklist and deliberately does not degrade this
      * sideload-first flow back to the list (ENC-129's behavior).
-     * Neither intent needs a manifest permission to fire.
+     * The direct intent needs the manifest's
+     * `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` declaration (ENC-143);
+     * the settings-list intent needs none.
      */
     private fun openBatteryOptimizationSettings() {
         var attempt: BatteryExemptionAttempt? =
