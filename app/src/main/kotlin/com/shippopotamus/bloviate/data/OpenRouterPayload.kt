@@ -35,7 +35,8 @@ object OpenRouterPayload {
     const val MAX_TOKENS: Int = 1024
 
     /**
-     * Reasoning control for style requests (ENC-94). A restyle is a
+     * Reasoning control for style requests (ENC-94, reshaped by
+     * ENC-95). A restyle is a
      * surface transformation — it needs no deliberation — but the
      * primary's default effort is HIGH: Sean's 2026-10-19 tirade test
      * burned 3,282 completion tokens in 41.1s, ~3.1k of them reasoning,
@@ -48,14 +49,27 @@ object OpenRouterPayload {
      * Grok 4.3, which accepts "none"). `exclude: true` is not a
      * latency lever either: the model still reasons, the tokens are
      * just withheld from the response. So the shipped setting is the
-     * strongest control 4.7 honors: effort LOW, plus a hard
-     * [REASONING_MAX_TOKENS] cap — which OpenRouter maps onto the
-     * effort allocation for effort-only models and enforces directly
-     * for token-allocation models, so the cap binds either way a
-     * future alias roll resolves.
+     * strongest control 4.7 honors: effort LOW.
+     *
+     * ENC-95 (the regression that reshaped this): ENC-94 shipped
+     * `reasoning: {effort, max_tokens: 512}` on EVERY attempt, and on
+     * device both attempts began dying instantly, where the pre-ENC-94
+     * payload had completed the same calls. OpenRouter's docs are
+     * explicit that the unified parameter takes either `effort` or
+     * `max_tokens`, not both — and the fallback's arithmetic is worse:
+     * translated to Anthropic, an effort request derives
+     * `budget_tokens = max(min(max_tokens * 0.2, 128000), 1024)` =
+     * 1024 from this payload's `max_tokens: 1024`, while Anthropic
+     * requires max_tokens STRICTLY greater than the budget, so the
+     * fallback request was invalid by construction. The block is
+     * therefore effort-only, and it rides the PRIMARY only: Haiku has
+     * no reasoning blowout to leash, and its proven shape is the
+     * pre-ENC-94 one with no block at all. The client's degraded
+     * retry (ENC-95) is the structural guardrail that replaces the
+     * cap: if any provider still rejects the block, the same model is
+     * retried once with no optional parameters at all.
      */
     const val REASONING_EFFORT: String = "low"
-    const val REASONING_MAX_TOKENS: Int = 512
 
     /**
      * Provider pin for the primary (ENC-80). Queried from OpenRouter's
@@ -85,11 +99,14 @@ object OpenRouterPayload {
      * When [providerOrder] is given, a `provider` routing block is
      * appended (ENC-80): try those provider slugs in order,
      * `allow_fallbacks` on, minus any [providerIgnore] slugs. [stream]
-     * asks for the SSE form (ENC-81) and for usage in the final chunk
+     * asks for the SSE form (ENC-81) and — unless [includeUsage] is
+     * off — for usage in the final chunk
      * (`stream_options.include_usage`, ENC-94) so reasoning-token
-     * counts reach telemetry; the client always sets it. The
-     * [reasoningEffort]/[reasoningMaxTokens] controls ride every
-     * request (ENC-94, see [REASONING_EFFORT]).
+     * counts reach telemetry. [reasoningEffort] adds the unified
+     * `reasoning` block (ENC-94/95, see [REASONING_EFFORT]); null
+     * omits it. The client's degraded retry (ENC-95) passes
+     * `reasoningEffort = null, includeUsage = false`: a bare streamed
+     * request carrying nothing a provider could reject.
      */
     fun buildChatRequest(
         model: String,
@@ -101,21 +118,34 @@ object OpenRouterPayload {
         providerIgnore: List<String> = emptyList(),
         stream: Boolean = false,
         reasoningEffort: String? = REASONING_EFFORT,
-        reasoningMaxTokens: Int? = REASONING_MAX_TOKENS,
+        includeUsage: Boolean = true,
     ): String =
         "{\"model\":" + escape(model) +
             ",\"temperature\":" + temperature +
             ",\"max_tokens\":" + maxTokens +
             ",\"messages\":[" + messageJson(system) + "," + messageJson(user) + "]" +
-            (if (stream) ",\"stream\":true,\"stream_options\":{\"include_usage\":true}" else "") +
+            (if (stream && includeUsage) ",\"stream\":true,\"stream_options\":{\"include_usage\":true}" else "") +
+            (if (stream && !includeUsage) ",\"stream\":true" else "") +
             providerJson(providerOrder, providerIgnore) +
-            reasoningJson(reasoningEffort, reasoningMaxTokens) + "}"
+            // The unified `reasoning` block — effort only (ENC-95), or absent when unset.
+            (if (reasoningEffort == null) "" else ",\"reasoning\":{\"effort\":" + escape(reasoningEffort) + "}") +
+            "}"
 
-    /** The unified OpenRouter `reasoning` block (ENC-94), or "" when effort is unset. */
-    private fun reasoningJson(effort: String?, maxTokens: Int?): String {
-        if (effort == null) return ""
-        val capJson = if (maxTokens == null) "" else ",\"max_tokens\":" + maxTokens
-        return ",\"reasoning\":{\"effort\":" + escape(effort) + capJson + "}"
+    /**
+     * Extracts the provider error metadata of an OpenRouter error
+     * payload (`{"error":{"code":400,"type":"...",...}}`), or null
+     * when the body carries no error object (ENC-95 telemetry). The
+     * code (numeric or numeric-string) and type are provider
+     * metadata, never response text: they exist so a failed attempt's
+     * log line names the rejection class from logcat alone.
+     */
+    fun extractErrorInfo(body: String): ProviderError? {
+        val errorIndex = findKey(body, "error", 0) ?: return null
+        val codeIndex = findKey(body, "code", errorIndex)
+        val code = codeIndex?.let { readIntValue(body, it) ?: readStringValue(body, it)?.toIntOrNull() }
+        val typeIndex = findKey(body, "type", errorIndex)
+        val type = typeIndex?.let { readStringValue(body, it) }
+        return if (code == null && type == null) null else ProviderError(code = code, type = type)
     }
 
     /**
@@ -387,3 +417,13 @@ object OpenRouterPayload {
         "not supported",
     )
 }
+
+/**
+ * Provider error metadata from an OpenRouter error payload (ENC-95):
+ * the rejection's HTTP-style [code] and its [type] label, either of
+ * which the provider may omit. Telemetry only — never user content.
+ */
+data class ProviderError(
+    val code: Int?,
+    val type: String?,
+)
