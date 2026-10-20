@@ -124,7 +124,7 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | State | Presentation |
 |-------|--------------|
 | Idle | Mic pill, resting elevation |
-| Listening | Recording bar: live waveform (RMS-driven) + elapsed time |
+| Warming | Spinner in the bubble's content color while the speech engine finishes its initial warm-up; the bubble appears on schedule instead of staying absent — taps during warm-up are clean no-ops || Listening | Recording bar: live waveform (RMS-driven) + elapsed time |
 | Transcribing | Shimmering status text: "Transcribing" (gradient sweep over the word; no spinner, no fake percentages) |
 | Polishing | Shimmering status text: "Polishing" — only while an AI style pass runs; local-only sends skip this state |
 | Done | Brief check affordance, then fade to Idle |
