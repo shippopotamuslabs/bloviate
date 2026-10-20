@@ -161,6 +161,49 @@ class StyleOutputGuardTest {
     }
 
     @Test
+    fun `the enc-101 device case passes below the floor threshold`() {
+        // Sean's dictation (build e9ed680, retest #2, 2026-10-19):
+        // THREE content words — damn, fucking, fast — and Gemini's
+        // Seneca transformation, verbatim from the generation
+        // record. Faithful in spirit, ZERO literal content-word
+        // overlap: "fast" became "swift" and the persona absorbed
+        // the profanity. ENC-100's floor scored it 0.0 and the
+        // local text landed; ENC-101's threshold exists for
+        // exactly this case — below 10 content words the floor
+        // cannot tell invention from transformation, so it does
+        // not judge.
+        val source = "damn that was fucking fast too"
+        val styled = "It was over in a breath. Speed is a thief that leaves no time for the mind to " +
+            "settle. What is swift is often soon forgotten."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
+    fun `nine content words sit below the wholesale floor threshold`() {
+        // ENC-101 boundary pin: one content word under the
+        // threshold — the floor does not apply even at zero
+        // literal overlap. (NATO-alphabet words are used because
+        // none of them is a stopword: the count is exact.)
+        val source = "alpha bravo charlie delta echo foxtrot golf hotel india"
+        val styled = "Zulu yankee xray whisky victor uniform tango sierra romeo."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
+    fun `ten content words sit at the wholesale floor threshold`() {
+        // ENC-101 boundary pin: AT the threshold the floor
+        // applies — a zero-overlap output is wholesale
+        // replacement, the Llama-class shape the floor exists
+        // to catch.
+        val source = "alpha bravo charlie delta echo foxtrot golf hotel india juliett"
+        val styled = "Zulu yankee xray whisky victor uniform tango sierra romeo quebec."
+
+        assertEquals(Verdict.FIDELITY_LOSS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
     fun `a benign restructure with pronoun edits passes`() {
         val source = "he told me that he would bring his laptop to the office tomorrow morning"
         val styled = "He said he would bring his laptop to the office tomorrow morning."
