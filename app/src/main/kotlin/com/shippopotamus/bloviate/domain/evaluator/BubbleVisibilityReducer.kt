@@ -5,31 +5,52 @@ import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import javax.inject.Inject
 
 /**
- * Pure state machine mapping [FieldFocusState] transitions to bubble window
- * commands.
+ * Pure state machine mapping field-focus transitions, keyboard-visibility
+ * transitions, and recording-bar activity to bubble window commands.
  *
- * - [FieldFocusState.EditableFocus] shows the bubble unless it is already
- *   visible or was dismissed for the current field session.
- * - Any non-editable state (none, or a password field) hides the bubble and
- *   clears dismissal suppression: dismissal is per field session, so once
- *   focus leaves editable fields the next editable field shows the bubble
- *   again.
- * - Duplicate or equivalent states produce no command, keeping show/hide
- *   idempotent across rapid transitions.
+ * Composition rule (ENC-125, Sean's Wispr-Flow decision): the bubble is
+ * visible exactly while the on-screen keyboard is up **and** an editable,
+ * non-password field is focused —
  *
- * Stateful but single-threaded in practice: driven from the bubble service's
- * main-thread collection. Not a singleton — each service instance owns one
- * through the use case.
+ * - [FieldFocusState.EditableFocus] shows the bubble only while the
+ *   keyboard is visible, unless it is already visible or was dismissed
+ *   for the current field session.
+ * - The keyboard appearing over an already-focused editable field shows
+ *   the bubble; the keyboard hiding hides it, even though the field
+ *   keeps focus.
+ * - Any non-editable focus state (none, or a password field) hides the
+ *   bubble immediately and clears dismissal suppression: dismissal is
+ *   per field session, so once focus leaves editable fields the next
+ *   editable field shows the bubble again.
+ *
+ * One exemption: while the recording/processing bar is active (fed via
+ * [onBarActivityChanged]), a keyboard hide never hides the window — the
+ * send flow completes first, and the deferred hide lands when the bar
+ * returns to idle. Focus-driven hides are NOT exempt: a password field
+ * taking focus mid-recording still hides (and thereby cancels) exactly
+ * as before.
+ *
+ * Duplicate or equivalent inputs produce no command, keeping show/hide
+ * idempotent across rapid transitions.
+ *
+ * Stateful but single-threaded in practice: driven from the bubble
+ * service's main-thread collection. Not a singleton — each service
+ * instance owns one through the use case.
  */
 class BubbleVisibilityReducer @Inject constructor() {
 
     private var bubbleVisible: Boolean = false
     private var dismissedThisFieldSession: Boolean = false
+    private var lastFocusState: FieldFocusState = FieldFocusState.NoEditableFocus
+    private var keyboardVisible: Boolean = false
+    private var barActive: Boolean = false
 
     /** Feed one focus transition; returns the window command it implies, if any. */
-    fun onFocusState(state: FieldFocusState): BubbleVisibilityCommand? =
-        when (state) {
-            is FieldFocusState.EditableFocus -> showIfNeeded()
+    fun onFocusState(state: FieldFocusState): BubbleVisibilityCommand? {
+        lastFocusState = state
+        return when (state) {
+            is FieldFocusState.EditableFocus ->
+                if (keyboardVisible) showIfNeeded() else null
             FieldFocusState.NoEditableFocus,
             is FieldFocusState.PasswordFocus,
             -> {
@@ -37,6 +58,36 @@ class BubbleVisibilityReducer @Inject constructor() {
                 hideIfVisible()
             }
         }
+    }
+
+    /** Feed one keyboard show/hide transition; returns the window command it implies, if any. */
+    fun onKeyboardVisibilityChanged(visible: Boolean): BubbleVisibilityCommand? {
+        if (visible == keyboardVisible) return null
+        keyboardVisible = visible
+        return when {
+            visible ->
+                if (lastFocusState is FieldFocusState.EditableFocus) showIfNeeded() else null
+            // Keyboard gone: hide — unless the bar is mid-flow, in which
+            // case the hide defers to onBarActivityChanged.
+            barActive -> null
+            else -> hideIfVisible()
+        }
+    }
+
+    /**
+     * Feed recording/processing bar activity (any non-idle bar state).
+     * When activity ends, a keyboard hide that was deferred while the bar
+     * was up lands here.
+     */
+    fun onBarActivityChanged(active: Boolean): BubbleVisibilityCommand? {
+        if (active == barActive) return null
+        barActive = active
+        return if (!active && bubbleVisible && !shouldBeVisible()) {
+            hideIfVisible()
+        } else {
+            null
+        }
+    }
 
     /** The user dragged the visible bubble into the dismiss zone. */
     fun onBubbleDismissed(): BubbleVisibilityCommand? {
@@ -44,11 +95,19 @@ class BubbleVisibilityReducer @Inject constructor() {
         return hideIfVisible()
     }
 
-    /** Forget visibility + dismissal; called when the owning service is destroyed. */
+    /** Forget visibility, dismissal, and both signal states; called when the owning service is destroyed. */
     fun reset() {
         bubbleVisible = false
         dismissedThisFieldSession = false
+        lastFocusState = FieldFocusState.NoEditableFocus
+        keyboardVisible = false
+        barActive = false
     }
+
+    private fun shouldBeVisible(): Boolean =
+        lastFocusState is FieldFocusState.EditableFocus &&
+            keyboardVisible &&
+            !dismissedThisFieldSession
 
     private fun showIfNeeded(): BubbleVisibilityCommand? =
         if (!bubbleVisible && !dismissedThisFieldSession) {
