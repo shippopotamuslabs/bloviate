@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.presentation
 
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
@@ -14,15 +13,14 @@ import com.shippopotamus.bloviate.presentation.BloviateMorphShapes.asShape
  * the Setup preview. The tint mapping lives in `BubbleTintColors.kt`.
  */
 /**
- * The bubble silhouette for this shape: the gospel's circle and pill,
- * its large rounded square (squircle), and the ENC-90 morph polygons.
+ * The bubble silhouette for this shape: the gospel's pill, its large
+ * rounded square (squircle), and the ENC-90 morph polygons.
  * The polygons are for the square bubble — see [barShape] for the wide
  * bar's reduced vocabulary.
  */
 @Composable
 fun BubbleShape.bubbleShape(): Shape =
     when (this) {
-        BubbleShape.CIRCLE -> CircleShape
         BubbleShape.PILL -> BloviateShapes.Pill
         BubbleShape.SQUIRCLE -> BloviateShapes.Scale.large
         BubbleShape.COOKIE -> with(BloviateMorphShapes) { Cookie4Sided.asShape() }
@@ -43,7 +41,6 @@ fun BubbleShape.barShape(): Shape =
     when (this) {
         BubbleShape.PILL -> BloviateShapes.Pill
         BubbleShape.SQUIRCLE -> BloviateShapes.Scale.large
-        BubbleShape.CIRCLE,
         BubbleShape.COOKIE,
         BubbleShape.CLOVER,
         BubbleShape.ARCH,
