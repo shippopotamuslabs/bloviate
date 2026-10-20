@@ -608,7 +608,6 @@ private fun BubbleSizeUi.labelRes(): Int =
 
 private fun BubbleShapeUi.labelRes(): Int =
     when (this) {
-        BubbleShapeUi.CIRCLE -> R.string.bubble_shape_circle
         BubbleShapeUi.PILL -> R.string.bubble_shape_pill
         BubbleShapeUi.SQUIRCLE -> R.string.bubble_shape_squircle
         BubbleShapeUi.COOKIE -> R.string.bubble_shape_cookie
