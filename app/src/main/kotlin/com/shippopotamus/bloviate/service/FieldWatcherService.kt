@@ -6,17 +6,23 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.shippopotamus.bloviate.domain.evaluator.FieldFocusEvaluator
 import com.shippopotamus.bloviate.domain.evaluator.TextSplicer
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
+import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 /**
  * Watches the focused input field system-wide and publishes a deduped
  * [FieldFocusState] through [FieldFocusPort] for the bubble overlay (ENC-59).
+ * It also publishes keyboard visibility through [KeyboardVisibilityPort]
+ * (ENC-125): an input-method window present in the accessibility window
+ * stream means the on-screen keyboard is up. Only the window's type is
+ * read for that signal — never its content.
  *
  * Privacy contract: the watcher path reads only the host package name and
  * structural flags. Field text and content descriptions are never read,
@@ -38,21 +44,27 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     lateinit var fieldFocusPort: FieldFocusPort
 
     @Inject
+    lateinit var keyboardVisibilityPort: KeyboardVisibilityPort
+
+    @Inject
     lateinit var insertionBridge: FieldWatcherBridge
 
     @Inject
     lateinit var textSplicer: TextSplicer
 
     private var lastPublishedState: FieldFocusState = FieldFocusState.NoEditableFocus
+    private var lastKeyboardVisible: Boolean = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         insertionBridge.register(this)
+        publishKeyboardVisibility()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || event.eventType !in RELEVANT_EVENT_TYPES) return
         publish(FieldFocusEvaluator.evaluate(focusedNodeSnapshot(event)))
+        publishKeyboardVisibility()
     }
 
     override fun onInterrupt() = Unit
@@ -65,6 +77,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     override fun onDestroy() {
         insertionBridge.unregister(this)
         publish(FieldFocusState.NoEditableFocus)
+        keyboardVisibilityPort.publish(false)
         super.onDestroy()
     }
 
@@ -147,6 +160,20 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
         if (state != lastPublishedState) {
             lastPublishedState = state
             Log.d(TAG, "focus state -> ${state.describeForLog()}")
+        }
+    }
+
+    /**
+     * Keyboard visibility from the window stream: an input-method window
+     * present means the keyboard is up (ENC-125). Reads window types
+     * only — the IME window's content is never touched.
+     */
+    private fun publishKeyboardVisibility() {
+        val visible = windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        keyboardVisibilityPort.publish(visible)
+        if (visible != lastKeyboardVisible) {
+            lastKeyboardVisible = visible
+            Log.d(TAG, "keyboard visible -> $visible")
         }
     }
 
