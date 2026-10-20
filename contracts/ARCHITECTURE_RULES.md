@@ -165,7 +165,7 @@ Android offers exactly one API that can tell whether an editable field in *anoth
 ### 5.2 BubbleOverlayService (Foreground Service + WindowManager)
 
 - `TYPE_APPLICATION_OVERLAY` window with `FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_NO_LIMITS`. **`FLAG_NOT_FOCUSABLE` is non-negotiable:** if the overlay takes focus, the text field loses its caret, `findFocus(FOCUS_INPUT)` returns null, and the bubble hides itself.
-- Foreground service type `microphone` (Android 14+ requirement for mic capture from a service). Until `RECORD_AUDIO` is granted the service starts as `specialUse`; it (re)starts as `microphone` once the permission is granted — Android 14+ refuses a microphone-type start without the grant.
+- Foreground service type `microphone` (Android 14+ requirement for mic capture from a service). Every start *begins* as `specialUse` (a start cannot know its origin, and `specialUse` is the only type legal from a boot receiver on Android 15); it then promotes per origin once `RECORD_AUDIO` is granted — user and restart starts promote to `microphone`, boot starts never promote at start time and promote at the first eligible moment instead. Android 14+ refuses a microphone-type start without the grant. Resident presence (ENC-129): a boot receiver starts the service when setup is complete, the auto-start setting is on, and the user has not stopped the bubble; the service runs `START_STICKY` while auto-start is on, and a user-pressed Stop is final until the next in-app start.
 - Keeps the transcription engine loaded/warm while enabled (see `TRANSCRIPTION_RULES.md`).
 - Bubble states: **Idle** (mic bubble), **Listening** (the recording bar: [X] [live waveform] [✓] + elapsed — no pulsing ring; the waveform is the amplitude affordance), **Transcribing** (shimmering status text in the waveform slot — "Transcribing" while ASR runs, "Polishing" while the AI style pass runs; local-only sends skip Polishing), **Done** (brief check), **Error** (red flash).
 - Gestures (**tap-only — there is deliberately NO hold-to-talk / push-to-talk**): tap bubble = start recording and morph into the recording bar; ✓ on the bar = stop + transcribe + insert; X on the bar = cancel (discard, insert nothing); drag = reposition (position persisted); drag to bottom = dismiss for this field session (during recording: cancel + dismiss).
@@ -180,7 +180,7 @@ Via the accessibility service on the focused node:
 
 ### 5.4 Permissions
 
-Onboarding gates, each with a deep link to the system setting: display over other apps (`SYSTEM_ALERT_WINDOW`), accessibility service enabled, microphone (`RECORD_AUDIO`). No account, no analytics.
+Onboarding gates, each with a deep link to the system setting: display over other apps (`SYSTEM_ALERT_WINDOW`), accessibility service enabled, microphone (`RECORD_AUDIO`), and battery-optimization exemption (the service must be allowed to stay running; a presence gate, not a dictation gate — dictation works without it, survival on aggressive OEMs does not). No account, no analytics.
 
 ---
 
