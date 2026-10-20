@@ -19,6 +19,7 @@ class OpenRouterStyleClientTest {
 
     private val professional = StyleCatalog.byId("professional")
     private val seneca = StyleCatalog.byId("seneca")
+    private val aristotle = StyleCatalog.byId("aristotle")
     private val fakeTransport = FakeStyleHttpTransport()
     private val fakeKeys = FakeApiKeyPort(initialKey = "test-key")
     private var nowMs = 1_000L
@@ -104,16 +105,17 @@ class OpenRouterStyleClientTest {
     fun `the responding provider is surfaced on success`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-80: streamed chunks carry the serving upstream; telemetry
-        // surfaces it so instability is visible from logcat.
+        // surfaces it so instability is visible from logcat. ENC-96:
+        // on the happy path that upstream is Groq, the pin's head.
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "xAI")
+            emitStream(emit, parts = listOf(STYLED_TEXT), provider = "Groq")
             HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = SOURCE_TEXT)
 
         val styled = outcome as LlmStyleOutcome.Styled
-        assertEquals("xAI", styled.provider)
+        assertEquals("Groq", styled.provider)
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
     }
 
@@ -147,7 +149,11 @@ class OpenRouterStyleClientTest {
         client.style(style = professional, text = SOURCE_TEXT)
 
         assertTrue(fakeTransport.requests[0].contains("\"stream\":true"))
-        assertTrue(fakeTransport.requests[0].contains("\"provider\":{\"order\":[\"xai\"],\"allow_fallbacks\":true}"))
+        assertTrue(
+            fakeTransport.requests[0].contains(
+                "\"provider\":{\"order\":[\"groq\",\"sambanova\",\"together\",\"deepinfra\"],\"allow_fallbacks\":true}",
+            ),
+        )
         assertTrue(
             fakeTransport.requests[1].contains(
                 "\"provider\":{\"order\":[\"anthropic\"],\"allow_fallbacks\":true,\"ignore\":[\"claude-on-aws\"]}",
@@ -156,12 +162,12 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `the chain attempts grok latest first and haiku second`() = runTest {
+    fun `the chain attempts llama 3 3 first and haiku second`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-84: literal chain order — Grok alias, then Haiku, then local.
+        // ENC-96: literal chain order — Llama 3.3, then Haiku, then local.
         fakeTransport.handler = { callIndex, requestJson, emit ->
             if (callIndex == 0) {
-                assertTrue(requestJson.contains("~x-ai/grok-latest"))
+                assertTrue(requestJson.contains("meta-llama/llama-3.3-70b-instruct"))
                 HttpResult(status = 404, body = "model not found")
             } else {
                 assertTrue(requestJson.contains("anthropic/claude-haiku-5.5"))
@@ -174,7 +180,7 @@ class OpenRouterStyleClientTest {
 
         assertEquals(HAIKU_STYLED_TEXT, (outcome as LlmStyleOutcome.Styled).text)
         assertEquals(2, fakeTransport.requests.size)
-        assertTrue(fakeTransport.requests[0].contains("~x-ai/grok-latest"))
+        assertTrue(fakeTransport.requests[0].contains("meta-llama/llama-3.3-70b-instruct"))
         assertTrue(fakeTransport.requests[1].contains("anthropic/claude-haiku-5.5"))
     }
 
@@ -346,7 +352,7 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `reasoning deltas streamed ahead of content keep the grok attempt alive`() = runTest {
+    fun `reasoning deltas streamed ahead of content keep the primary attempt alive`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 1, streamed shape: Grok thinks out loud
         // first — reasoning deltas in both wire shapes (xAI's
@@ -373,7 +379,7 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `a silent reasoning phase ahead of the first chunk does not kill the grok attempt`() = runTest {
+    fun `a silent reasoning phase ahead of the first chunk does not kill the primary attempt`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 1, silent shape: the reasoning phase
         // delivers NO line for longer than the old 2s first-token
@@ -397,7 +403,7 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `slow gaps between reasoning deltas do not kill the grok attempt`() = runTest {
+    fun `slow gaps between reasoning deltas do not kill the primary attempt`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
         // ENC-91 hypothesis 1, paused shape: reasoning starts, pauses
         // past the old 2s budget mid-thought, resumes, then answers.
@@ -468,14 +474,14 @@ class OpenRouterStyleClientTest {
     }
 
     @Test
-    fun `the primary carries effort only reasoning and the fallback carries none`() = runTest {
+    fun `no chain attempt carries a reasoning block`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-95's split profile (was ENC-94's both-carry-it shape):
-        // effort-only on the primary — never combined with a token
-        // cap, the combination providers rejected — and no block at
-        // all on the Anthropic fallback, whose translated budget
-        // arithmetic made the combined request invalid by
-        // construction and which has no blowout to leash.
+        // ENC-96: the primary is a non-reasoning instruct model —
+        // there is no thinking to leash, and a block would be one
+        // provider translation away from a rejection (ENC-95's
+        // lesson). The fallback keeps its proven ENC-95 no-block
+        // shape for the same reason. (Was ENC-95's split profile:
+        // effort-only on the then-reasoning primary, none on Haiku.)
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
                 HttpResult(status = 404, body = "model not found")
@@ -487,7 +493,7 @@ class OpenRouterStyleClientTest {
 
         client.style(style = professional, text = SOURCE_TEXT)
 
-        assertTrue(fakeTransport.requests[0].contains("\"reasoning\":{\"effort\":\"low\"}"))
+        assertTrue(!fakeTransport.requests[0].contains("\"reasoning\""))
         assertTrue(!fakeTransport.requests[1].contains("\"reasoning\""))
     }
 
@@ -648,14 +654,16 @@ class OpenRouterStyleClientTest {
     @Test
     fun `the seneca tirade restyles and inserts with its profanity intact`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // ENC-94's acceptance scenario in fixture form: Sean's tirade
-        // test — long, first-person, profanity-bearing — restyled by
-        // the primary in Seneca's voice. The hard tier (the profanity,
+        // The acceptance scenario in fixture form (ENC-94's scenario,
+        // ENC-96's primary): Sean's tirade test — long, first-person,
+        // profanity-bearing — restyled by the primary in Seneca's
+        // voice, served by Groq in the plain content-delta shape a
+        // non-reasoning model streams. The hard tier (the profanity,
         // the names) survives, the speaker stays the speaker (ENC-92),
         // and the styled text is the outcome of a single call.
         fakeTransport.handler = { callIndex, _, emit ->
             if (callIndex == 0) {
-                emitStream(emit, parts = listOf(TIRADE_STYLED), provider = "SpaceXAI")
+                emitStream(emit, parts = listOf(TIRADE_STYLED), provider = "Groq")
                 HttpResult(status = 200, body = "")
             } else {
                 HttpResult(status = 499, body = "fallback exploded")
@@ -667,6 +675,33 @@ class OpenRouterStyleClientTest {
         val styled = outcome as LlmStyleOutcome.Styled
         assertEquals(TIRADE_STYLED, styled.text)
         assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals("Groq", styled.provider)
+        assertEquals(1, fakeTransport.requests.size)
+    }
+
+    @Test
+    fun `a long aristotle restyle passes the guard and inserts from the primary`() = runTest {
+        val client = newClient(StandardTestDispatcher(testScheduler))
+        // ENC-96 battery: the guard suite's long-Aristotle datapoint
+        // (an inserted paragraph break, 'colour' for 'color', elevated
+        // diction, every content word preserved) end to end against
+        // the new primary's recorded shape — plain Groq deltas, no
+        // reasoning phase — and it must land as ONE primary call.
+        fakeTransport.handler = { callIndex, _, emit ->
+            if (callIndex == 0) {
+                emitStream(emit, parts = listOf(ARISTOTLE_STYLED), provider = "Groq")
+                HttpResult(status = 200, body = "")
+            } else {
+                HttpResult(status = 499, body = "fallback exploded")
+            }
+        }
+
+        val outcome = client.style(style = aristotle, text = ARISTOTLE_SOURCE)
+
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(ARISTOTLE_STYLED, styled.text)
+        assertEquals(OpenRouterPayload.PRIMARY_MODEL, styled.model)
+        assertEquals("Groq", styled.provider)
         assertEquals(1, fakeTransport.requests.size)
     }
 
@@ -767,15 +802,18 @@ class OpenRouterStyleClientTest {
     @Test
     fun `the gerbil limerick passes the guard end to end`() = runTest {
         val client = newClient(StandardTestDispatcher(testScheduler))
-        // The canonical ENC-82 datapoint: profanity intact, one call.
+        // The canonical ENC-82 datapoint: profanity intact, one call —
+        // in ENC-96's primary shape (Groq-served plain deltas).
         fakeTransport.handler = { _, _, emit ->
-            emitStream(emit, parts = listOf(GERBIL_STYLED))
+            emitStream(emit, parts = listOf(GERBIL_STYLED), provider = "Groq")
             HttpResult(status = 200, body = "")
         }
 
         val outcome = client.style(style = professional, text = GERBIL_SOURCE)
 
-        assertEquals(GERBIL_STYLED, (outcome as LlmStyleOutcome.Styled).text)
+        val styled = outcome as LlmStyleOutcome.Styled
+        assertEquals(GERBIL_STYLED, styled.text)
+        assertEquals("Groq", styled.provider)
         assertEquals(1, fakeTransport.keylessCallCount)
     }
 
@@ -829,6 +867,18 @@ class OpenRouterStyleClientTest {
         /** ENC-94's long reasoning phase: chunks and beat, ~6s of virtual deliberation. */
         const val REASONING_BURST_CHUNKS: Int = 24
         const val REASONING_BEAT_MS: Long = 250L
+
+        /** The guard suite's long-Aristotle pair (ENC-82/83 datapoint), end to end in ENC-96. */
+        const val ARISTOTLE_SOURCE: String =
+            "a man's character is revealed not by his grand declarations but by his small daily choices. " +
+                "anyone can be generous when the world is watching, but the color of his soul shows in how he " +
+                "treats people who can do nothing for him. excellence is not a single act but a habit, " +
+                "repeated until it becomes the shape of a life."
+        const val ARISTOTLE_STYLED: String =
+            "A man's character is revealed not by his grand declarations, but by his small daily choices. " +
+                "Anyone can be generous when the world is watching; the colour of his soul, though, shows in how he " +
+                "treats people who can do nothing for him.\n\n" +
+                "Excellence, then, is not a single act but a habit, repeated until it becomes the shape of a life."
 
         /** Sean's ENC-94 tirade test, transcript-shaped (ENC-94). */
         const val TIRADE_SOURCE: String =
