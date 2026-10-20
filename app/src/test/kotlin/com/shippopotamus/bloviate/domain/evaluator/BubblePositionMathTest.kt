@@ -186,8 +186,99 @@ class BubblePositionMathTest {
         assertEquals(0, barX)
     }
 
+    // ENC-123: the docked edge is invariant across bubble <-> bar morphs.
+    // The resting position is a function of the persisted anchor and the
+    // bubble's own size ONLY — a collapse that re-derives it lands exactly
+    // where the bubble rested before the expansion, whatever the bar's
+    // width was and whatever widths the morph passed through.
+
+    @Test
+    fun `expand then collapse returns the identical resting position for a right docked bubble`() {
+        val anchor = BubblePosition(xFraction = 1f, yFraction = 0.68f)
+        val resting = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, PORTRAIT)
+        assertEquals(PORTRAIT.widthPx - BUBBLE_PX, resting.xPx)
+
+        for (barWidthPx in listOf(320, 480, BAR_PX, 900)) {
+            val barX = BubblePositionMath.barWindowX(
+                bubbleXPx = resting.xPx,
+                barWidthPx = barWidthPx,
+                bounds = PORTRAIT,
+                edgeMarginPx = MARGIN_PX,
+            )
+            assertTrue(barX + barWidthPx <= PORTRAIT.widthPx, "bar of $barWidthPx stays on screen")
+            val collapsed = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, PORTRAIT)
+            assertEquals(resting, collapsed, "collapse after a $barWidthPx bar restores the resting position")
+        }
+    }
+
+    @Test
+    fun `expand then collapse returns the identical resting position for a left docked bubble`() {
+        val anchor = BubblePosition(xFraction = 0f, yFraction = 0.68f)
+        val resting = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, PORTRAIT)
+        assertEquals(0, resting.xPx)
+
+        val barX = BubblePositionMath.barWindowX(
+            bubbleXPx = resting.xPx,
+            barWidthPx = BAR_PX,
+            bounds = PORTRAIT,
+            edgeMarginPx = MARGIN_PX,
+        )
+        assertEquals(resting.xPx, barX, "a left docked bubble's bar grows rightward from the resting x")
+        val collapsed = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, PORTRAIT)
+        assertEquals(resting, collapsed)
+    }
+
+    @Test
+    fun `clamping a docked position against a wider form's width displaces it - the trap restingTopLeft avoids`() {
+        // Characterization of the ENC-123 bug: pixel-clamping the resting x
+        // against a transient width (the bar's, mid-collapse) pulls a right
+        // docked bubble left by the width difference, and clamping never
+        // moves it back. Resting positions must be re-derived from the
+        // anchor (restingTopLeft), never pixel-clamped against a form width.
+        val anchor = BubblePosition(xFraction = 1f, yFraction = 0.68f)
+        val resting = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, PORTRAIT)
+
+        val displaced = BubblePositionMath.clamp(resting, BAR_PX, BUBBLE_PX, PORTRAIT)
+
+        assertEquals(PORTRAIT.widthPx - BAR_PX, displaced.xPx)
+        assertTrue(displaced.xPx < resting.xPx, "the clamp displaced the bubble toward the interior")
+    }
+
+    @Test
+    fun `a size change while docked preserves the docked edge`() {
+        val rightDock = BubblePosition(xFraction = 1f, yFraction = 0.5f)
+        val leftDock = BubblePosition(xFraction = 0f, yFraction = 0.5f)
+
+        for (sizePx in listOf(BUBBLE_SMALL_PX, BUBBLE_PX, BUBBLE_LARGE_PX)) {
+            val right = BubblePositionMath.restingTopLeft(rightDock, sizePx, sizePx, PORTRAIT)
+            assertEquals(PORTRAIT.widthPx - sizePx, right.xPx, "right edge at size $sizePx")
+            assertEquals(0, BubblePositionMath.restingTopLeft(leftDock, sizePx, sizePx, PORTRAIT).xPx)
+        }
+    }
+
+    @Test
+    fun `a size change moves a mid-screen position only as the anchor model prescribes`() {
+        val anchor = BubblePosition(xFraction = 0.5f, yFraction = 0.25f)
+
+        for (sizePx in listOf(BUBBLE_SMALL_PX, BUBBLE_PX, BUBBLE_LARGE_PX)) {
+            val resting = BubblePositionMath.restingTopLeft(anchor, sizePx, sizePx, PORTRAIT)
+            val roundTripped = BubblePositionMath.toNormalized(resting, sizePx, sizePx, PORTRAIT)
+            assertEquals(anchor.xFraction, roundTripped.xFraction, FRACTION_TOLERANCE, "x at size $sizePx")
+            assertEquals(anchor.yFraction, roundTripped.yFraction, FRACTION_TOLERANCE, "y at size $sizePx")
+        }
+
+        // The pixel position scales with the travel range — it never jumps
+        // to an edge or keeps a stale pixel from the previous size.
+        val small = BubblePositionMath.restingTopLeft(anchor, BUBBLE_SMALL_PX, BUBBLE_SMALL_PX, PORTRAIT)
+        val large = BubblePositionMath.restingTopLeft(anchor, BUBBLE_LARGE_PX, BUBBLE_LARGE_PX, PORTRAIT)
+        assertEquals((PORTRAIT.widthPx - BUBBLE_SMALL_PX) / 2, small.xPx)
+        assertEquals((PORTRAIT.widthPx - BUBBLE_LARGE_PX) / 2, large.xPx)
+    }
+
     private companion object {
         const val BUBBLE_PX: Int = 168
+        const val BUBBLE_SMALL_PX: Int = 144
+        const val BUBBLE_LARGE_PX: Int = 192
         const val BAR_PX: Int = 640
         const val MARGIN_PX: Int = 24
         const val FRACTION_TOLERANCE: Float = 0.001f
