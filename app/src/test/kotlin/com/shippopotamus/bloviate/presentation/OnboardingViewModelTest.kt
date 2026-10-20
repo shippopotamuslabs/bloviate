@@ -7,6 +7,7 @@ import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import com.shippopotamus.bloviate.domain.model.OnboardingStep
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
@@ -15,9 +16,11 @@ import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveWatcherConnectionUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
@@ -26,6 +29,7 @@ import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeOnboardingPort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
+import com.shippopotamus.bloviate.testing.FakeWatcherConnectionPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -49,6 +53,8 @@ class OnboardingViewModelTest {
     private val fakeModelStorePort = FakeModelStorePort()
     private val fakeParakeetModelStorePort = FakeParakeetModelStorePort()
     private val fakeEnginePreferencePort = FakeEnginePreferencePort()
+    private val fakeWatcherConnectionPort = FakeWatcherConnectionPort()
+    private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
 
     /** Builds the ViewModel over the current fake state; configure fakes first. */
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
@@ -65,6 +71,8 @@ class OnboardingViewModelTest {
         ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
         observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
         selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
+        observeWatcherConnection = ObserveWatcherConnectionUseCase(fakeWatcherConnectionPort),
+        isBatteryOptimizationExempt = IsBatteryOptimizationExemptUseCase(fakeBatteryExemptionPort),
     )
 
     @Test
@@ -378,6 +386,7 @@ class OnboardingViewModelTest {
     fun `the test step is satisfied only when the whole chain is live`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             fakeWatcherAccessPort.enabled = true
+            fakeWatcherConnectionPort.publishConnected(true)
             fakeBubbleOverlayAccessPort.canDraw = true
             fakeMicPermissionPort.setGranted(true)
             fakeParakeetModelStorePort.setReady()
@@ -390,6 +399,64 @@ class OnboardingViewModelTest {
                 fakeBubbleServiceStatePort.publishServiceRunning(false)
 
                 assertFalse(awaitItem().stepSatisfied(OnboardingStepUi.TEST))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    // ENC-129: the battery step, supervised watcher step, walk order.
+
+    @Test
+    fun `continue walks microphone to battery to model`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeOnboardingPort.publish(
+                OnboardingProgress(step = OnboardingStep.MICROPHONE, finished = false),
+            )
+            val viewModel = buildViewModel()
+
+            viewModel.onContinue()
+            advanceUntilIdle()
+            assertEquals(
+                OnboardingProgress(step = OnboardingStep.BATTERY, finished = false),
+                fakeOnboardingPort.progress.value,
+            )
+
+            viewModel.onContinue()
+            advanceUntilIdle()
+            assertEquals(
+                OnboardingProgress(step = OnboardingStep.MODEL, finished = false),
+                fakeOnboardingPort.progress.value,
+            )
+        }
+
+    @Test
+    fun `battery exemption is read at start and refreshed on resume`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            val viewModel = buildViewModel()
+
+            viewModel.uiState.test {
+                assertFalse(awaitItem().stepSatisfied(OnboardingStepUi.BATTERY))
+
+                fakeBatteryExemptionPort.exempt = true
+                viewModel.onResumed()
+
+                assertTrue(awaitItem().stepSatisfied(OnboardingStepUi.BATTERY))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `watcher step follows the connection stream`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeWatcherAccessPort.enabled = true
+            val viewModel = buildViewModel()
+
+            viewModel.uiState.test {
+                // Enabled but not yet connected: supervised unsatisfied.
+                assertFalse(awaitItem().stepSatisfied(OnboardingStepUi.WATCHER))
+
+                fakeWatcherConnectionPort.publishConnected(true)
+
+                assertTrue(awaitItem().stepSatisfied(OnboardingStepUi.WATCHER))
                 cancelAndIgnoreRemainingEvents()
             }
         }

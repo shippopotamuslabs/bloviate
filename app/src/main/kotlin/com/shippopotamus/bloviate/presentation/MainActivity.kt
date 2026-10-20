@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onOpenAccessibilitySettings = ::openAccessibilitySettings,
                     onOpenOverlaySettings = ::openOverlaySettings,
+                    onOpenBatterySettings = ::openBatteryOptimizationSettings,
                     onStartBubble = ::startBubbleService,
                     onStopBubble = ::stopBubbleService,
                     onRequestMicPermission = ::requestMicPermission,
@@ -81,14 +82,32 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /**
+     * The battery-optimization list (ENC-129). The direct exemption
+     * request (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) is
+     * Play-policy-restricted, so the user is sent to the list to set
+     * Bloviate to Unrestricted instead.
+     */
+    private fun openBatteryOptimizationSettings() {
+        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    }
+
     private fun startBubbleService() {
+        // An explicit in-app start lifts a previous Stop in the
+        // resident-presence record (ENC-129) and tags the start as a
+        // user start, the origin always eligible for the microphone type.
+        viewModel.onBubbleStartRequested()
         ContextCompat.startForegroundService(
             this,
-            Intent(this, BubbleOverlayService::class.java),
+            Intent(this, BubbleOverlayService::class.java)
+                .setAction(BubbleOverlayService.ACTION_USER_START),
         )
     }
 
     private fun stopBubbleService() {
+        // Record the stop (ENC-129): boot start and sticky restart
+        // honor it until the next explicit start.
+        viewModel.onBubbleStopRequested()
         stopService(Intent(this, BubbleOverlayService::class.java))
     }
 
