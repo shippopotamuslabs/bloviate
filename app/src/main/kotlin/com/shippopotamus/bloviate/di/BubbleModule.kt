@@ -6,13 +6,17 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import com.shippopotamus.bloviate.data.AndroidBubbleOverlayAccess
+import com.shippopotamus.bloviate.data.AndroidInstallSourceAccess
 import com.shippopotamus.bloviate.data.BubbleServiceStateHolder
 import com.shippopotamus.bloviate.data.DataStoreBubbleAppearanceStore
 import com.shippopotamus.bloviate.data.DataStoreBubblePositionStore
+import com.shippopotamus.bloviate.data.DataStoreOnboardingStore
 import com.shippopotamus.bloviate.domain.port.BubbleAppearancePort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubblePositionPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
+import com.shippopotamus.bloviate.domain.port.InstallSourcePort
+import com.shippopotamus.bloviate.domain.port.OnboardingPort
 import com.shippopotamus.bloviate.domain.port.TextInsertionPort
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.service.FieldWatcherBridge
@@ -36,6 +40,13 @@ abstract class BubbleModule {
 
     @Binds
     abstract fun bindBubbleAppearancePort(store: DataStoreBubbleAppearanceStore): BubbleAppearancePort
+
+    /** First-run wizard progress (ENC-67) — a DataStore preference like the appearance record. */
+    @Binds
+    abstract fun bindOnboardingPort(store: DataStoreOnboardingStore): OnboardingPort
+
+    @Binds
+    abstract fun bindInstallSourcePort(access: AndroidInstallSourceAccess): InstallSourcePort
 
     @Binds
     abstract fun bindBubbleServiceStatePort(holder: BubbleServiceStateHolder): BubbleServiceStatePort
