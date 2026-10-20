@@ -1,7 +1,6 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.Manifest
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -46,6 +45,15 @@ class MainActivity : ComponentActivity() {
      * the shell — is the visible surface.
      */
     private val onboardingViewModel: OnboardingViewModel by viewModels()
+
+    /**
+     * Whether the battery dialog attempt has already fired in this
+     * activity session (ENC-141): the escalation input for
+     * [BatteryExemptionIntentPolicy.firstAttempt]. Set only when the
+     * direct intent actually starts — a start that throws never
+     * fired, and the same tap's walk handles it.
+     */
+    private var batteryDirectAttemptFired: Boolean = false
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -96,29 +104,43 @@ class MainActivity : ComponentActivity() {
      * [BatteryExemptionIntentPolicy]: the one-tap system dialog first
      * (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` with our package
      * URI — the system asks in place and the user never leaves the
-     * app), falling back to the battery-optimization settings list
-     * when an OEM build strips the direct intent and starting it
-     * throws [ActivityNotFoundException]. The direct intent is
+     * app), falling back to the battery-optimization settings list.
+     *
+     * Hardened by ENC-141 after a dead tap on Motorola: ANY exception
+     * from [startActivity] advances the plan, not just
+     * `ActivityNotFoundException` — OEM builds fail the direct intent
+     * in more ways than one, and some start it "successfully" into a
+     * no-op, which the policy's session escalation answers on the
+     * next tap (a direct attempt that already fired goes straight to
+     * the list). Every attempt is logged, fired or failed, so a field
+     * report can arbitrate dialog-vs-list on a given device (the
+     * ENC-128 decision-seam pattern). The direct intent is
      * Play-policy-restricted; the flag is recorded on ENC-139 for the
      * launch checklist and deliberately does not degrade this
      * sideload-first flow back to the list (ENC-129's behavior).
      * Neither intent needs a manifest permission to fire.
      */
     private fun openBatteryOptimizationSettings() {
-        var attempt: BatteryExemptionAttempt? = BatteryExemptionIntentPolicy.firstAttempt()
+        var attempt: BatteryExemptionAttempt? =
+            BatteryExemptionIntentPolicy.firstAttempt(directAlreadyTried = batteryDirectAttemptFired)
         while (attempt != null) {
             try {
                 startActivity(attempt.intent())
+                Log.i(TAG, "Battery exemption attempt $attempt started")
+                if (attempt == BatteryExemptionAttempt.DIRECT_REQUEST) {
+                    batteryDirectAttemptFired = true
+                }
                 return
-            } catch (notFound: ActivityNotFoundException) {
-                // A build that strips this attempt's intent is the
-                // signal to advance the plan — logged because the
-                // fallback being exercised is field evidence about
-                // the device, not an error in the flow.
-                Log.w(TAG, "Battery exemption attempt $attempt unavailable; advancing the plan", notFound)
+            } catch (failure: Exception) {
+                // A failed start — whatever its type — is the signal
+                // to advance the plan, logged with the exception
+                // because which attempt failed, and how, is field
+                // evidence about the device, not an error in the flow.
+                Log.w(TAG, "Battery exemption attempt $attempt failed to start; advancing the plan", failure)
                 attempt = BatteryExemptionIntentPolicy.attemptAfter(attempt)
             }
         }
+        Log.w(TAG, "Battery exemption plan exhausted; no attempt could be started")
     }
 
     /** The platform intent a [BatteryExemptionAttempt] names. */
