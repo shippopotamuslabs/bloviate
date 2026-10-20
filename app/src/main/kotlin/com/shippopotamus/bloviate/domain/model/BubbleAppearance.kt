@@ -8,13 +8,17 @@ enum class BubbleSize {
 }
 
 /**
- * Bubble silhouettes (ENC-68): the gospel's circle and pill, its rounded
- * square (squircle), and the M3 Expressive morph polygons adopted in
- * ENC-90 (cookie, clover, arch). The Compose shape each name renders as
- * is a presentation mapping; the domain only names the choice.
+ * Bubble silhouettes (ENC-68): the gospel's pill, its rounded square
+ * (squircle), and the M3 Expressive morph polygons adopted in ENC-90
+ * (cookie, clover, arch). The Compose shape each name renders as is a
+ * presentation mapping; the domain only names the choice.
+ *
+ * ENC-122: the launch list also carried a CIRCLE entry, but on the
+ * square bubble and the bar it resolved to the same radius as PILL —
+ * one shape offered twice — so the picker keeps only PILL. Stored
+ * CIRCLE records migrate to PILL at the persistence mapper.
  */
 enum class BubbleShape {
-    CIRCLE,
     PILL,
     SQUIRCLE,
     COOKIE,
@@ -43,7 +47,9 @@ enum class BubbleTint {
  * tint, persisted as schema v1 in the shared preferences DataStore (see
  * `contracts/DATA_LAYER_RULES.md` §2). [DEFAULT] is exactly the look the
  * bubble shipped with before this preference existed — full opacity,
- * medium (56dp), circle, indigo — so an absent record changes nothing.
+ * medium (56dp), pill, indigo — so an absent record changes nothing.
+ * (The shipping look was named "circle" until ENC-122 merged the two
+ * identical silhouettes under PILL.)
  *
  * Opacity is bounded to [MIN_OPACITY]..[MAX_OPACITY]: below the floor the
  * bubble would be too faint to find against a busy host app, which is a
@@ -54,7 +60,7 @@ enum class BubbleTint {
 data class BubbleAppearance(
     val opacity: Float = MAX_OPACITY,
     val size: BubbleSize = BubbleSize.MEDIUM,
-    val shape: BubbleShape = BubbleShape.CIRCLE,
+    val shape: BubbleShape = BubbleShape.PILL,
     val tint: BubbleTint = BubbleTint.INDIGO,
 ) {
 

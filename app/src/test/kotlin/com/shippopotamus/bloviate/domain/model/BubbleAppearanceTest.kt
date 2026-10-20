@@ -11,7 +11,7 @@ class BubbleAppearanceTest {
 
         assertEquals(1f, appearance.opacity)
         assertEquals(BubbleSize.MEDIUM, appearance.size)
-        assertEquals(BubbleShape.CIRCLE, appearance.shape)
+        assertEquals(BubbleShape.PILL, appearance.shape)
         assertEquals(BubbleTint.INDIGO, appearance.tint)
     }
 
