@@ -13,6 +13,7 @@ import com.shippopotamus.bloviate.domain.port.LlmStylePort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -57,7 +58,7 @@ import java.net.HttpURLConnection
  * field. Timeouts judge LIVENESS, not total time: a first-token budget,
  * a reasoning-phase budget, and an inter-token gap budget (any line —
  * token, reasoning, or keep-alive — counts as a sign of life), plus a
- * generous absolute cap as backstop. A healthy stream may therefore
+ * generous per-attempt absolute cap as backstop (ENC-97). A healthy stream may therefore
  * run far past the old 4s total cap on long dictations. ENC-91
  * re-based the pre-content budgets for a reasoning primary: Grok
  * thinks before it speaks, and a budget that cannot tell thinking
@@ -106,6 +107,24 @@ import java.net.HttpURLConnection
  * choice to revive deliberately. Everything else is inherited
  * unchanged: Haiku fallback with its ENC-80 ignore, the ENC-82
  * guard, ENC-95's degraded retry, and all budgets.
+ *
+ * Per-attempt budgets (ENC-97): until now the whole chain shared
+ * one absolute cap ([ABSOLUTE_CAP_MS] as was, 14s) — designed in
+ * ENC-94 to bound ONE reasoning attempt's worst case. Sean's
+ * ENC-96 retest exposed the structural flaw: the Llama primary
+ * hallucinated (ENC-98), the guard failed it, and the Haiku
+ * fallback then produced the faithful restyle server-side — but
+ * the chain deadline, partly spent by the primary, killed the
+ * slow-but-healthy fallback stream mid-flight and the local text
+ * landed. Budgets are now per attempt: each attempt (full and
+ * degraded alike) runs under its own liveness rules plus its own
+ * [ATTEMPT_ABSOLUTE_CAP_MS]; a per-attempt timeout advances the
+ * chain carrying that attempt's `timeout` reason instead of
+ * killing the chain, and telemetry names the attempt (model +
+ * payload shape) and the reason on every death. The only
+ * chain-wide bound left is [CHAIN_BACKSTOP_MS] — the four attempt
+ * caps plus slack — which exists purely as pathology insurance
+ * and can only fire if an attempt's own cap somehow fails to.
  */
 class OpenRouterStyleClient(
     private val transport: StyleHttpTransport,
@@ -131,9 +150,11 @@ class OpenRouterStyleClient(
         val prompt = prompts.build(style = style, transcript = text)
         val startedMs = clock()
         return try {
-            // One absolute backstop for the whole chain; the per-attempt
-            // liveness budgets inside do the real judging (ENC-81).
-            withTimeout(ABSOLUTE_CAP_MS) {
+            // Pathology insurance only (ENC-97): the sum of the four
+            // per-attempt caps plus slack. The attempts' own caps and
+            // liveness budgets do the real judging (ENC-81/97); this
+            // bound can only fire if one of them somehow fails to.
+            withTimeout(CHAIN_BACKSTOP_MS) {
                 when (val first = attemptPrimary(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)) {
                     is AttemptResult.Done -> first.outcome
                     is AttemptResult.Retry -> retryOutcome(key = key, prompt = prompt, sourceText = text, startedMs = startedMs)
@@ -259,16 +280,54 @@ class OpenRouterStyleClient(
                 lines.close()
             }
         }
+        // Telemetry names the attempt on every death (ENC-97): model
+        // plus which payload shape of it is running.
+        val attemptLabel = "model=$model shape=${if (degraded) "degraded" else "full"}"
+        // The attempt's own absolute cap (ENC-97): the liveness budgets
+        // inside judge silence; this bounds an attempt that never goes
+        // silent yet never finishes (an endless keep-alive stream).
+        // Expiry advances the chain with this attempt's reason — it
+        // never kills the chain the way the old shared cap did.
+        val result = withTimeoutOrNull(ATTEMPT_ABSOLUTE_CAP_MS) {
+            runStream(
+                call = call,
+                lines = lines,
+                attemptLabel = attemptLabel,
+                startedMs = startedMs,
+                model = model,
+                sourceText = sourceText,
+            )
+        }
+        if (result != null) return result
+        call.cancel()
+        Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_TIMEOUT capMs=$ATTEMPT_ABSOLUTE_CAP_MS")
+        return AttemptResult.Retry(reason = REASON_TIMEOUT)
+    }
+
+    /**
+     * Consumes one attempt's stream to a verdict: liveness assembly,
+     * HTTP status, then the guard via [finish]. Suspends until the
+     * stream concludes or a budget (liveness, or the caller's
+     * per-attempt cap) cancels it.
+     */
+    private suspend fun runStream(
+        call: Deferred<HttpResult>,
+        lines: Channel<String>,
+        attemptLabel: String,
+        startedMs: Long,
+        model: String,
+        sourceText: String,
+    ): AttemptResult {
         val assembly = try {
             consumeLines(lines)
         } catch (liveness: LivenessException) {
             call.cancel()
-            Log.d(TAG, "style attempt model=$model outcome=${liveness.reason}")
+            Log.d(TAG, "style attempt $attemptLabel outcome=${liveness.reason}")
             return AttemptResult.Retry(reason = liveness.reason)
         }
         if (assembly.errorData != null) {
             call.cancel()
-            return streamErrorResult(data = assembly.errorData, model = model)
+            return streamErrorResult(data = assembly.errorData, attemptLabel = attemptLabel)
         }
         val result = try {
             if (assembly.doneReceived) {
@@ -284,15 +343,16 @@ class OpenRouterStyleClient(
         } catch (exception: Exception) {
             // The producer died mid-stream (socket, IO): a provider
             // failure like any other — worth the other model's try.
-            Log.d(TAG, "style attempt model=$model outcome=$REASON_TRANSPORT_ERROR detail=${exception.javaClass.simpleName}")
+            Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_TRANSPORT_ERROR detail=${exception.javaClass.simpleName}")
             return AttemptResult.Retry(reason = REASON_TRANSPORT_ERROR)
         }
-        if (result.status != HttpURLConnection.HTTP_OK) return httpFailureResult(result = result, model = model)
+        if (result.status != HttpURLConnection.HTTP_OK) return httpFailureResult(result = result, attemptLabel = attemptLabel)
         return finish(
             content = assembly.content,
             provider = assembly.provider,
             reasoningTokens = assembly.reasoningTokens,
             startedMs = startedMs,
+            attemptLabel = attemptLabel,
             model = model,
             sourceText = sourceText,
         )
@@ -382,10 +442,10 @@ class OpenRouterStyleClient(
     private fun sseData(line: String): String? =
         line.trim().takeIf { it.startsWith(DATA_PREFIX) }?.removePrefix(DATA_PREFIX)?.trim()?.takeIf { it.isNotEmpty() }
 
-    private fun streamErrorResult(data: String, model: String): AttemptResult {
+    private fun streamErrorResult(data: String, attemptLabel: String): AttemptResult {
         val provider = OpenRouterPayload.extractProvider(data)
         if (OpenRouterPayload.isModelUnavailable(status = HttpURLConnection.HTTP_OK, body = data)) {
-            Log.d(TAG, "style attempt model=$model outcome=model-unavailable (stream error)")
+            Log.d(TAG, "style attempt $attemptLabel outcome=model-unavailable (stream error)")
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE, provider = provider)
         }
         // ENC-95 telemetry: an in-stream rejection names its code/type
@@ -393,7 +453,7 @@ class OpenRouterStyleClient(
         val errorInfo = OpenRouterPayload.extractErrorInfo(data)
         Log.d(
             TAG,
-            "style attempt model=$model outcome=$REASON_STREAM_ERROR " +
+            "style attempt $attemptLabel outcome=$REASON_STREAM_ERROR " +
                 "errorCode=${errorInfo?.code?.toString() ?: "-"} errorType=${errorInfo?.type ?: "-"}",
         )
         return AttemptResult.Retry(
@@ -403,9 +463,9 @@ class OpenRouterStyleClient(
         )
     }
 
-    private fun httpFailureResult(result: HttpResult, model: String): AttemptResult {
+    private fun httpFailureResult(result: HttpResult, attemptLabel: String): AttemptResult {
         if (OpenRouterPayload.isModelUnavailable(status = result.status, body = result.body)) {
-            Log.d(TAG, "style attempt model=$model outcome=model-unavailable")
+            Log.d(TAG, "style attempt $attemptLabel outcome=model-unavailable")
             return AttemptResult.Retry(reason = REASON_MODEL_UNAVAILABLE)
         }
         // ENC-95 telemetry: status plus the provider's error code/type
@@ -414,7 +474,7 @@ class OpenRouterStyleClient(
         val errorInfo = OpenRouterPayload.extractErrorInfo(result.body)
         Log.d(
             TAG,
-            "style attempt model=$model outcome=${REASON_HTTP_PREFIX + result.status} " +
+            "style attempt $attemptLabel outcome=${REASON_HTTP_PREFIX + result.status} " +
                 "errorCode=${errorInfo?.code?.toString() ?: "-"} errorType=${errorInfo?.type ?: "-"}",
         )
         return AttemptResult.Retry(
@@ -434,6 +494,7 @@ class OpenRouterStyleClient(
         provider: String?,
         reasoningTokens: Int?,
         startedMs: Long,
+        attemptLabel: String,
         model: String,
         sourceText: String,
     ): AttemptResult {
@@ -442,7 +503,7 @@ class OpenRouterStyleClient(
         val reasoningLabel = reasoningTokens?.toString() ?: "-"
         val cleaned = cleaner.clean(content)
         if (cleaned.isBlank()) {
-            Log.d(TAG, "style attempt model=$model outcome=$REASON_EMPTY_RESPONSE reasoningTokens=$reasoningLabel")
+            Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_EMPTY_RESPONSE reasoningTokens=$reasoningLabel")
             return AttemptResult.Retry(reason = REASON_EMPTY_RESPONSE, provider = provider)
         }
         return when (StyleOutputGuard.classify(source = sourceText, styled = cleaned)) {
@@ -455,17 +516,17 @@ class OpenRouterStyleClient(
                 )
                 Log.d(
                     TAG,
-                    "style attempt model=$model provider=${outcome.providerLabel()} " +
+                    "style attempt $attemptLabel provider=${outcome.providerLabel()} " +
                         "outcome=${outcome.logLabel()} reasoningTokens=$reasoningLabel",
                 )
                 AttemptResult.Done(outcome)
             }
             StyleOutputGuard.Verdict.REFUSAL -> {
-                Log.d(TAG, "style attempt model=$model outcome=$REASON_REFUSAL reasoningTokens=$reasoningLabel")
+                Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_REFUSAL reasoningTokens=$reasoningLabel")
                 AttemptResult.Retry(reason = REASON_REFUSAL, provider = provider)
             }
             StyleOutputGuard.Verdict.FIDELITY_LOSS -> {
-                Log.d(TAG, "style attempt model=$model outcome=$REASON_FIDELITY reasoningTokens=$reasoningLabel")
+                Log.d(TAG, "style attempt $attemptLabel outcome=$REASON_FIDELITY reasoningTokens=$reasoningLabel")
                 AttemptResult.Retry(reason = REASON_FIDELITY, provider = provider)
             }
         }
@@ -567,22 +628,32 @@ class OpenRouterStyleClient(
         const val TOKEN_GAP_TIMEOUT_MS: Long = 2_000L
 
         /**
-         * Absolute backstop for the whole chain, re-tuned in ENC-94
-         * to the reasoning-constrained profile (the 20s ENC-81 value
-         * was sized for unconstrained generation — and still lost to
-         * a 41s Grok generation). The constrained healthy path: ~0.5s
-         * routing/connect, reasoning held at effort low (in practice
-         * near zero tokens on a surface transform), then content at
-         * the ~150 tok/s rate observed in the ENC-83/91 evidence —
-         * a long ~700-token restyle lands in ~5–6s end to end. The
-         * slowest legitimate chain is two full liveness deaths
-         * (2 × [FIRST_TOKEN_TIMEOUT_MS] = 12s), so 14s leaves headroom
-         * over that while a pathological stream still dies young.
-         * The ENC-95 degraded retries fire on instant 400-class
-         * deaths, so they add round trips, not liveness waits; only
-         * a pathological stream reaches the cap.
+         * Absolute cap for ONE attempt (ENC-97; the 14s ENC-94 value
+         * was this number's ancestor, but it bounded the WHOLE chain,
+         * so a slow-but-healthy fallback inherited only the time the
+         * primary hadn't spent — Sean's ENC-96 retest lost a faithful
+         * 630-token Haiku restyle to exactly that starvation). The
+         * liveness budgets judge silence far earlier on every real
+         * death; this cap exists for the one shape liveness cannot
+         * see — a stream that keeps producing signs of life yet never
+         * finishes (endless keep-alives, a trickle that never ends).
+         * 20s clears the slowest legitimate attempt in the device
+         * evidence (a long restyle streaming at a reasoning-era
+         * route's pace) with room, while a pathological attempt still
+         * dies young enough for the chain to advance usefully.
          */
-        const val ABSOLUTE_CAP_MS: Long = 14_000L
+        const val ATTEMPT_ABSOLUTE_CAP_MS: Long = 20_000L
+
+        /**
+         * The chain's only outer bound (ENC-97): the four possible
+         * attempts (primary/fallback × full/degraded) at
+         * [ATTEMPT_ABSOLUTE_CAP_MS] each, plus slack for the
+         * non-network work between them (guard, cleaning, channel
+         * hand-offs). Pure pathology insurance — every attempt's own
+         * cap fires first by construction, so this bound can only
+         * catch a failure of the caps themselves.
+         */
+        const val CHAIN_BACKSTOP_MS: Long = 90_000L
 
         const val REASON_NO_KEY: String = "no-key"
         const val REASON_TIMEOUT: String = "timeout"
