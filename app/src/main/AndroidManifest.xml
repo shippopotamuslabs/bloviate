@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Resident presence (ENC-129): the boot receiver restarts the bubble service after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The one network use in the app: downloading the on-device model file. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
@@ -45,10 +47,12 @@
         </service>
 
         <!--
-          Foreground types (ENC-60): the service starts as microphone once
-          RECORD_AUDIO is granted — Android 14+ refuses a microphone-typed
-          FGS without it — and falls back to specialUse until then, in which
-          case it cannot record yet. The subtype property below is required
+          Foreground types (ENC-60, ENC-129): every start begins as
+          specialUse — the only type legal in every start context — and
+          promotes to microphone once the start's origin is known eligible
+          and RECORD_AUDIO is granted (Android 14+ refuses a microphone-typed
+          FGS without the grant, and Android 15 refuses one from a boot
+          receiver entirely). The subtype property below is required
           because specialUse remains a declared type.
         -->
         <service
@@ -59,6 +63,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows a user-enabled floating dictation bubble over editable text fields in other apps" />
         </service>
+
+        <!--
+          Boot start (ENC-129): BOOT_COMPLETED is a protected broadcast —
+          only the system can send it — so the exported receiver cannot be
+          triggered by other apps. The receiver itself gates on the
+          resident-presence record before starting the bubble service.
+        -->
+        <receiver
+            android:name=".service.BootStartReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

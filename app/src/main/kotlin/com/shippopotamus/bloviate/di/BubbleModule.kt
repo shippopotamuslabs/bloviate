@@ -10,11 +10,13 @@ import com.shippopotamus.bloviate.data.BubbleServiceStateHolder
 import com.shippopotamus.bloviate.data.DataStoreBubbleAppearanceStore
 import com.shippopotamus.bloviate.data.DataStoreBubblePositionStore
 import com.shippopotamus.bloviate.data.DataStoreOnboardingStore
+import com.shippopotamus.bloviate.data.DataStoreResidentPresenceStore
 import com.shippopotamus.bloviate.domain.port.BubbleAppearancePort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubblePositionPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
 import com.shippopotamus.bloviate.domain.port.OnboardingPort
+import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
 import com.shippopotamus.bloviate.domain.port.TextInsertionPort
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.service.FieldWatcherBridge
@@ -42,6 +44,10 @@ abstract class BubbleModule {
     /** First-run wizard progress (ENC-67) — a DataStore preference like the appearance record. */
     @Binds
     abstract fun bindOnboardingPort(store: DataStoreOnboardingStore): OnboardingPort
+
+    /** Resident-presence record (ENC-129) — boot/sticky gating, same DataStore pattern. */
+    @Binds
+    abstract fun bindResidentPresencePort(store: DataStoreResidentPresenceStore): ResidentPresencePort
 
     @Binds
     abstract fun bindBubbleServiceStatePort(holder: BubbleServiceStateHolder): BubbleServiceStatePort
