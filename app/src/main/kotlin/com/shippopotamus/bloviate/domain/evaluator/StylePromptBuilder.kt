@@ -27,7 +27,7 @@ class StylePromptBuilder @Inject constructor() {
     fun build(style: StyleDefinition, transcript: String): StylePrompt {
         val system = PromptMessage(
             role = ROLE_SYSTEM,
-            content = style.systemInstructions + " " + ONLY_TEXT_INSTRUCTION,
+            content = style.systemInstructions + " " + SPEAKER_INVARIANT + " " + ONLY_TEXT_INSTRUCTION,
         )
         val user = PromptMessage(
             role = ROLE_USER,
@@ -52,6 +52,24 @@ class StylePromptBuilder @Inject constructor() {
     private companion object {
         const val ROLE_SYSTEM: String = "system"
         const val ROLE_USER: String = "user"
+
+        /**
+         * The speaker invariant (ENC-92), shared by every style: the
+         * output is the SPEAKER'S OWN words in the style's voice, never
+         * a reply to them. The epistolary personas (Seneca above all,
+         * whose surviving work is letters) otherwise drag the model
+         * into correspondence mode — "You have noticed..." — addressing
+         * the dictation back at the person who just spoke it. Person
+         * and point of view are facts of the text, and like the
+         * NEVER-change clause they are not the style's to alter.
+         */
+        const val SPEAKER_INVARIANT: String =
+            "VOICE: The input is the speaker's own dictated words. Return them restyled " +
+                "as the speaker's own text, preserving the speaker's person and point of view " +
+                "exactly — where the speaker says 'I', the output says 'I'. NEVER address the " +
+                "speaker as 'you', never write as though replying to them, and use no " +
+                "salutations, letter framing, or counsel directed at the speaker. Change " +
+                "only the voice, never who is speaking or who is spoken to."
 
         /**
          * The model must return ONLY the transformed text: no quotes, no

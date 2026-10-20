@@ -20,6 +20,25 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `every style's system message carries the speaker invariant`() {
+        // ENC-92: dictation is the speaker's own words, never a reply
+        // addressed back at them — the invariant rides every style's
+        // system message, personas included.
+        StyleCatalog.ALL.forEach { style ->
+            val prompt = builder.build(style = style, transcript = "i noticed the bug this morning")
+
+            assertTrue(
+                prompt.system.content.contains("NEVER address the speaker"),
+                "${style.id} system message lacks the speaker invariant",
+            )
+            assertTrue(
+                prompt.system.content.contains("speaker's own"),
+                "${style.id} system message lacks the own-words clause",
+            )
+        }
+    }
+
+    @Test
     fun `user message carries every few-shot pair then the transcript`() {
         val prompt = builder.build(style = professional, transcript = "meet me at noon")
 
