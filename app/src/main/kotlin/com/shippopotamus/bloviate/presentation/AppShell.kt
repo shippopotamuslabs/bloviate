@@ -2,8 +2,11 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MenuBook
@@ -104,7 +107,19 @@ fun MainRoute(
  * a root Scaffold, and no padding values are threaded into the screens.
  * The [NavigationBar] owns the system navigation-bar inset, which is why
  * the screens no longer pad for it themselves.
+ *
+ * While the IME is up, the bar leaves the layout entirely (ENC-124).
+ * The screens seat their content on the keyboard with `imePadding()`,
+ * which measures the IME inset from the *window's* bottom edge — but
+ * this column's content box ends above the bar, so a reserved bar slab
+ * (80dp + the bar's own inset) stacked on top of the IME inset and left
+ * a dead gap between content and keyboard on every tab. With the bar
+ * gone, the content box reaches the window's bottom edge and the
+ * screens' `imePadding()` lands content exactly on the keyboard. The
+ * wizard never had the gap: it replaces this shell, so nothing sits
+ * below its `imePadding()`.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppShell(
     setupContent: @Composable () -> Unit,
@@ -114,6 +129,7 @@ fun AppShell(
 ) {
     var selectedTabValue by rememberSaveable { mutableStateOf(MainTab.DEFAULT.toSavedValue()) }
     val selectedTab = MainTab.fromSavedValue(selectedTabValue)
+    val imeVisible = WindowInsets.isImeVisible
     Column(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -126,24 +142,34 @@ fun AppShell(
                 MainTab.DICTIONARY -> dictionaryContent()
             }
         }
-        NavigationBar(containerColor = BloviateColors.extended.bgSubtle) {
-            MainTab.entries.forEach { tab ->
-                val label = stringResource(tab.labelRes())
-                NavigationBarItem(
-                    selected = tab == selectedTab,
-                    onClick = { selectedTabValue = tab.toSavedValue() },
-                    icon = {
-                        Icon(
-                            imageVector = tab.icon(),
-                            contentDescription = label,
-                        )
-                    },
-                    label = { Text(text = label) },
-                )
+        if (tabBarVisible(imeVisible = imeVisible)) {
+            NavigationBar(containerColor = BloviateColors.extended.bgSubtle) {
+                MainTab.entries.forEach { tab ->
+                    val label = stringResource(tab.labelRes())
+                    NavigationBarItem(
+                        selected = tab == selectedTab,
+                        onClick = { selectedTabValue = tab.toSavedValue() },
+                        icon = {
+                            Icon(
+                                imageVector = tab.icon(),
+                                contentDescription = label,
+                            )
+                        },
+                        label = { Text(text = label) },
+                    )
+                }
             }
         }
     }
 }
+
+/**
+ * Whether the shell's tab bar reserves its slab of the column
+ * (ENC-124): only while no IME is up. An open keyboard is itself the
+ * bottom surface of the screen, and the bar hidden behind it must not
+ * keep its height — see [AppShell]'s doc.
+ */
+internal fun tabBarVisible(imeVisible: Boolean): Boolean = !imeVisible
 
 private fun MainTab.labelRes(): Int =
     when (this) {
