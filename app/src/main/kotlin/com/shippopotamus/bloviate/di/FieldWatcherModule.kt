@@ -2,7 +2,9 @@ package com.shippopotamus.bloviate.di
 
 import com.shippopotamus.bloviate.data.AndroidWatcherAccess
 import com.shippopotamus.bloviate.data.FieldFocusStateHolder
+import com.shippopotamus.bloviate.data.KeyboardVisibilityStateHolder
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
+import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
 import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
 import dagger.Binds
 import dagger.Module
@@ -16,6 +18,9 @@ abstract class FieldWatcherModule {
 
     @Binds
     abstract fun bindFieldFocusPort(holder: FieldFocusStateHolder): FieldFocusPort
+
+    @Binds
+    abstract fun bindKeyboardVisibilityPort(holder: KeyboardVisibilityStateHolder): KeyboardVisibilityPort
 
     @Binds
     abstract fun bindWatcherAccessPort(access: AndroidWatcherAccess): WatcherAccessPort
