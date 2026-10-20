@@ -24,6 +24,12 @@ import javax.inject.Inject
  * stream means the on-screen keyboard is up. Only the window's type is
  * read for that signal — never its content.
  *
+ * Every relevant event re-derives BOTH signals from the live window
+ * state (ENC-127): the subscribed types include in-field interactions
+ * (clicks, caret moves), so a tap inside an already-focused field after
+ * a transient window-churn flap reconciles a stale keyboard reading
+ * instead of leaving it stuck.
+ *
  * Privacy contract: the watcher path reads only the host package name and
  * structural flags. Field text and content descriptions are never read,
  * logged, or stored for classification, and password fields classify as
@@ -166,15 +172,36 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     /**
      * Keyboard visibility from the window stream: an input-method window
      * present means the keyboard is up (ENC-125). Reads window types
-     * only — the IME window's content is never touched.
+     * only — the IME window's content is never touched. On a transition
+     * the window-type census that produced the reading is logged with it
+     * (types only, no content), so a host app whose window arrangement
+     * makes this derivation flap (ENC-127) is diagnosable from logcat.
      */
     private fun publishKeyboardVisibility() {
-        val visible = windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        val currentWindows = windows
+        val visible = currentWindows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
         keyboardVisibilityPort.publish(visible)
         if (visible != lastKeyboardVisible) {
             lastKeyboardVisible = visible
-            Log.d(TAG, "keyboard visible -> $visible")
+            Log.d(TAG, "keyboard visible -> $visible (window types: ${currentWindows.typeCensus()})")
         }
+    }
+
+    /** Counts by window type, e.g. "APPLICATION x2, INPUT_METHOD x1" — types only, never content. */
+    private fun List<AccessibilityWindowInfo>.typeCensus(): String =
+        groupingBy { window -> window.typeName() }
+            .eachCount()
+            .entries
+            .joinToString(separator = ", ") { (type, count) -> "$type x$count" }
+            .ifEmpty { "none" }
+
+    private fun AccessibilityWindowInfo.typeName(): String = when (type) {
+        AccessibilityWindowInfo.TYPE_APPLICATION -> "APPLICATION"
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "INPUT_METHOD"
+        AccessibilityWindowInfo.TYPE_SYSTEM -> "SYSTEM"
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "ACCESSIBILITY_OVERLAY"
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "SPLIT_SCREEN_DIVIDER"
+        else -> "TYPE_$type"
     }
 
     private fun focusedNodeSnapshot(event: AccessibilityEvent): FocusedNodeSnapshot? {
@@ -215,6 +242,11 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            // ENC-127: in-field interactions re-derive both signals, so a
+            // tap or caret move inside the already-focused field heals a
+            // keyboard reading left stale by window churn.
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
         )
     }
 }

@@ -376,6 +376,21 @@ class BubbleOverlayService : Service() {
             BubbleVisibilityCommand.ShowBubble -> showBubble()
             BubbleVisibilityCommand.HideBubble -> hideBubble()
         }
+        // ENC-127 reconciliation: report the window's actual presence
+        // back to the state machine after every command. If the command's
+        // effect didn't materialize (a show swallowed by a missing
+        // overlay permission, say), the machine's visibility belief
+        // resyncs instead of swallowing every later show; if a window is
+        // present that should not be, the corrective hide comes back
+        // here and is applied like any other command (it terminates:
+        // applying it removes the window, so the nested report agrees).
+        val windowPresent = bubbleView != null
+        Log.d(TAG, "visibility command $command applied; window present: $windowPresent")
+        val corrective = observeBubbleVisibility.onWindowPresenceChanged(windowPresent)
+        if (corrective != null) {
+            Log.d(TAG, "visibility reconcile: window present but not desired; applying $corrective")
+            applyCommand(corrective)
+        }
     }
 
     private suspend fun showBubble() {
