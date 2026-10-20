@@ -214,6 +214,56 @@ class BubbleVisibilityReducerTest {
         assertNull(reducer.onBarActivityChanged(false))
     }
 
+    // --- Window-presence reconciliation (ENC-127) ---------------------------
+
+    @Test
+    fun `a swallowed show resyncs on the presence report, and the next focus transition re-commands the show`() {
+        reducer.onKeyboardVisibilityChanged(true)
+        assertEquals(
+            BubbleVisibilityCommand.ShowBubble,
+            reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A)),
+        )
+
+        // The service applied the show but no window materialized (e.g.
+        // overlay permission was missing at apply time): the report
+        // resyncs the belief silently — no command here...
+        assertNull(reducer.onWindowPresenceChanged(false))
+
+        // ...so the next show-worthy transition commands a fresh show
+        // instead of being swallowed by the stale "already visible".
+        assertEquals(
+            BubbleVisibilityCommand.ShowBubble,
+            reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_B)),
+        )
+    }
+
+    @Test
+    fun `presence reports that agree with the belief command nothing`() {
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+
+        assertNull(reducer.onWindowPresenceChanged(true))
+
+        reducer.onFocusState(FieldFocusState.NoEditableFocus)
+        assertNull(reducer.onWindowPresenceChanged(false))
+    }
+
+    @Test
+    fun `a window present while nothing is desired gets a corrective hide`() {
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowPresenceChanged(true))
+        // After the correction the belief agrees with the (now removed) window.
+        assertNull(reducer.onWindowPresenceChanged(false))
+    }
+
+    @Test
+    fun `a window present while the bubble is dismissed gets a corrective hide`() {
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        reducer.onBubbleDismissed()
+
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowPresenceChanged(true))
+    }
+
     private companion object {
         const val PACKAGE_A = "com.example.host.a"
         const val PACKAGE_B = "com.example.host.b"
