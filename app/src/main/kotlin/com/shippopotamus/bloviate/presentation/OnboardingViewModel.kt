@@ -8,6 +8,7 @@ import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
@@ -16,6 +17,7 @@ import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveWatcherConnectionUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
@@ -55,10 +57,13 @@ class OnboardingViewModel @Inject constructor(
     private val ensureParakeetModel: EnsureParakeetModelUseCase,
     observeEnginePreference: ObserveEnginePreferenceUseCase,
     private val selectEngine: SelectEngineUseCase,
+    observeWatcherConnection: ObserveWatcherConnectionUseCase,
+    private val isBatteryOptimizationExempt: IsBatteryOptimizationExemptUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())
+    private val batteryExempt = MutableStateFlow(isBatteryOptimizationExempt())
     private val testFieldText = MutableStateFlow("")
 
     /**
@@ -68,19 +73,33 @@ class OnboardingViewModel @Inject constructor(
      */
     private val onboardingProgress: StateFlow<OnboardingProgress> = observeOnboardingProgress()
 
+    // The watcher's supervision signals (ENC-129) ride together, as on
+    // the Setup screen: enablement refreshed on resume, connection live.
+    private val watcherSignals = combine(watcherEnabled, observeWatcherConnection()) { enabled, connected ->
+        enabled to connected
+    }
+
+    // Overlay and battery exemption ride together for the same reason:
+    // both are settings reads refreshed on resume (ENC-129).
+    private val permissionSignals = combine(overlayPermissionGranted, batteryExempt) { overlay, exempt ->
+        overlay to exempt
+    }
+
     private val baseUiState: StateFlow<OnboardingUiState> = combine(
         onboardingProgress,
-        watcherEnabled,
-        overlayPermissionGranted,
+        watcherSignals,
+        permissionSignals,
         micPermissionGranted,
         observeBubbleServiceRunning(),
-    ) { progress, watcherOn, overlayGranted, micGranted, bubbleRunning ->
+    ) { progress, (watcherOn, watcherConnected), (overlayGranted, exempt), micGranted, bubbleRunning ->
         OnboardingUiState(
             showWizard = !progress.finished,
             step = progress.step.toUi(),
             watcherEnabled = watcherOn,
+            watcherConnected = watcherConnected,
             overlayPermissionGranted = overlayGranted,
             micPermissionGranted = micGranted,
+            batteryExempt = exempt,
             bubbleServiceRunning = bubbleRunning,
         )
     }.stateIn(
@@ -91,8 +110,10 @@ class OnboardingViewModel @Inject constructor(
                 showWizard = !finished,
                 step = step.toUi(),
                 watcherEnabled = isFieldWatcherEnabled(),
+                watcherConnected = observeWatcherConnection().value,
                 overlayPermissionGranted = isOverlayPermissionGranted(),
                 micPermissionGranted = isMicPermissionGranted(),
+                batteryExempt = isBatteryOptimizationExempt(),
                 bubbleServiceRunning = observeBubbleServiceRunning().value,
             )
         },
@@ -204,6 +225,7 @@ class OnboardingViewModel @Inject constructor(
     fun onResumed() {
         watcherEnabled.update { isFieldWatcherEnabled() }
         overlayPermissionGranted.update { isOverlayPermissionGranted() }
+        batteryExempt.update { isBatteryOptimizationExempt() }
         refreshMicPermissionState()
     }
 

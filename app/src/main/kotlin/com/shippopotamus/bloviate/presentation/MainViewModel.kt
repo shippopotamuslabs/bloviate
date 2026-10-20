@@ -9,6 +9,7 @@ import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
@@ -18,9 +19,14 @@ import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveResidentPresenceUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.domain.usecase.RecordBubbleUserStartUseCase
+import com.shippopotamus.bloviate.domain.usecase.RecordBubbleUserStopUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.domain.usecase.SetAutoStartEnabledUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +42,7 @@ import javax.inject.Inject
  * [FieldFocusState] and [ModelState] into the presentation-only [MainUiState]
  * so no domain types reach composables.
  */
+@Suppress("LongParameterList") // One injected use case per capability, per the ViewModel rules.
 @HiltViewModel
 class MainViewModel @Inject constructor(
     observeFieldFocus: ObserveFieldFocusUseCase,
@@ -52,21 +59,36 @@ class MainViewModel @Inject constructor(
     private val selectEngine: SelectEngineUseCase,
     private val observeBubbleAppearance: ObserveBubbleAppearanceUseCase,
     private val saveBubbleAppearance: SaveBubbleAppearanceUseCase,
+    observeWatcherConnection: ObserveWatcherConnectionUseCase,
+    private val isBatteryOptimizationExempt: IsBatteryOptimizationExemptUseCase,
+    observeResidentPresence: ObserveResidentPresenceUseCase,
+    private val setAutoStartEnabled: SetAutoStartEnabledUseCase,
+    private val recordBubbleUserStart: RecordBubbleUserStartUseCase,
+    private val recordBubbleUserStop: RecordBubbleUserStopUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())
+    private val batteryExempt = MutableStateFlow(isBatteryOptimizationExempt())
+
+    // The watcher's two supervision signals (ENC-129) ride together:
+    // enablement is a settings read refreshed on resume, connection is
+    // the service's own live stream.
+    private val watcherSignals = combine(watcherEnabled, observeWatcherConnection()) { enabled, connected ->
+        enabled to connected
+    }
 
     private val baseUiState: StateFlow<MainUiState> = combine(
         observeFieldFocus(),
-        watcherEnabled,
+        watcherSignals,
         overlayPermissionGranted,
         observeBubbleServiceRunning(),
         micPermissionGranted,
-    ) { focusState, watcherOn, overlayGranted, bubbleRunning, micGranted ->
+    ) { focusState, (watcherOn, watcherConnected), overlayGranted, bubbleRunning, micGranted ->
         mapToUiState(
             focusState = focusState,
             watcherEnabled = watcherOn,
+            watcherConnected = watcherConnected,
             overlayPermissionGranted = overlayGranted,
             bubbleServiceRunning = bubbleRunning,
             micPermissionGranted = micGranted,
@@ -77,25 +99,38 @@ class MainViewModel @Inject constructor(
         initialValue = mapToUiState(
             focusState = FieldFocusState.NoEditableFocus,
             watcherEnabled = isFieldWatcherEnabled(),
+            watcherConnected = observeWatcherConnection().value,
             overlayPermissionGranted = isOverlayPermissionGranted(),
             bubbleServiceRunning = observeBubbleServiceRunning().value,
             micPermissionGranted = isMicPermissionGranted(),
         ),
     )
 
+    // Appearance, resident presence, and battery exemption ride
+    // together into the second combine (ENC-129): appearance restyles
+    // the bubble-look card, presence drives the auto-start switch, and
+    // the exemption is a settings read refreshed on resume.
+    private val appearancePresenceBattery = combine(
+        observeBubbleAppearance(),
+        observeResidentPresence(),
+        batteryExempt,
+    ) { appearance, presence, exempt -> Triple(appearance, presence, exempt) }
+
     val uiState: StateFlow<MainUiState> = combine(
         baseUiState,
         observeModelState(),
         observeParakeetModelState(),
         observeEnginePreference(),
-        observeBubbleAppearance(),
-    ) { baseState, whisperState, parakeetState, engine, appearance ->
+        appearancePresenceBattery,
+    ) { baseState, whisperState, parakeetState, engine, (appearance, presence, exempt) ->
         baseState.copy(
             whisperModelStatus = mapModelStatus(whisperState),
             parakeetModelStatus = mapModelStatus(parakeetState),
             selectedEngine = mapEngine(engine),
             engineFallback = mapEngineFallback(engine, whisperState, parakeetState),
             bubbleAppearance = appearance.toUi(),
+            autoStartEnabled = presence.autoStartEnabled,
+            batteryExempt = exempt,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -110,6 +145,8 @@ class MainViewModel @Inject constructor(
                 observeParakeetModelState().value,
             ),
             bubbleAppearance = observeBubbleAppearance().value.toUi(),
+            autoStartEnabled = observeResidentPresence().value.autoStartEnabled,
+            batteryExempt = isBatteryOptimizationExempt(),
         ),
     )
 
@@ -175,10 +212,41 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The user started the bubble from the app (ENC-129): the explicit
+     * start is what lifts a previous Stop, so resident presence may
+     * resume it again from here. The activity performs the actual
+     * service start alongside this call.
+     */
+    fun onBubbleStartRequested() {
+        viewModelScope.launch {
+            recordBubbleUserStart()
+        }
+    }
+
+    /**
+     * The user stopped the bubble from the app (ENC-129): record the
+     * stop so boot start and sticky restart honor it. The activity
+     * performs the actual service stop alongside this call.
+     */
+    fun onBubbleStopRequested() {
+        viewModelScope.launch {
+            recordBubbleUserStop()
+        }
+    }
+
+    /** "Start on its own" switch: persists the resident-presence posture (ENC-129). */
+    fun onAutoStartEnabledChange(enabled: Boolean) {
+        viewModelScope.launch {
+            setAutoStartEnabled(enabled)
+        }
+    }
+
     /** Re-reads the system settings; called when the screen resumes after a settings detour. */
     fun onResumed() {
         watcherEnabled.update { isFieldWatcherEnabled() }
         overlayPermissionGranted.update { isOverlayPermissionGranted() }
+        batteryExempt.update { isBatteryOptimizationExempt() }
         refreshMicPermissionState()
     }
 
@@ -195,6 +263,7 @@ class MainViewModel @Inject constructor(
     private fun mapToUiState(
         focusState: FieldFocusState,
         watcherEnabled: Boolean,
+        watcherConnected: Boolean,
         overlayPermissionGranted: Boolean,
         bubbleServiceRunning: Boolean,
         micPermissionGranted: Boolean,
@@ -206,6 +275,7 @@ class MainViewModel @Inject constructor(
         }
         return MainUiState(
             watcherEnabled = watcherEnabled,
+            watcherConnected = watcherConnected,
             focusClassification = classification,
             focusPackageName = packageName,
             overlayPermissionGranted = overlayPermissionGranted,

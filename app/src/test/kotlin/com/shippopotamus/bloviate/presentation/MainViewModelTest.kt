@@ -8,8 +8,10 @@ import com.shippopotamus.bloviate.domain.model.BubbleTint
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.DictationEngine
+import com.shippopotamus.bloviate.domain.model.ResidentPresenceState
 import com.shippopotamus.bloviate.domain.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
+import com.shippopotamus.bloviate.domain.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
@@ -19,9 +21,15 @@ import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveFieldFocusUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveParakeetModelStateUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveResidentPresenceUseCase
+import com.shippopotamus.bloviate.domain.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.domain.usecase.RecordBubbleUserStartUseCase
+import com.shippopotamus.bloviate.domain.usecase.RecordBubbleUserStopUseCase
 import com.shippopotamus.bloviate.domain.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.domain.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.domain.usecase.SetAutoStartEnabledUseCase
+import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
@@ -30,7 +38,9 @@ import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
+import com.shippopotamus.bloviate.testing.FakeResidentPresencePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
+import com.shippopotamus.bloviate.testing.FakeWatcherConnectionPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -56,6 +66,9 @@ class MainViewModelTest {
     private val fakeParakeetModelStorePort = FakeParakeetModelStorePort()
     private val fakeEnginePreferencePort = FakeEnginePreferencePort()
     private val fakeBubbleAppearancePort = FakeBubbleAppearancePort()
+    private val fakeWatcherConnectionPort = FakeWatcherConnectionPort()
+    private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
+    private val fakeResidentPresencePort = FakeResidentPresencePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -75,6 +88,12 @@ class MainViewModelTest {
             selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
             observeBubbleAppearance = ObserveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
             saveBubbleAppearance = SaveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
+            observeWatcherConnection = ObserveWatcherConnectionUseCase(fakeWatcherConnectionPort),
+            isBatteryOptimizationExempt = IsBatteryOptimizationExemptUseCase(fakeBatteryExemptionPort),
+            observeResidentPresence = ObserveResidentPresenceUseCase(fakeResidentPresencePort),
+            setAutoStartEnabled = SetAutoStartEnabledUseCase(fakeResidentPresencePort),
+            recordBubbleUserStart = RecordBubbleUserStartUseCase(fakeResidentPresencePort),
+            recordBubbleUserStop = RecordBubbleUserStopUseCase(fakeResidentPresencePort),
         )
     }
 
@@ -458,6 +477,72 @@ class MainViewModelTest {
                 ),
                 fakeBubbleAppearancePort.savedAppearances.last(),
             )
+        }
+
+    // ENC-129: watcher supervision, battery exemption, resident presence.
+
+    @Test
+    fun `watcher connection state flows into the UI state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().watcherConnected)
+                fakeWatcherConnectionPort.publishConnected(true)
+                assertTrue(awaitItem().watcherConnected)
+                fakeWatcherConnectionPort.publishConnected(false)
+                assertFalse(awaitItem().watcherConnected)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `battery exemption is read at start and refreshed on resume`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertFalse(awaitItem().batteryExempt)
+                fakeBatteryExemptionPort.exempt = true
+                viewModel.onResumed()
+                assertTrue(awaitItem().batteryExempt)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `auto-start switch state flows from the resident-presence record`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertTrue(awaitItem().autoStartEnabled)
+                fakeResidentPresencePort.publish(ResidentPresenceState(autoStartEnabled = false))
+                assertFalse(awaitItem().autoStartEnabled)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `auto-start toggle persists without clobbering the stop flag`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeResidentPresencePort.publish(
+                ResidentPresenceState(autoStartEnabled = true, userStopped = true),
+            )
+
+            viewModel.onAutoStartEnabledChange(false)
+            advanceUntilIdle()
+
+            assertEquals(
+                ResidentPresenceState(autoStartEnabled = false, userStopped = true),
+                fakeResidentPresencePort.state.value,
+            )
+        }
+
+    @Test
+    fun `bubble stop request records the stop, start request lifts it`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.onBubbleStopRequested()
+            advanceUntilIdle()
+            assertTrue(fakeResidentPresencePort.state.value.userStopped)
+
+            viewModel.onBubbleStartRequested()
+            advanceUntilIdle()
+            assertFalse(fakeResidentPresencePort.state.value.userStopped)
         }
 
     private companion object {

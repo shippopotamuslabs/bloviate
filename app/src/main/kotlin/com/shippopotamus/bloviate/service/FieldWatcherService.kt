@@ -17,6 +17,7 @@ import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
 import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
+import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -67,6 +68,9 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     lateinit var keyboardVisibilityPort: KeyboardVisibilityPort
 
     @Inject
+    lateinit var watcherConnectionPort: WatcherConnectionPort
+
+    @Inject
     lateinit var insertionBridge: FieldWatcherBridge
 
     @Inject
@@ -86,6 +90,10 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     override fun onServiceConnected() {
         super.onServiceConnected()
         insertionBridge.register(this)
+        // Supervision (ENC-129): connection is a published fact, so an
+        // enabled-but-disconnected watcher is visible in Setup and on
+        // the bubble's notification instead of failing silently.
+        watcherConnectionPort.publishConnected(true)
         publishKeyboardVisibility()
     }
 
@@ -99,12 +107,14 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
 
     override fun onUnbind(intent: Intent?): Boolean {
         insertionBridge.unregister(this)
+        watcherConnectionPort.publishConnected(false)
         stopKeyboardWatchdog()
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         insertionBridge.unregister(this)
+        watcherConnectionPort.publishConnected(false)
         stopKeyboardWatchdog()
         publish(FieldFocusState.NoEditableFocus)
         keyboardVisibilityPort.publish(false)

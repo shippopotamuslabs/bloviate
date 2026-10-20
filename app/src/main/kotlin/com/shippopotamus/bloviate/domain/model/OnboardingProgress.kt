@@ -2,18 +2,21 @@ package com.shippopotamus.bloviate.domain.model
 
 /**
  * The first-run wizard's steps, in walk order (ENC-67): welcome, then
- * the four setup gates in the order a user must clear them (the
- * watcher spots fields, the overlay lets the bubble draw, the
- * microphone hears, a model transcribes), and finally the guided test
- * dictation. The gate order mirrors the Setup screen's blocker order
- * so the wizard and the dashboard can never disagree about what comes
- * first.
+ * the setup gates in the order a user must clear them (the watcher
+ * spots fields, the overlay lets the bubble draw, the microphone
+ * hears, the battery exemption keeps the system from putting Bloviate
+ * to sleep (ENC-129), a model transcribes), and finally the guided
+ * test dictation. The gate order mirrors the Setup screen's blocker
+ * order so the wizard and the dashboard can never disagree about what
+ * comes first. Steps persist by name, so inserting one never
+ * reinterprets a saved place in the walk.
  */
 enum class OnboardingStep {
     WELCOME,
     WATCHER,
     OVERLAY,
     MICROPHONE,
+    BATTERY,
     MODEL,
     TEST,
     ;

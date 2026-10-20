@@ -20,6 +20,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
@@ -85,8 +86,10 @@ fun SetupScreen(
     uiState: MainUiState,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit,
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
+    onAutoStartEnabledChange: (Boolean) -> Unit,
     onRequestMicPermission: () -> Unit,
     onWhisperDownloadClick: () -> Unit,
     onParakeetDownloadClick: () -> Unit,
@@ -127,6 +130,7 @@ fun SetupScreen(
                 uiState = uiState,
                 onOpenAccessibilitySettings = onOpenAccessibilitySettings,
                 onOpenOverlaySettings = onOpenOverlaySettings,
+                onOpenBatterySettings = onOpenBatterySettings,
                 onRequestMicPermission = onRequestMicPermission,
             )
             DashboardSectionHeader(
@@ -136,6 +140,7 @@ fun SetupScreen(
                 uiState = uiState,
                 onStartBubble = onStartBubble,
                 onStopBubble = onStopBubble,
+                onAutoStartEnabledChange = onAutoStartEnabledChange,
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.bubble_look_title),
@@ -181,6 +186,7 @@ private fun SetupStatusPill(
             text = stringResource(
                 when (status.blocker) {
                     SetupBlocker.WATCHER -> R.string.setup_status_watcher
+                    SetupBlocker.WATCHER_DISCONNECTED -> R.string.setup_status_watcher_disconnected
                     SetupBlocker.OVERLAY -> R.string.setup_status_overlay
                     SetupBlocker.MICROPHONE -> R.string.setup_status_mic
                     SetupBlocker.MODEL -> R.string.setup_status_model
@@ -194,19 +200,24 @@ private fun SetupStatusPill(
 }
 
 /**
- * The three permission gates as one grouped card (ENC-75). Each row's
- * chip carries the state; the row itself is the fix when one exists —
- * the accessibility row always opens Settings (that is also how a user
- * turns it back off), the microphone and overlay rows act only while
- * their permission is missing. The detection row's sub-line doubles as
- * the live focus readout while the watcher is on: which kind of field
- * is focused, never its content or the app it belongs to.
+ * The permission gates as one grouped card (ENC-75; battery row added
+ * by ENC-129). Each row's chip carries the state; the row itself is
+ * the fix when one exists — the accessibility row always opens
+ * Settings (that is also how a user turns it back off), the microphone
+ * and overlay rows act only while their permission is missing, and the
+ * battery row opens the battery-optimization list only while Bloviate
+ * is not exempt. The detection row's sub-line doubles as the live
+ * focus readout while the watcher is on and connected: which kind of
+ * field is focused, never its content or the app it belongs to. An
+ * enabled-but-disconnected watcher (ENC-129 supervision) reads
+ * "Not connected" here instead of a misleading On.
  */
 @Composable
 private fun PermissionsCard(
     uiState: MainUiState,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit,
     onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -214,18 +225,26 @@ private fun PermissionsCard(
         DashboardRow(
             label = stringResource(R.string.watcher_row_label),
             icon = Icons.Filled.Visibility,
-            sub = if (uiState.watcherEnabled) {
-                focusSub(uiState.focusClassification)
-            } else {
-                stringResource(R.string.watcher_row_sub)
+            sub = when {
+                !uiState.watcherEnabled -> stringResource(R.string.watcher_row_sub)
+                !uiState.watcherConnected -> stringResource(R.string.watcher_row_disconnected_sub)
+                else -> focusSub(uiState.focusClassification)
             },
             onClick = onOpenAccessibilitySettings,
             trailing = {
                 StatusChip(
                     text = stringResource(
-                        if (uiState.watcherEnabled) R.string.chip_on else R.string.chip_off,
+                        when {
+                            !uiState.watcherEnabled -> R.string.chip_off
+                            !uiState.watcherConnected -> R.string.chip_not_connected
+                            else -> R.string.chip_on
+                        },
                     ),
-                    tone = if (uiState.watcherEnabled) StatusTone.POSITIVE else StatusTone.ATTENTION,
+                    tone = if (uiState.watcherEnabled && uiState.watcherConnected) {
+                        StatusTone.POSITIVE
+                    } else {
+                        StatusTone.ATTENTION
+                    },
                 )
             },
         )
@@ -269,6 +288,22 @@ private fun PermissionsCard(
                 )
             },
         )
+        DashboardRow(
+            label = stringResource(R.string.battery_row_label),
+            icon = Icons.Filled.BatteryStd,
+            sub = stringResource(R.string.battery_row_sub),
+            onClick = if (uiState.batteryExempt) null else onOpenBatterySettings,
+            showChevron = !uiState.batteryExempt,
+            dividerAbove = true,
+            trailing = {
+                StatusChip(
+                    text = stringResource(
+                        if (uiState.batteryExempt) R.string.chip_allowed else R.string.chip_not_allowed,
+                    ),
+                    tone = if (uiState.batteryExempt) StatusTone.POSITIVE else StatusTone.ATTENTION,
+                )
+            },
+        )
     }
 }
 
@@ -287,12 +322,15 @@ private fun focusSub(classification: FocusClassification): String =
  * that matches an on/off job. The switch is live regardless of the
  * overlay permission, exactly as the old start/stop buttons were: the
  * service is the thing that runs, the permission gate is its own row.
+ * Below it, the resident-presence switch (ENC-129): whether the bubble
+ * starts on its own after a reboot and comes back after a system stop.
  */
 @Composable
 private fun DictationCard(
     uiState: MainUiState,
     onStartBubble: () -> Unit,
     onStopBubble: () -> Unit,
+    onAutoStartEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     DashboardCard(modifier = modifier) {
@@ -306,6 +344,19 @@ private fun DictationCard(
                     onCheckedChange = { turnOn ->
                         if (turnOn) onStartBubble() else onStopBubble()
                     },
+                    colors = bloviateSwitchColors(),
+                )
+            },
+        )
+        DashboardRow(
+            label = stringResource(R.string.autostart_row_label),
+            icon = Icons.Filled.RestartAlt,
+            sub = stringResource(R.string.autostart_row_sub),
+            dividerAbove = true,
+            trailing = {
+                Switch(
+                    checked = uiState.autoStartEnabled,
+                    onCheckedChange = onAutoStartEnabledChange,
                     colors = bloviateSwitchColors(),
                 )
             },
@@ -869,8 +920,10 @@ private fun SetupScreenEmptyPreview() {
             uiState = MainUiState(),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
             onStartBubble = {},
             onStopBubble = {},
+            onAutoStartEnabledChange = {},
             onRequestMicPermission = {},
             onWhisperDownloadClick = {},
             onParakeetDownloadClick = {},
@@ -892,9 +945,11 @@ private fun SetupScreenPopulatedPreview() {
         SetupScreen(
             uiState = MainUiState(
                 watcherEnabled = true,
+                watcherConnected = true,
                 focusClassification = FocusClassification.EDITABLE,
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
+                batteryExempt = true,
                 micPermissionGranted = true,
                 whisperModelStatus = ModelUiStatus.Ready,
                 parakeetModelStatus = ModelUiStatus.Ready,
@@ -908,8 +963,10 @@ private fun SetupScreenPopulatedPreview() {
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
             onStartBubble = {},
             onStopBubble = {},
+            onAutoStartEnabledChange = {},
             onRequestMicPermission = {},
             onWhisperDownloadClick = {},
             onParakeetDownloadClick = {},

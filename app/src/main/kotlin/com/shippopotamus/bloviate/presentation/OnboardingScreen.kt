@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
@@ -43,8 +44,9 @@ import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
 
 /**
- * The first-run wizard (ENC-67): six steps — welcome, the four setup
- * gates in the Setup screen's own order, and a guided test dictation.
+ * The first-run wizard (ENC-67): seven steps — welcome, the five setup
+ * gates in the Setup screen's own order (the battery gate arrived with
+ * ENC-129), and a guided test dictation.
  * It is a flow over the same live state the Setup dashboard reads:
  * every gate step shows its state as a chip and carries the deep-link
  * action that fixes it, and the model step is the Setup model card's
@@ -57,12 +59,14 @@ import com.shippopotamus.bloviate.R
  * for a successful dictation. Progress persists per step, so a
  * settings detour or a dead process resumes where the user left off.
  */
+@Suppress("LongParameterList") // Fully state-hoisted screen: one callback per control, by design.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingScreen(
     uiState: OnboardingUiState,
     onOpenAccessibilitySettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit,
     onRequestMicPermission: () -> Unit,
     onStartBubble: () -> Unit,
     onWhisperDownloadClick: () -> Unit,
@@ -121,6 +125,10 @@ fun OnboardingScreen(
                 OnboardingStepUi.MICROPHONE -> MicrophoneStep(
                     uiState = uiState,
                     onRequestMicPermission = onRequestMicPermission,
+                )
+                OnboardingStepUi.BATTERY -> BatteryStep(
+                    uiState = uiState,
+                    onOpenBatterySettings = onOpenBatterySettings,
                 )
                 OnboardingStepUi.MODEL -> ModelStep(
                     uiState = uiState,
@@ -249,6 +257,10 @@ private fun WelcomeStep(modifier: Modifier = Modifier) {
             text = stringResource(R.string.onboarding_welcome_point_mic),
         )
         WelcomePoint(
+            icon = Icons.Filled.BatteryStd,
+            text = stringResource(R.string.onboarding_welcome_point_battery),
+        )
+        WelcomePoint(
             icon = Icons.Filled.GraphicEq,
             text = stringResource(R.string.onboarding_welcome_point_model),
         )
@@ -329,9 +341,14 @@ private fun WatcherStep(
         icon = Icons.Filled.Visibility,
         title = stringResource(R.string.onboarding_watcher_title),
         sub = stringResource(R.string.onboarding_watcher_sub),
-        satisfied = uiState.watcherEnabled,
+        // Supervised (ENC-129): enabled and connected, the same verdict
+        // the Setup dashboard shows — an enabled-but-disconnected
+        // watcher reads "Not connected" here, never a satisfied On.
+        satisfied = uiState.stepSatisfied(OnboardingStepUi.WATCHER),
         satisfiedChipText = stringResource(R.string.chip_on),
-        unsatisfiedChipText = stringResource(R.string.chip_off),
+        unsatisfiedChipText = stringResource(
+            if (uiState.watcherEnabled) R.string.chip_not_connected else R.string.chip_off,
+        ),
         actionLabel = stringResource(R.string.onboarding_open_settings),
         onAction = onOpenAccessibilitySettings,
     )
@@ -374,7 +391,31 @@ private fun MicrophoneStep(
 }
 
 /**
- * Step 5 — the voice model: both engines' rows with their live
+ * Step 5 — stay running (ENC-129): the battery-optimization exemption,
+ * deep-linked to the system's battery list. The direct exemption
+ * request intent is Play-policy-restricted, so the wizard sends the
+ * user to the list to set Bloviate to Unrestricted — the same deep
+ * link the Setup battery row uses.
+ */
+@Composable
+private fun BatteryStep(
+    uiState: OnboardingUiState,
+    onOpenBatterySettings: () -> Unit,
+) {
+    GateStep(
+        icon = Icons.Filled.BatteryStd,
+        title = stringResource(R.string.onboarding_battery_title),
+        sub = stringResource(R.string.onboarding_battery_sub),
+        satisfied = uiState.batteryExempt,
+        satisfiedChipText = stringResource(R.string.chip_allowed),
+        unsatisfiedChipText = stringResource(R.string.chip_not_allowed),
+        actionLabel = stringResource(R.string.onboarding_open_settings),
+        onAction = onOpenBatterySettings,
+    )
+}
+
+/**
+ * Step 6 — the voice model: both engines' rows with their live
  * download states and the engine choice, the Setup model card's
  * content in the wizard's frame. The selected engine is only a
  * preference — the fallback note appears while the ready engine is
@@ -618,6 +659,7 @@ private fun OnboardingWatcherPreview() {
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
             onRequestMicPermission = {},
             onStartBubble = {},
             onWhisperDownloadClick = {},
@@ -649,6 +691,7 @@ private fun OnboardingTestLandedPreview() {
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
             onRequestMicPermission = {},
             onStartBubble = {},
             onWhisperDownloadClick = {},
@@ -672,6 +715,7 @@ private fun OnboardingWelcomePreview() {
             uiState = OnboardingUiState(step = OnboardingStepUi.WELCOME),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
             onRequestMicPermission = {},
             onStartBubble = {},
             onWhisperDownloadClick = {},
