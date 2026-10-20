@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,13 +70,15 @@ import kotlin.math.roundToInt
  * the settings link, a switch for the bubble, a segmented control for
  * the engine — instead of cards full of sentences and verb buttons.
  * Same state and callbacks as the card layout it replaced; the rework
- * is presentation only.
+ * is presentation only. Below the cards sit the quiet sections: the
+ * setup-guide row that re-runs the ENC-67 wizard, and the footer.
  *
  * The column scrolls: the sections together exceed short viewports
  * (fold cover screens, split windows), and every row must stay
  * reachable (ENC-65). The shell's navigation bar owns the bottom
  * system inset, so the column does not pad for it.
  */
+@Suppress("LongParameterList") // Fully state-hoisted screen: one callback per control, by design.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(
@@ -92,6 +95,7 @@ fun SetupScreen(
     onBubbleSizeChange: (BubbleSizeUi) -> Unit,
     onBubbleShapeChange: (BubbleShapeUi) -> Unit,
     onBubbleTintChange: (BubbleTintUi) -> Unit,
+    onRunSetupAgain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -152,6 +156,10 @@ fun SetupScreen(
                 onParakeetDownloadClick = onParakeetDownloadClick,
                 onSelectEngine = onSelectEngine,
             )
+            DashboardSectionHeader(
+                text = stringResource(R.string.setup_section_guide),
+            )
+            SetupGuideCard(onRunSetupAgain = onRunSetupAgain)
             SetupFooter()
         }
     }
@@ -783,6 +791,28 @@ private fun engineShortName(engine: DictationEngineUi): String =
     )
 
 /**
+ * The setup-guide card (ENC-67): one row that restarts the first-run
+ * wizard at its welcome step. The wizard's record flips back to
+ * unfinished, the shell hands the screen over to it, and the walk's
+ * live chips show everything already in place — re-running is a
+ * review, not a reset of the settings themselves.
+ */
+@Composable
+private fun SetupGuideCard(
+    onRunSetupAgain: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DashboardCard(modifier = modifier) {
+        DashboardRow(
+            label = stringResource(R.string.setup_rerun_row_label),
+            icon = Icons.Filled.RestartAlt,
+            sub = stringResource(R.string.setup_rerun_row_sub),
+            onClick = onRunSetupAgain,
+        )
+    }
+}
+
+/**
  * The quiet footer (ENC-75): the privacy story in one line, the model
  * attributions, and the exact build identity (ENC-69 — one-off test
  * builds all report version 1.0, so the commit SHA is the only reliable
@@ -850,6 +880,7 @@ private fun SetupScreenEmptyPreview() {
             onBubbleSizeChange = {},
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
+            onRunSetupAgain = {},
         )
     }
 }
@@ -888,6 +919,7 @@ private fun SetupScreenPopulatedPreview() {
             onBubbleSizeChange = {},
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
+            onRunSetupAgain = {},
         )
     }
 }

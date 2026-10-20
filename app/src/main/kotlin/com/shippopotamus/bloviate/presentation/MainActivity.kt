@@ -17,9 +17,11 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 /**
- * Launcher activity hosting the status screen. The [WhisperEngine] injection
- * proves the composite-build substitution and the whisper-android-hilt
- * bindings resolve in the app's Hilt graph; no transcription happens yet.
+ * Launcher activity hosting the app's root route — the first-run
+ * wizard (ENC-67) until its persisted record is finished, the tab
+ * shell after. The [WhisperEngine] injection proves the
+ * composite-build substitution and the whisper-android-hilt bindings
+ * resolve in the app's Hilt graph.
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -28,10 +30,19 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    /**
+     * The wizard's ViewModel (ENC-67): the same activity-scoped
+     * instance the composition's `hiltViewModel()` resolves to, held
+     * here only so lifecycle events reach it while the wizard — not
+     * the shell — is the visible surface.
+     */
+    private val onboardingViewModel: OnboardingViewModel by viewModels()
+
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
         viewModel.onMicPermissionResult()
+        onboardingViewModel.onMicPermissionResult()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +65,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.onResumed()
+        onboardingViewModel.onResumed()
     }
 
     private fun openAccessibilitySettings() {
