@@ -66,7 +66,6 @@
     <string name="bubble_size_small">Small</string>
     <string name="bubble_size_medium">Medium</string>
     <string name="bubble_size_large">Large</string>
-    <string name="bubble_shape_circle">Circle</string>
     <string name="bubble_shape_pill">Pill</string>
     <string name="bubble_shape_squircle">Squircle</string>
     <string name="bubble_shape_cookie">Cookie</string>

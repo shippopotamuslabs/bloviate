@@ -97,9 +97,8 @@ enum class BubbleSizeUi {
     LARGE,
 }
 
-/** Presentation-only mapping of the bubble silhouettes (ENC-68). */
+/** Presentation-only mapping of the bubble silhouettes (ENC-68; circle merged into pill in ENC-122). */
 enum class BubbleShapeUi {
-    CIRCLE,
     PILL,
     SQUIRCLE,
     COOKIE,
@@ -125,7 +124,7 @@ enum class BubbleTintUi {
 data class BubbleAppearanceUi(
     val opacity: Float = 1f,
     val size: BubbleSizeUi = BubbleSizeUi.MEDIUM,
-    val shape: BubbleShapeUi = BubbleShapeUi.CIRCLE,
+    val shape: BubbleShapeUi = BubbleShapeUi.PILL,
     val tint: BubbleTintUi = BubbleTintUi.INDIGO,
 )
 
@@ -145,7 +144,6 @@ internal fun BubbleSize.toUi(): BubbleSizeUi =
 
 internal fun BubbleShapeUi.toDomain(): BubbleShape =
     when (this) {
-        BubbleShapeUi.CIRCLE -> BubbleShape.CIRCLE
         BubbleShapeUi.PILL -> BubbleShape.PILL
         BubbleShapeUi.SQUIRCLE -> BubbleShape.SQUIRCLE
         BubbleShapeUi.COOKIE -> BubbleShape.COOKIE
@@ -155,7 +153,6 @@ internal fun BubbleShapeUi.toDomain(): BubbleShape =
 
 internal fun BubbleShape.toUi(): BubbleShapeUi =
     when (this) {
-        BubbleShape.CIRCLE -> BubbleShapeUi.CIRCLE
         BubbleShape.PILL -> BubbleShapeUi.PILL
         BubbleShape.SQUIRCLE -> BubbleShapeUi.SQUIRCLE
         BubbleShape.COOKIE -> BubbleShapeUi.COOKIE

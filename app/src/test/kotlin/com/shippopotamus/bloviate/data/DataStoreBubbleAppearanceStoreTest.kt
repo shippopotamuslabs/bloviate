@@ -100,13 +100,37 @@ class DataStoreBubbleAppearanceStoreTest {
             preferences[stringPreferencesKey("bubble_tint")] = "INFO"
         }
 
-        // The removed silhouette falls back to its default; the rest of
-        // the v1 record — including the surviving fields — still reads.
+        // The unrecognized silhouette falls back to its default; the rest
+        // of the v1 record — including the surviving fields — still reads.
         assertEquals(
             BubbleAppearance(
                 opacity = 0.5f,
                 size = BubbleSize.LARGE,
-                shape = BubbleShape.CIRCLE,
+                shape = BubbleShape.PILL,
+                tint = BubbleTint.INFO,
+            ),
+            store.appearance.value,
+        )
+    }
+
+    @Test
+    fun `a stored CIRCLE shape migrates to PILL and the rest of the record survives`() = runTest {
+        dataStore.edit { preferences ->
+            preferences[intPreferencesKey("bubble_appearance_schema_version")] = 1
+            preferences[floatPreferencesKey("bubble_opacity")] = 0.5f
+            preferences[stringPreferencesKey("bubble_size")] = "LARGE"
+            preferences[stringPreferencesKey("bubble_shape")] = "CIRCLE"
+            preferences[stringPreferencesKey("bubble_tint")] = "INFO"
+        }
+
+        // ENC-122: CIRCLE was a real v1 value, removed as PILL's
+        // duplicate — it renames to PILL explicitly; the rest of the
+        // record reads exactly as stored.
+        assertEquals(
+            BubbleAppearance(
+                opacity = 0.5f,
+                size = BubbleSize.LARGE,
+                shape = BubbleShape.PILL,
                 tint = BubbleTint.INFO,
             ),
             store.appearance.value,
