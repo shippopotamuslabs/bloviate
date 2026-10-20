@@ -13,14 +13,15 @@ class OpenRouterPayloadTest {
     private val user = PromptMessage(role = "user", content = "Say hi.")
 
     @Test
-    fun `the style chain is gemini 3 1 flash lite then local`() {
-        // ENC-99 as revised (Sean, 2026-10-19): pinning the literal
-        // string here is what makes an accidental slug edit a test
-        // failure instead of a silent behavior change. There is no
-        // second model to pin: the fallback slot is deliberately
-        // empty pending Sean's call, so the chain is this slug,
-        // then the local text.
-        assertEquals("google/gemini-3.1-flash-lite", OpenRouterPayload.PRIMARY_MODEL)
+    fun `the style chain is deepseek v4 1 flash then gemini 3 1 flash lite then local`() {
+        // ENC-100 (Sean, 2026-10-19): pinning the literal strings
+        // here is what makes an accidental slug edit a test failure
+        // instead of a silent behavior change. DeepSeek V4.1 Flash
+        // (the dated 1017 snapshot) heads the chain; Gemini 3.1
+        // Flash-Lite — the ENC-99 head — is the fallback; then the
+        // local text.
+        assertEquals("deepseek/deepseek-v4.1-flash-1017", OpenRouterPayload.PRIMARY_MODEL)
+        assertEquals("google/gemini-3.1-flash-lite", OpenRouterPayload.FALLBACK_MODEL)
     }
 
     @Test
@@ -36,23 +37,37 @@ class OpenRouterPayloadTest {
     }
 
     @Test
-    fun `the primary provider pool is the standard gemini endpoints latency sorted`() {
-        // ENC-99: endpoint tags are the OpenRouter endpoints API's
-        // values, verified live at implementation time (all at 100%
-        // 30-day uptime). The Flex tags (google-vertex/global/flex,
-        // google-ai-studio/flex) and the /priority tags are absent
-        // on purpose — an allow-list admits only what it names.
+    fun `the primary provider pool is the us fast class latency sorted`() {
+        // ENC-100: endpoint tags are the OpenRouter endpoints API's
+        // values, verified live at implementation time (all at
+        // status 0 / 100% 30-day uptime). Sean specified US fast
+        // providers: DeepSeek direct, Alibaba, and the Flex tier
+        // (deepinfra/fp8/flex) are absent on purpose — an allow-list
+        // admits only what it names.
         assertEquals(
-            listOf("google-vertex/global", "google-ai-studio", "google-vertex/us", "google-vertex/eu"),
+            listOf("deepinfra/fp8/priority", "deepinfra/fp8", "fireworks", "together", "baseten", "parasail/fp8"),
             OpenRouterPayload.PRIMARY_PROVIDER_ONLY,
         )
         assertEquals("latency", OpenRouterPayload.PRIMARY_PROVIDER_SORT)
     }
 
     @Test
+    fun `the fallback provider pool is vertex only latency sorted`() {
+        // ENC-100: ENC-99's pool minus google-ai-studio — Sean's
+        // stored AI Studio BYOK key is invalid and its 400s were
+        // recorded polluting the ENC-99 build's retest route. The
+        // Flex and priority tags stay absent, as in ENC-99.
+        assertEquals(
+            listOf("google-vertex/global", "google-vertex/us", "google-vertex/eu"),
+            OpenRouterPayload.FALLBACK_PROVIDER_ONLY,
+        )
+        assertEquals("latency", OpenRouterPayload.FALLBACK_PROVIDER_SORT)
+    }
+
+    @Test
     fun `a request with an only list and a sort carries both in the provider block`() {
-        // ENC-99: the primary's exact wire shape — allow-list plus
-        // latency sort, fallbacks on within the list.
+        // ENC-100: the primary's exact wire shape — the US-only
+        // allow-list plus latency sort, fallbacks on within the list.
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
@@ -64,10 +79,36 @@ class OpenRouterPayloadTest {
         assertTrue(
             request.contains(
                 "\"provider\":{\"allow_fallbacks\":true," +
-                    "\"only\":[\"google-vertex/global\",\"google-ai-studio\",\"google-vertex/us\",\"google-vertex/eu\"]," +
+                    "\"only\":[\"deepinfra/fp8/priority\",\"deepinfra/fp8\",\"fireworks\",\"together\",\"baseten\",\"parasail/fp8\"]," +
                     "\"sort\":\"latency\"}",
             ),
         )
+        assertFalse(request.contains("flex"))
+        assertFalse(request.contains("alibaba"))
+    }
+
+    @Test
+    fun `a fallback request carries the vertex only provider block`() {
+        // ENC-100: the fallback's exact wire shape — Vertex
+        // endpoints only; google-ai-studio appears nowhere in the
+        // request while the key behind it is invalid.
+        val request = OpenRouterPayload.buildChatRequest(
+            model = OpenRouterPayload.FALLBACK_MODEL,
+            system = system,
+            user = user,
+            providerOnly = OpenRouterPayload.FALLBACK_PROVIDER_ONLY,
+            providerSort = OpenRouterPayload.FALLBACK_PROVIDER_SORT,
+        )
+
+        assertTrue(
+            request.contains(
+                "\"provider\":{\"allow_fallbacks\":true," +
+                    "\"only\":[\"google-vertex/global\",\"google-vertex/us\",\"google-vertex/eu\"]," +
+                    "\"sort\":\"latency\"}",
+            ),
+        )
+        assertFalse(request.contains("google-ai-studio"))
+        assertFalse(request.contains("flex"))
     }
 
     @Test
@@ -167,22 +208,23 @@ class OpenRouterPayloadTest {
 
     @Test
     fun `the reasoning control pins to effort none`() {
-        // ENC-99: the shipped control value, pinned literally for the
-        // same reason as the model slugs — a silent edit here changes
-        // every style call's latency profile. "none" because the
-        // ENC-99 primary's own metadata lists it in supported_efforts
-        // with reasoning not mandatory (live-verified); ENC-94's
-        // effort "low" was the strongest control the then-primary
-        // (Grok 4.7) would honor, and it still thought ~1,000 tokens
-        // a call.
+        // ENC-100: the shipped control value, pinned literally for
+        // the same reason as the model slugs — a silent edit here
+        // changes every style call's latency profile. "none"
+        // because BOTH chain models' own metadata list it in
+        // supported_efforts with reasoning not mandatory
+        // (live-verified for the DeepSeek primary and the Gemini
+        // fallback alike); ENC-94's effort "low" was the strongest
+        // control the then-primary (Grok 4.7) would honor, and it
+        // still thought ~1,000 tokens a call.
         assertEquals("none", OpenRouterPayload.REASONING_EFFORT)
     }
 
     @Test
     fun `a request carries no reasoning control by default`() {
         // The BUILDER's bare shape: no effort given, no block. The
-        // chain never sends this shape — its link passes the effort
-        // explicitly on every attempt (ENC-99).
+        // chain never sends this shape — both links pass the effort
+        // explicitly on every attempt (ENC-100).
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
@@ -196,8 +238,10 @@ class OpenRouterPayloadTest {
 
     @Test
     fun `a request carries the reasoning control when an effort is given`() {
-        // ENC-99: the chain's full-attempt shape — the primary with
-        // reasoning explicitly off.
+        // ENC-100: the chain's full-attempt shape — a link with
+        // reasoning explicitly off (asserted on the primary here;
+        // the fallback's identical shape is pinned by the client
+        // suite's per-request assertions).
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
@@ -229,11 +273,12 @@ class OpenRouterPayloadTest {
 
     @Test
     fun `a degraded request drops stream options but keeps the reasoning control and still streams`() {
-        // ENC-99's degraded shape (ENC-95's mechanism, revised): the
-        // retry drops stream_options — the one purely-optional block —
-        // but KEEPS reasoning effort none. Dropping it would silently
-        // re-enable the primary's default reasoning on exactly the
-        // calls that already failed once.
+        // ENC-100's degraded shape (ENC-95's mechanism, revised by
+        // ENC-99): the retry drops stream_options — the one
+        // purely-optional block — but KEEPS reasoning effort none.
+        // Dropping it would silently re-enable a model's default
+        // reasoning on exactly the calls that already failed once
+        // (both chain models reason by default).
         val request = OpenRouterPayload.buildChatRequest(
             model = OpenRouterPayload.PRIMARY_MODEL,
             system = system,
