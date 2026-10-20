@@ -72,14 +72,15 @@ class StyleHttpTransportTimeoutTest {
 
     @Test
     fun `the chain backstop exceeds the sum of the per-attempt caps`() {
-        // ENC-97: the backstop is pathology insurance only. If it
-        // could ever bind inside the sum of the four attempt caps
-        // (primary/fallback × full/degraded), it would reintroduce
-        // the chain-wide starvation this ticket removes.
+        // ENC-97 (attempt count updated by ENC-99): the backstop is
+        // pathology insurance only. If it could ever bind inside the
+        // sum of the two attempt caps (the one link × full/degraded),
+        // it would reintroduce the chain-wide starvation ENC-97
+        // removed.
         assertTrue(
-            OpenRouterStyleClient.CHAIN_BACKSTOP_MS > 4 * OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS,
+            OpenRouterStyleClient.CHAIN_BACKSTOP_MS > 2 * OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS,
             "chain backstop ${OpenRouterStyleClient.CHAIN_BACKSTOP_MS}ms must exceed the sum of " +
-                "the four ${OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS}ms attempt caps",
+                "the two ${OpenRouterStyleClient.ATTEMPT_ABSOLUTE_CAP_MS}ms attempt caps",
         )
     }
 
