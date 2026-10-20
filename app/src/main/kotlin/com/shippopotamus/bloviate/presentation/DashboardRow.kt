@@ -166,7 +166,7 @@ private fun DashboardRowPreview() {
             DashboardRow(
                 label = "Text-field detection",
                 icon = Icons.Filled.Visibility,
-                sub = "Spots fields, never reads them",
+                sub = "Spots text fields",
                 onClick = {},
                 trailing = { StatusChip(text = "On", tone = StatusTone.POSITIVE) },
             )
