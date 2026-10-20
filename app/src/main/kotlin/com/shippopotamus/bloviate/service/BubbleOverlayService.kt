@@ -24,6 +24,7 @@ import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
+import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
@@ -149,6 +150,12 @@ class BubbleOverlayService : Service() {
     // emission — the window is never recreated for an appearance change.
     private val appearanceSnapshot = mutableStateOf(BubbleAppearance.DEFAULT)
 
+    // The persisted anchor's in-memory mirror (ENC-123): collected for the
+    // service's whole lifetime and updated synchronously wherever this
+    // service persists a position, so re-deriving the resting position
+    // (see reclampBubble) never lags the store.
+    private var restingPosition: BubblePosition = BubblePosition.DEFAULT
+
     // Bar-form window placement (ENC-65): the recording bar is far wider
     // than the bubble and the window is anchored top-left, so the morph
     // repositions the window to keep the whole bar on-screen. These fields
@@ -210,6 +217,9 @@ class BubbleOverlayService : Service() {
         }
         serviceScope.launch {
             observeBubbleAppearance().collect { appearance -> appearanceSnapshot.value = appearance }
+        }
+        serviceScope.launch {
+            observeBubblePosition().collect { saved -> restingPosition = saved ?: BubblePosition.DEFAULT }
         }
         serviceScope.launch {
             modelStore.state.collect { state -> onModelStateChanged(state) }
@@ -366,9 +376,9 @@ class BubbleOverlayService : Service() {
         // view's width changes (the bar morph settling, elapsed-time
         // growth), the placement check keeps the whole bar on-screen.
         // An appearance size change (ENC-68) resizes the idle bubble in
-        // the same way, so it re-clamps into the screen too — the drag
-        // math reads the view's live size, and the persisted anchor is a
-        // normalized fraction, so a resize never strands the bubble.
+        // the same way; the re-clamp then re-derives the resting position
+        // from the persisted anchor at the new size (ENC-123) — the live
+        // view size is never trusted mid-morph (see reclampBubble).
         view.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
             val widthChanged = right - left != oldRight - oldLeft
             val heightChanged = bottom - top != oldBottom - oldTop
@@ -416,6 +426,7 @@ class BubbleOverlayService : Service() {
         if (barFormAnchorXPx != null) {
             barFormMoved = true
         } else {
+            restingPosition = position
             serviceScope.launch { saveBubblePosition(position) }
         }
     }
@@ -472,18 +483,14 @@ class BubbleOverlayService : Service() {
             )
             params.x = landed.xPx
             params.y = landed.yPx
-            val anchorWidthPx = barFormAnchorWidthPx
-            val anchorHeightPx = barFormAnchorHeightPx
-            serviceScope.launch {
-                saveBubblePosition(
-                    BubblePositionMath.toNormalized(
-                        topLeft = landed,
-                        bubbleWidthPx = anchorWidthPx,
-                        bubbleHeightPx = anchorHeightPx,
-                        bounds = bounds,
-                    ),
-                )
-            }
+            val landedPosition = BubblePositionMath.toNormalized(
+                topLeft = landed,
+                bubbleWidthPx = barFormAnchorWidthPx,
+                bubbleHeightPx = barFormAnchorHeightPx,
+                bounds = bounds,
+            )
+            restingPosition = landedPosition
+            serviceScope.launch { saveBubblePosition(landedPosition) }
         } else {
             params.x = anchorXPx
         }
@@ -527,10 +534,11 @@ class BubbleOverlayService : Service() {
     /** Apply the persisted (or default) position once the view has been measured. */
     private suspend fun restorePosition(view: ComposeView, params: WindowManager.LayoutParams) {
         val saved = observeBubblePosition().first() ?: BubblePosition.DEFAULT
+        restingPosition = saved
         view.post {
             if (bubbleView !== view) return@post
             val bounds = currentBounds()
-            val pixels = BubblePositionMath.toPixels(
+            val pixels = BubblePositionMath.restingTopLeft(
                 position = saved,
                 bubbleWidthPx = view.width,
                 bubbleHeightPx = view.height,
@@ -542,22 +550,60 @@ class BubbleOverlayService : Service() {
         }
     }
 
+    /**
+     * Keep the resting bubble on-screen when its size or the bounds change
+     * around it (ENC-123).
+     *
+     * Outside bar form the resting position is RE-DERIVED from the
+     * persisted anchor against the bubble's own appearance size — never
+     * pixel-clamped against the view's live size. The old clamp read the
+     * view mid-morph: on collapse the view is still bar-wide for the whole
+     * settle animation, so each frame's clamp pulled a docked bubble's x
+     * left toward the bar's width, and the one-way clamp never let it
+     * back — the bubble came to rest displaced toward mid-screen after
+     * every record cycle. The same clamp stranded a bubble off its docked
+     * edge when an ENC-68 size step shrank it. Re-derivation is a
+     * constant during a morph (the anchor and the bubble's size do not
+     * change), preserves the docked edge at every size step, and moves
+     * mid-screen positions only as the anchor model prescribes.
+     *
+     * In bar form the window's placement belongs to [applyBarPlacement] /
+     * [exitBarForm]; the clamp below only keeps the bar itself on-screen
+     * across a posture change.
+     */
     private fun reclampBubble() {
         val view = bubbleView ?: return
         val params = layoutParams ?: return
         val bounds = currentBounds()
-        val clamped = BubblePositionMath.clamp(
-            topLeft = BubblePixelPosition(xPx = params.x, yPx = params.y),
-            bubbleWidthPx = view.width,
-            bubbleHeightPx = view.height,
-            bounds = bounds,
-        )
-        if (clamped.xPx != params.x || clamped.yPx != params.y) {
-            params.x = clamped.xPx
-            params.y = clamped.yPx
+        val target = if (barFormAnchorXPx != null) {
+            BubblePositionMath.clamp(
+                topLeft = BubblePixelPosition(xPx = params.x, yPx = params.y),
+                bubbleWidthPx = view.width,
+                bubbleHeightPx = view.height,
+                bounds = bounds,
+            )
+        } else {
+            val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
+            BubblePositionMath.restingTopLeft(
+                position = restingPosition,
+                bubbleWidthPx = bubbleWidthPx,
+                bubbleHeightPx = bubbleHeightPx,
+                bounds = bounds,
+            )
+        }
+        if (target.xPx != params.x || target.yPx != params.y) {
+            params.x = target.xPx
+            params.y = target.yPx
             windowManager.updateViewLayout(view, params)
         }
         Log.d(TAG, "Bubble re-clamped into ${bounds.widthPx}x${bounds.heightPx}")
+    }
+
+    /** The bubble's own extent in pixels, from the appearance's size step (ENC-68). */
+    private fun bubbleSizePx(): Pair<Int, Int> {
+        val sizePx = (BubbleAppearanceMath.bubbleSizeDp(appearanceSnapshot.value.size) *
+            resources.displayMetrics.density).roundToInt()
+        return sizePx to sizePx
     }
 
     private fun createLayoutParams(): WindowManager.LayoutParams =

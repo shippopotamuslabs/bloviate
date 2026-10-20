@@ -67,6 +67,29 @@ object BubblePositionMath {
             bounds = bounds,
         )
 
+    /**
+     * The bubble's resting top-left: [position] (the persisted anchor)
+     * re-derived against the bubble's OWN size in [bounds] (ENC-123).
+     *
+     * This is the only way a resting position may be recomputed when the
+     * window's form or size changes around the bubble — the bar morph
+     * settling, an ENC-68 size-step change, a posture change. The window's
+     * current pixel offset and any transient form width are never inputs:
+     * pixel-clamping the resting offset against a wider form's width
+     * (the bar's, mid-collapse) pulls a docked bubble toward the interior
+     * by the width difference, and clamping never moves it back — the
+     * bubble came to rest displaced toward mid-screen after every record
+     * cycle. Re-derived from the anchor instead, the docked edge is
+     * invariant: expand → collapse returns the identical resting
+     * position, and a resize preserves the docked edge exactly.
+     */
+    fun restingTopLeft(
+        position: BubblePosition,
+        bubbleWidthPx: Int,
+        bubbleHeightPx: Int,
+        bounds: ScreenBounds,
+    ): BubblePixelPosition = toPixels(position, bubbleWidthPx, bubbleHeightPx, bounds)
+
     /** True when the bubble's vertical center sits inside the bottom dismiss zone. */
     fun isInDismissZone(centerYPx: Int, bounds: ScreenBounds): Boolean =
         centerYPx.toFloat() >= bounds.heightPx * (MAX_FRACTION - DISMISS_ZONE_HEIGHT_FRACTION)
