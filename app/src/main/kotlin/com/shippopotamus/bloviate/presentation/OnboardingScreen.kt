@@ -392,10 +392,11 @@ private fun MicrophoneStep(
 
 /**
  * Step 5 — stay running (ENC-129): the battery-optimization exemption.
- * The action raises the system's one-tap exemption dialog in place
- * (ENC-139), falling back to the battery-optimization list on builds
- * that strip the direct intent — the same action the Setup battery
- * row uses.
+ * The action grants rather than opens Settings — it raises the
+ * system's one-tap exemption dialog in place (ENC-139), falling back
+ * to the battery-optimization list on builds that defeat the direct
+ * intent (ENC-141) — so the button is labeled "Allow" (ENC-141), the
+ * same action the Setup battery row uses.
  */
 @Composable
 private fun BatteryStep(
@@ -409,7 +410,7 @@ private fun BatteryStep(
         satisfied = uiState.batteryExempt,
         satisfiedChipText = stringResource(R.string.chip_allowed),
         unsatisfiedChipText = stringResource(R.string.chip_not_allowed),
-        actionLabel = stringResource(R.string.onboarding_open_settings),
+        actionLabel = stringResource(R.string.onboarding_battery_action),
         onAction = onOpenBatterySettings,
     )
 }
