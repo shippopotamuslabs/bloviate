@@ -34,6 +34,7 @@
     <string name="bubble_notification_text">The dictation bubble appears over editable text fields.</string>
     <string name="bubble_notification_stop">Stop</string>
     <string name="bubble_content_description">Bloviate dictation bubble</string>
+    <string name="bubble_warming_description">Warming up the speech engine</string>
     <string name="bubble_recording_description">Recording dictation</string>
     <string name="bubble_cancel_description">Cancel recording</string>
     <string name="bubble_send_description">Stop and transcribe</string>

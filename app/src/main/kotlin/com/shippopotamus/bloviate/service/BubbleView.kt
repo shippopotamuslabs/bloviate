@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -180,6 +181,10 @@ internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize>
  *
  * - [RecordingBarState.Idle]: the mic bubble. Tap starts a recording; drag
  *   repositions; drag to the bottom dismisses for the field session.
+ *   While the speech engine is still warming up ([engineWarming],
+ *   ENC-126) the bubble shows a spinner in place of the mic and taps are
+ *   clean no-ops — the bubble appears on schedule instead of staying
+ *   absent for the seconds the engine needs, which read as broken.
  * - [RecordingBarState.Recording]: the bar — **X** cancels, a live
  *   ~10-bar waveform plus elapsed time in the middle, and the **check**
  *   stops + transcribes. There is no hold-to-talk. The bar drags (by its
@@ -233,6 +238,7 @@ fun BubbleContent(
     waveformLevels: () -> List<Float>,
     inDismissZone: Boolean,
     onTap: () -> Unit = {},
+    engineWarming: Boolean = false,
     onCancelRecording: () -> Unit = {},
     onSendRecording: () -> Unit = {},
     onTransientStateElapsed: () -> Unit = {},
@@ -275,6 +281,7 @@ fun BubbleContent(
         when (barState) {
             RecordingBarState.Idle -> MicBubble(
                 inDismissZone = inDismissZone,
+                engineWarming = engineWarming,
                 appearance = appearance,
                 renderParams = renderParams,
                 onTap = onTap,
@@ -330,8 +337,11 @@ private fun MicBubble(
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    engineWarming: Boolean = false,
 ) {
-    val description = stringResource(R.string.bubble_content_description)
+    val description = stringResource(
+        if (engineWarming) R.string.bubble_warming_description else R.string.bubble_content_description,
+    )
     // The dismiss zone keeps its danger treatment whatever the tint:
     // it is a warning state, not part of the user's chosen look.
     val tint = appearance.tint.tintColors()
@@ -370,11 +380,21 @@ private fun MicBubble(
         shadowElevation = BUBBLE_ELEVATION,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(
-                painter = painterResource(R.drawable.ic_mic),
-                contentDescription = null,
-                modifier = Modifier.size(renderParams.bubbleIconDp.dp),
-            )
+            if (engineWarming) {
+                // The warming indication (ENC-126): a spinner where the
+                // mic will be. It is the affordance — while it shows,
+                // taps do nothing (the recording controller gates them).
+                CircularProgressIndicator(
+                    color = contentColor,
+                    modifier = Modifier.size(renderParams.bubbleIconDp.dp),
+                )
+            } else {
+                Icon(
+                    painter = painterResource(R.drawable.ic_mic),
+                    contentDescription = null,
+                    modifier = Modifier.size(renderParams.bubbleIconDp.dp),
+                )
+            }
         }
     }
 }
@@ -844,6 +864,20 @@ private fun BubbleContentIdlePreview() {
             barState = RecordingBarState.Idle,
             waveformLevels = { emptyList() },
             inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Warming", showBackground = true)
+@Composable
+private fun BubbleContentWarmingPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Idle,
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+            engineWarming = true,
         )
     }
 }
