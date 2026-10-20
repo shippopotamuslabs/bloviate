@@ -25,7 +25,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.R
 
-/** Wires [MainViewModel] state into the shell's Setup tab; the route is the only place the ViewModel is touched. */
+/**
+ * The app's root route: the first-run wizard (ENC-67) while its
+ * persisted record is unfinished, the tab shell otherwise. Both
+ * ViewModels are touched only here (and in the activity, which
+ * forwards resume/mic-result events to each). The wizard and the
+ * shell read the same live gate state through their own ViewModels,
+ * so the two surfaces can never disagree about a permission.
+ */
 @Composable
 fun MainRoute(
     onOpenAccessibilitySettings: () -> Unit,
@@ -34,8 +41,29 @@ fun MainRoute(
     onStopBubble: () -> Unit,
     onRequestMicPermission: () -> Unit,
     viewModel: MainViewModel = hiltViewModel(),
+    onboardingViewModel: OnboardingViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
+    val onboardingUiState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
+    if (onboardingUiState.showWizard) {
+        OnboardingScreen(
+            uiState = onboardingUiState,
+            onOpenAccessibilitySettings = onOpenAccessibilitySettings,
+            onOpenOverlaySettings = onOpenOverlaySettings,
+            onRequestMicPermission = onRequestMicPermission,
+            onStartBubble = onStartBubble,
+            onWhisperDownloadClick = onboardingViewModel::onWhisperDownloadClick,
+            onParakeetDownloadClick = onboardingViewModel::onParakeetDownloadClick,
+            onSelectEngine = onboardingViewModel::onSelectEngine,
+            onTestFieldTextChange = onboardingViewModel::onTestFieldTextChange,
+            onContinue = onboardingViewModel::onContinue,
+            onBack = onboardingViewModel::onBack,
+            onSkip = onboardingViewModel::onSkip,
+            onFinish = onboardingViewModel::onFinish,
+            modifier = modifier,
+        )
+        return
+    }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     AppShell(
         setupContent = {
@@ -53,6 +81,7 @@ fun MainRoute(
                 onBubbleSizeChange = viewModel::onBubbleSizeChange,
                 onBubbleShapeChange = viewModel::onBubbleShapeChange,
                 onBubbleTintChange = viewModel::onBubbleTintChange,
+                onRunSetupAgain = onboardingViewModel::onRunSetupAgain,
             )
         },
         styleContent = { StyleRoute() },
