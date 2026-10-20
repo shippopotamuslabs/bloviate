@@ -10,7 +10,6 @@ import com.shippopotamus.bloviate.domain.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.domain.usecase.IsOverlayPermissionGrantedUseCase
-import com.shippopotamus.bloviate.domain.usecase.IsStoreInstallUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveEnginePreferenceUseCase
 import com.shippopotamus.bloviate.domain.usecase.ObserveModelStateUseCase
@@ -22,7 +21,6 @@ import com.shippopotamus.bloviate.domain.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
-import com.shippopotamus.bloviate.testing.FakeInstallSourcePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeOnboardingPort
@@ -51,7 +49,6 @@ class OnboardingViewModelTest {
     private val fakeModelStorePort = FakeModelStorePort()
     private val fakeParakeetModelStorePort = FakeParakeetModelStorePort()
     private val fakeEnginePreferencePort = FakeEnginePreferencePort()
-    private val fakeInstallSourcePort = FakeInstallSourcePort()
 
     /** Builds the ViewModel over the current fake state; configure fakes first. */
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
@@ -68,7 +65,6 @@ class OnboardingViewModelTest {
         ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
         observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
         selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
-        isStoreInstall = IsStoreInstallUseCase(fakeInstallSourcePort),
     )
 
     @Test
@@ -357,57 +353,6 @@ class OnboardingViewModelTest {
 
             viewModel.uiState.test {
                 assertNull(awaitItem().engineFallback)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `a store install never flags restricted settings`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            fakeInstallSourcePort.installingPackageName = "com.android.vending"
-            val viewModel = buildViewModel()
-
-            viewModel.uiState.test {
-                assertFalse(awaitItem().restrictedSettingsLikely)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `a sideload install with a restricted gate off flags restricted settings`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            fakeInstallSourcePort.installingPackageName = null
-            val viewModel = buildViewModel()
-
-            viewModel.uiState.test {
-                assertTrue(awaitItem().restrictedSettingsLikely)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `a sideload install still flags restricted settings while only the overlay is off`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            fakeInstallSourcePort.installingPackageName = null
-            fakeWatcherAccessPort.enabled = true
-            val viewModel = buildViewModel()
-
-            viewModel.uiState.test {
-                assertTrue(awaitItem().restrictedSettingsLikely)
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `a sideload install with both restricted gates on does not flag restricted settings`() =
-        runTest(mainDispatcherExtension.testDispatcher) {
-            fakeInstallSourcePort.installingPackageName = null
-            fakeWatcherAccessPort.enabled = true
-            fakeBubbleOverlayAccessPort.canDraw = true
-            val viewModel = buildViewModel()
-
-            viewModel.uiState.test {
-                assertFalse(awaitItem().restrictedSettingsLikely)
                 cancelAndIgnoreRemainingEvents()
             }
         }
