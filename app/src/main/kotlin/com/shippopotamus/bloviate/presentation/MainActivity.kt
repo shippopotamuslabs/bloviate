@@ -1,8 +1,10 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -61,6 +63,16 @@ class MainActivity : ComponentActivity() {
         viewModel.onMicPermissionResult()
         onboardingViewModel.onMicPermissionResult()
     }
+
+    /**
+     * POST_NOTIFICATIONS ask (ENC-146): fired from the explicit bubble-start
+     * funnel when the grant is missing on Android 13+, so the foreground
+     * notification's status refreshes can actually post. No result handling —
+     * the service re-reads the live grant at each refresh.
+     */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -159,6 +171,7 @@ class MainActivity : ComponentActivity() {
         }
 
     private fun startBubbleService() {
+        requestNotificationPermissionIfNeeded()
         // An explicit in-app start lifts a previous Stop in the
         // resident-presence record (ENC-129) and tags the start as a
         // user start, the origin always eligible for the microphone type.
@@ -179,5 +192,15 @@ class MainActivity : ComponentActivity() {
 
     private fun requestMicPermission() {
         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 }
