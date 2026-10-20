@@ -3,26 +3,45 @@ package com.shippopotamus.bloviate.domain.usecase
 import com.shippopotamus.bloviate.domain.evaluator.BubbleVisibilityReducer
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
+import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
 import javax.inject.Inject
 
 /**
- * Streams bubble window commands derived from field-focus transitions via
- * [BubbleVisibilityReducer], and accepts the user's drag-to-dismiss back into
- * the same state machine. The overlay service is the only collector; it owns
- * this use case instance for its lifetime so the reducer state stays coherent.
+ * Streams bubble window commands derived from field-focus and
+ * keyboard-visibility transitions via [BubbleVisibilityReducer] (ENC-125:
+ * the bubble follows the keyboard, not field focus alone), and accepts
+ * the user's drag-to-dismiss and the recording bar's activity back into
+ * the same state machine. The overlay service is the only collector; it
+ * owns this use case instance for its lifetime so the reducer state stays
+ * coherent.
  */
 class ObserveBubbleVisibilityUseCase @Inject constructor(
     private val fieldFocusPort: FieldFocusPort,
+    private val keyboardVisibilityPort: KeyboardVisibilityPort,
     private val reducer: BubbleVisibilityReducer,
 ) {
 
-    operator fun invoke(): Flow<BubbleVisibilityCommand> =
-        fieldFocusPort.fieldFocusState.mapNotNull { state -> reducer.onFocusState(state) }
+    operator fun invoke(): Flow<BubbleVisibilityCommand> = merge(
+        fieldFocusPort.fieldFocusState.mapNotNull { state -> reducer.onFocusState(state) },
+        keyboardVisibilityPort.keyboardVisible.mapNotNull { visible ->
+            reducer.onKeyboardVisibilityChanged(visible)
+        },
+    )
 
     /** The visible bubble was dragged into the dismiss zone; returns the implied command, if any. */
     fun onBubbleDismissed(): BubbleVisibilityCommand? = reducer.onBubbleDismissed()
+
+    /**
+     * Recording/processing bar activity (any non-idle bar state). While
+     * the bar is active a keyboard hide cannot hide the window; when
+     * activity ends, the deferred hide — if one is owed — is returned
+     * here for the service to apply.
+     */
+    fun onBarActivityChanged(active: Boolean): BubbleVisibilityCommand? =
+        reducer.onBarActivityChanged(active)
 
     /** Forget reducer state; called when the owning service is destroyed. */
     fun reset() {

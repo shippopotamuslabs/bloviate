@@ -62,9 +62,10 @@ import javax.inject.Inject
 /**
  * Foreground service hosting the floating dictation bubble.
  *
- * Collects field-focus state (published by the field watcher) through
- * [ObserveBubbleVisibilityUseCase] and shows the bubble window only while an
- * editable, non-password field is focused — never on password fields. The
+ * Collects field-focus and keyboard-visibility state (published by the
+ * field watcher) through [ObserveBubbleVisibilityUseCase] and shows the
+ * bubble window only while the keyboard is up and an editable,
+ * non-password field is focused (ENC-125) — never on password fields. The
  * window is `TYPE_APPLICATION_OVERLAY` with `FLAG_NOT_FOCUSABLE`
  * (non-negotiable: a focusable overlay would steal the host field's caret)
  * and `FLAG_LAYOUT_NO_LIMITS`.
@@ -210,6 +211,14 @@ class BubbleOverlayService : Service() {
                 CadenceCounters.snapshotWrite() // ENC-69 cadence counters (L3)
                 barStateSnapshot.value = state
                 onBarStateChanged(state)
+                // ENC-125: bar activity arms the visibility machine's
+                // keyboard-hide exemption — while the bar is up a keyboard
+                // hide cannot hide the window; when the bar settles back
+                // to idle, a deferred hide (if one is owed) comes back
+                // here and is applied like any other command.
+                val deferredCommand =
+                    observeBubbleVisibility.onBarActivityChanged(state != RecordingBarState.Idle)
+                if (deferredCommand != null) applyCommand(deferredCommand)
             }
         }
         serviceScope.launch {
