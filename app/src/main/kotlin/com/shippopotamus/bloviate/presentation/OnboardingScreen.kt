@@ -56,9 +56,6 @@ import com.shippopotamus.bloviate.R
  * and fixed later from Setup), and Finish on the test step never waits
  * for a successful dictation. Progress persists per step, so a
  * settings detour or a dead process resumes where the user left off.
- * Sideload installs get one extra panel on the two restricted gates:
- * the exact "Allow restricted settings" steps, because Android will
- * not move those switches until they are done.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -274,9 +271,8 @@ private fun WelcomePoint(
 
 /**
  * One gate step's shared shape: the gate as a dashboard row (live chip
- * at the trailing edge), the fix as a button under it while the gate
- * is unsatisfied, and — for the two restricted gates on a sideload
- * install — the restricted-settings panel under that.
+ * at the trailing edge), and the fix as a button under it while the
+ * gate is unsatisfied.
  */
 @Composable
 private fun GateStep(
@@ -288,7 +284,6 @@ private fun GateStep(
     unsatisfiedChipText: String,
     actionLabel: String,
     onAction: () -> Unit,
-    showRestrictedPanel: Boolean,
     modifier: Modifier = Modifier,
 ) {
     DashboardCard(modifier = modifier) {
@@ -322,9 +317,6 @@ private fun GateStep(
             },
         )
     }
-    if (showRestrictedPanel && !satisfied) {
-        RestrictedSettingsCard()
-    }
 }
 
 /** Step 2 — the accessibility watcher, deep-linked to its system settings. */
@@ -342,7 +334,6 @@ private fun WatcherStep(
         unsatisfiedChipText = stringResource(R.string.chip_off),
         actionLabel = stringResource(R.string.onboarding_open_settings),
         onAction = onOpenAccessibilitySettings,
-        showRestrictedPanel = uiState.restrictedSettingsLikely,
     )
 }
 
@@ -361,11 +352,10 @@ private fun OverlayStep(
         unsatisfiedChipText = stringResource(R.string.chip_not_allowed),
         actionLabel = stringResource(R.string.onboarding_open_settings),
         onAction = onOpenOverlaySettings,
-        showRestrictedPanel = uiState.restrictedSettingsLikely,
     )
 }
 
-/** Step 4 — the microphone, an in-app runtime request (no settings detour, no restricted panel). */
+/** Step 4 — the microphone, an in-app runtime request (no settings detour). */
 @Composable
 private fun MicrophoneStep(
     uiState: OnboardingUiState,
@@ -380,48 +370,7 @@ private fun MicrophoneStep(
         unsatisfiedChipText = stringResource(R.string.chip_off),
         actionLabel = stringResource(R.string.onboarding_allow_mic),
         onAction = onRequestMicPermission,
-        showRestrictedPanel = false,
     )
-}
-
-/**
- * The restricted-settings blocked state (ENC-67): shown on the watcher
- * and overlay steps when the install did not come from a store and the
- * gate is still off — the situation where Android greys the switch
- * out. The steps are the exact on-device path learned in ENC-63:
- * Settings → Apps → Bloviate → ⋮ → "Allow restricted settings".
- */
-@Composable
-private fun RestrictedSettingsCard(modifier: Modifier = Modifier) {
-    DashboardCard(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(BloviateSpacing.s16),
-            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
-        ) {
-            Text(
-                text = stringResource(R.string.onboarding_restricted_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.onboarding_restricted_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            listOf(
-                R.string.onboarding_restricted_step_1,
-                R.string.onboarding_restricted_step_2,
-                R.string.onboarding_restricted_step_3,
-                R.string.onboarding_restricted_step_4,
-            ).forEachIndexed { index, stepRes ->
-                Text(
-                    text = "${index + 1}.  ${stringResource(stepRes)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-    }
 }
 
 /**
@@ -659,14 +608,13 @@ private const val TEST_FIELD_MIN_LINES: Int = 2
 private const val TEST_FIELD_MAX_LINES: Int = 4
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
-@Preview(name = "Wizard Watcher Blocked - Dark", showBackground = true)
+@Preview(name = "Wizard Watcher - Dark", showBackground = true)
 @Composable
-private fun OnboardingWatcherBlockedPreview() {
+private fun OnboardingWatcherPreview() {
     PreviewTheme {
         OnboardingScreen(
             uiState = OnboardingUiState(
                 step = OnboardingStepUi.WATCHER,
-                restrictedSettingsLikely = true,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
