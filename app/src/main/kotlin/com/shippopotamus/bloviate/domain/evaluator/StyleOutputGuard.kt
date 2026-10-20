@@ -24,10 +24,11 @@ package com.shippopotamus.bloviate.domain.evaluator
  * (case-insensitively): numbers, proper nouns, and the profanity class
  * models are observed to silently censor — ordinary vocabulary is the
  * style's legitimate playground (persona styles substitute diction by
- * design). Over the rest, a soft floor: if under half of the source's
- * distinct content words survive, the output is not a restyle of this
- * text at all. The baseline pipeline runs before the LLM, so filler
- * removal is already done and is not the guard's concern.
+ * design). Over the rest, a soft floor: if under a third of the
+ * source's distinct content words survive, the output is not a
+ * restyle of this text at all. The baseline pipeline runs before the
+ * LLM, so filler removal is already done and is not the guard's
+ * concern.
  */
 object StyleOutputGuard {
 
@@ -111,8 +112,17 @@ object StyleOutputGuard {
 
     private const val OPENING_CHARS: Int = 200
 
-    /** Under half the content surviving is not a restyle of this text. */
-    private const val MIN_COVERAGE: Double = 0.5
+    /**
+     * Under a third of the content surviving is not a restyle of this
+     * text. ENC-91 re-based this from 0.5: persona styles substitute
+     * ordinary diction by design, and on SHORT dictations a handful of
+     * legitimate substitutions (checking → reach for, feel bad →
+     * ashamed) pushed faithful restyles under the half line. The hard
+     * tier remains the real censor-catcher — the Idiocracy drop fails
+     * there regardless of coverage — and the wholesale-replacement
+     * shape still scores ~0.
+     */
+    private const val MIN_COVERAGE: Double = 0.35
 
     private val WORD_REGEX: Regex = Regex("[A-Za-z0-9']+")
 
