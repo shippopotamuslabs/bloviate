@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.service
 
+import android.Manifest
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
@@ -7,10 +8,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.content.ComponentCallbacks2
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -20,6 +23,7 @@ import com.shippopotamus.bloviate.presentation.BloviateTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
@@ -822,6 +826,18 @@ class BubbleOverlayService : Service() {
         if (!notificationUpdatesEnabled) return
         val status = currentSupervision
         if (status == lastNotificationStatus) return
+        // Android 13+ requires the POST_NOTIFICATIONS runtime grant to re-post
+        // via notify(); without it the call silently no-ops (and lint errors).
+        // Skip WITHOUT marking the status posted, so the next supervision
+        // change after a grant posts the then-current status (ENC-146).
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.d(TAG, "Notification status refresh skipped: POST_NOTIFICATIONS not granted")
+            return
+        }
         lastNotificationStatus = status
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
         Log.d(TAG, "Notification status refreshed: $status")
