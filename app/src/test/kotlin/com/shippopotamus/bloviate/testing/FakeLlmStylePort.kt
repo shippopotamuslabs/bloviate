@@ -1,8 +1,8 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
-import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
-import com.shippopotamus.bloviate.domain.port.LlmStylePort
+import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.application.port.LlmStylePort
 import kotlinx.coroutines.CompletableDeferred
 
 /**

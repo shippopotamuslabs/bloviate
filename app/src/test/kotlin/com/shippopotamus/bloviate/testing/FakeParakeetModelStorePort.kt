@@ -2,7 +2,7 @@ package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.ParakeetModelFiles
-import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
+import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 

@@ -11,7 +11,7 @@ import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
 import com.shippopotamus.bloviate.domain.model.BubbleTint
-import com.shippopotamus.bloviate.domain.port.BubbleAppearancePort
+import com.shippopotamus.bloviate.application.port.BubbleAppearancePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

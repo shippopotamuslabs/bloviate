@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.shippopotamus.bloviate.domain.model.DictationEngine
-import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
+import com.shippopotamus.bloviate.application.port.EnginePreferencePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

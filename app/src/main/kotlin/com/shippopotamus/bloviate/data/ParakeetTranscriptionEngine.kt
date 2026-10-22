@@ -8,8 +8,8 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.shippopotamus.bloviate.domain.model.ParakeetModelFiles
 import com.shippopotamus.bloviate.domain.model.ProcessingMode
-import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
-import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
+import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
+import com.shippopotamus.bloviate.application.port.TranscriptionEngine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject

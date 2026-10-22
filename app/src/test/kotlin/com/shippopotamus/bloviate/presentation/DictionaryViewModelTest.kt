@@ -2,11 +2,11 @@ package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.PersonalDictionary
-import com.shippopotamus.bloviate.domain.usecase.AddDictionaryCorrectionUseCase
-import com.shippopotamus.bloviate.domain.usecase.AddDictionaryWordUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveDictionaryUseCase
-import com.shippopotamus.bloviate.domain.usecase.RemoveDictionaryCorrectionUseCase
-import com.shippopotamus.bloviate.domain.usecase.RemoveDictionaryWordUseCase
+import com.shippopotamus.bloviate.application.usecase.AddDictionaryCorrectionUseCase
+import com.shippopotamus.bloviate.application.usecase.AddDictionaryWordUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveDictionaryUseCase
+import com.shippopotamus.bloviate.application.usecase.RemoveDictionaryCorrectionUseCase
+import com.shippopotamus.bloviate.application.usecase.RemoveDictionaryWordUseCase
 import com.shippopotamus.bloviate.testing.FakeDictionaryPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.flow.collect

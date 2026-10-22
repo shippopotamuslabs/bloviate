@@ -9,7 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import com.shippopotamus.bloviate.domain.model.OnboardingStep
-import com.shippopotamus.bloviate.domain.port.OnboardingPort
+import com.shippopotamus.bloviate.application.port.OnboardingPort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

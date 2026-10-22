@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.ResidentPresenceState
-import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
+import com.shippopotamus.bloviate.application.port.ResidentPresencePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

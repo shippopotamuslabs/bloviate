@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.testing
 
-import com.shippopotamus.bloviate.domain.port.ApiKeyPort
+import com.shippopotamus.bloviate.application.port.ApiKeyPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

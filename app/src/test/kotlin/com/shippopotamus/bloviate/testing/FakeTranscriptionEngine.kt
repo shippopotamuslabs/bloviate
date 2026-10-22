@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.ProcessingMode
-import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
+import com.shippopotamus.bloviate.application.port.TranscriptionEngine
 import kotlinx.coroutines.CompletableDeferred
 
 /**

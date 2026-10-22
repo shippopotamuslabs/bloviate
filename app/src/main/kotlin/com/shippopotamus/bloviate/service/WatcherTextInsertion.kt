@@ -7,7 +7,7 @@ import android.content.Context
 import android.os.PersistableBundle
 import android.util.Log
 import com.shippopotamus.bloviate.domain.model.InsertionResult
-import com.shippopotamus.bloviate.domain.port.TextInsertionPort
+import com.shippopotamus.bloviate.application.port.TextInsertionPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers

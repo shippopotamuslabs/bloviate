@@ -6,8 +6,8 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
-import com.shippopotamus.bloviate.domain.port.OnboardingPort
-import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
+import com.shippopotamus.bloviate.application.port.OnboardingPort
+import com.shippopotamus.bloviate.application.port.ResidentPresencePort
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch

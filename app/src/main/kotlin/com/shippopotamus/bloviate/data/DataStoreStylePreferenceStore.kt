@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
-import com.shippopotamus.bloviate.domain.port.StylePreferencePort
+import com.shippopotamus.bloviate.application.port.StylePreferencePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

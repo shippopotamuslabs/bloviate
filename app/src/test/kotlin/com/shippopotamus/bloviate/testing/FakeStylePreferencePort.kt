@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
-import com.shippopotamus.bloviate.domain.port.StylePreferencePort
+import com.shippopotamus.bloviate.application.port.StylePreferencePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

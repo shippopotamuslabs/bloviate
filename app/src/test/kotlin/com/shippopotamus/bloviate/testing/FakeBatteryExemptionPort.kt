@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.testing
 
-import com.shippopotamus.bloviate.domain.port.BatteryExemptionPort
+import com.shippopotamus.bloviate.application.port.BatteryExemptionPort
 
 /** Hand-written fake of [BatteryExemptionPort]; flip [exempt] to simulate the system list. */
 class FakeBatteryExemptionPort : BatteryExemptionPort {

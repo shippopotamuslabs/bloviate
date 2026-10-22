@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.data
 
 import android.content.Context
-import com.shippopotamus.bloviate.domain.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.AudioCapturePort
 import com.shippopotamus.whisper.AudioRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow

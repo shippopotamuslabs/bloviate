@@ -3,8 +3,8 @@ package com.shippopotamus.bloviate.service
 import android.os.SystemClock
 import android.util.Log
 import com.shippopotamus.bloviate.domain.model.InsertionResult
-import com.shippopotamus.bloviate.domain.port.TextInsertionPort
-import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
+import com.shippopotamus.bloviate.application.port.TextInsertionPort
+import com.shippopotamus.bloviate.application.port.TranscriptSinkPort
 import javax.inject.Inject
 import javax.inject.Singleton
 

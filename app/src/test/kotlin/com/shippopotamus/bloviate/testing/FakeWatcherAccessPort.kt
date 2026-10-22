@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.testing
 
-import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
+import com.shippopotamus.bloviate.application.port.WatcherAccessPort
 
 /** Hand-written fake of [WatcherAccessPort]; flip [enabled] to simulate the system setting. */
 class FakeWatcherAccessPort : WatcherAccessPort {

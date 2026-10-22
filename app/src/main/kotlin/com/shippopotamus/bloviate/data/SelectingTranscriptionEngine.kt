@@ -3,10 +3,10 @@ package com.shippopotamus.bloviate.data
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.ProcessingMode
-import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
-import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
-import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
+import com.shippopotamus.bloviate.application.port.EnginePreferencePort
+import com.shippopotamus.bloviate.application.port.ModelStorePort
+import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
+import com.shippopotamus.bloviate.application.port.TranscriptionEngine
 import javax.inject.Inject
 import javax.inject.Singleton
 

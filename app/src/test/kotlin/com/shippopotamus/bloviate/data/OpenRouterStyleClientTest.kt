@@ -3,7 +3,7 @@ package com.shippopotamus.bloviate.data
 import com.shippopotamus.bloviate.domain.evaluator.LlmResponseCleaner
 import com.shippopotamus.bloviate.domain.evaluator.StylePromptBuilder
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
-import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeStyleHttpTransport
 import kotlinx.coroutines.CoroutineDispatcher

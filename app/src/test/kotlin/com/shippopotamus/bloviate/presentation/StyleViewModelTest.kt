@@ -2,12 +2,12 @@ package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
-import com.shippopotamus.bloviate.domain.usecase.ClearApiKeyUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveHasApiKeyUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveSelectedStyleUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveStyleCatalogUseCase
-import com.shippopotamus.bloviate.domain.usecase.SaveApiKeyUseCase
-import com.shippopotamus.bloviate.domain.usecase.SelectStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.ClearApiKeyUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveHasApiKeyUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveStyleCatalogUseCase
+import com.shippopotamus.bloviate.application.usecase.SaveApiKeyUseCase
+import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
