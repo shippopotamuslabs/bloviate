@@ -131,31 +131,94 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `a new amplitude at the same elapsed republishes a distinguishable bar state`() = runTest {
-        // Regression (ENC-69): elapsedMs is sample-count-derived and only
-        // advances when a recorder chunk lands (~1 s), while amplitudes
-        // stream at ~30 Hz. Publishing an elapsed-only state made every
-        // in-between value equal, so StateFlow conflation swallowed them
-        // and the overlay waveform redrew at ~1 Hz on device.
+    fun `a new amplitude at the same elapsed does not republish but still records levels`() = runTest {
+        // ENC-162: republishing at the amplitude cadence (~15-30 Hz)
+        // recomposed the overlay mid-drag and corrupted pointer deltas
+        // (drag jitter). Only a new elapsed tick republishes — the
+        // waveform Canvas re-reads the levels at display rate through its
+        // deferred lambda, so record() must still run on every update.
         val controller = createController(backgroundScope)
         val emissions = mutableListOf<RecordingBarState>()
         backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
         startRecording(controller)
+        val publishedBefore = emissions.filterIsInstance<RecordingBarState.Recording>().size
+        val levelsBefore = controller.waveform.levels().size
 
         // Same chunk (elapsed unchanged), a different voice level.
         fakeSession.setRecording(elapsedMs = 500L, amplitude = 0.05f)
         runCurrent()
 
         val recordings = emissions.filterIsInstance<RecordingBarState.Recording>()
-        assertTrue(
-            recordings.size >= 2,
-            "the level change must republish the bar state, got $emissions",
+        assertEquals(
+            publishedBefore,
+            recordings.size,
+            "a waveform-only change must not republish the bar state, got $emissions",
         )
-        val first = recordings.first()
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 500L, frame = 1L),
+            controller.barState.value,
+        )
+        assertTrue(
+            controller.waveform.levels().size > levelsBefore,
+            "the amplitude must still land in the waveform history: " +
+                "${controller.waveform.levels()}",
+        )
+    }
+
+    @Test
+    fun `elapsed advancing within the same displayed second does not republish but still records levels`() = runTest {
+        // ENC-162 round 3: the session emits per ~33ms amplitude window,
+        // so elapsed advances ~30x/second while the m:ss readout is
+        // unchanged — republishing those sub-second ticks recomposes the
+        // overlay mid-drag and corrupts pointer deltas (drag jitter).
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+        val publishedBefore = emissions.filterIsInstance<RecordingBarState.Recording>().size
+        val levelsBefore = controller.waveform.levels().size
+
+        // Same displayed second (0), elapsed advanced.
+        fakeSession.setRecording(elapsedMs = 700L, amplitude = 0.05f)
+        runCurrent()
+
+        val recordings = emissions.filterIsInstance<RecordingBarState.Recording>()
+        assertEquals(
+            publishedBefore,
+            recordings.size,
+            "a sub-second elapsed change must not republish the bar state, got $emissions",
+        )
+        assertEquals(
+            RecordingBarState.Recording(elapsedMs = 500L, frame = 1L),
+            controller.barState.value,
+        )
+        assertTrue(
+            controller.waveform.levels().size > levelsBefore,
+            "the amplitude must still land in the waveform history: " +
+                "${controller.waveform.levels()}",
+        )
+    }
+
+    @Test
+    fun `crossing a displayed-second boundary republishes with an advanced frame`() = runTest {
+        // ENC-162 companion: only the displayed second (elapsedMs / 1000)
+        // is the republish trigger, and successive publishes stay
+        // distinguishable via the frame tick.
+        val controller = createController(backgroundScope)
+        val emissions = mutableListOf<RecordingBarState>()
+        backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
+        startRecording(controller)
+        val first = emissions.filterIsInstance<RecordingBarState.Recording>().last()
+
+        fakeSession.setRecording(elapsedMs = 1_500L, amplitude = 0.05f)
+        runCurrent()
+
+        val recordings = emissions.filterIsInstance<RecordingBarState.Recording>()
         val last = recordings.last()
-        assertEquals(first.elapsedMs, last.elapsedMs)
+        assertTrue(recordings.size >= 2, "the second boundary must republish, got $emissions")
+        assertEquals(1_500L, last.elapsedMs)
         assertNotEquals(first, last)
-        assertTrue(last.frame > first.frame, "the redraw tick must advance: $recordings")
+        assertTrue(last.frame > first.frame, "the tick must advance: $recordings")
         assertEquals(last, controller.barState.value)
     }
 
