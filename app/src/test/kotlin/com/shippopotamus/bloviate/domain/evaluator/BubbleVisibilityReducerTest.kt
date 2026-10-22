@@ -3,7 +3,9 @@ package com.shippopotamus.bloviate.domain.evaluator
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class BubbleVisibilityReducerTest {
@@ -58,6 +60,40 @@ class BubbleVisibilityReducerTest {
         reducer.onKeyboardVisibilityChanged(true)
 
         assertNull(reducer.onFocusState(FieldFocusState.PasswordFocus(PACKAGE_A)))
+    }
+
+    @Test
+    fun `the decision snapshot names the focus and keyboard signals`() {
+        // ENC-145: one repro line identifies the stuck signal.
+        val idle = reducer.describeStateForLog()
+        assertTrue(idle.contains("focus=NoEditableFocus"))
+        assertTrue(idle.contains("keyboardVisible=false"))
+        assertTrue(idle.contains("bubbleVisible=false"))
+
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        val showing = reducer.describeStateForLog()
+        assertTrue(showing.contains("EditableFocus"))
+        assertTrue(showing.contains("keyboardVisible=true"))
+        assertTrue(showing.contains("bubbleVisible=true"))
+    }
+
+    @Test
+    fun `only a password focus reads as a password hide`() {
+        // ENC-156: the sink hardens on this — a shade-peek focus-loss
+        // must never cancel a recording.
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        assertFalse(reducer.isPasswordFocus())
+
+        reducer.onFocusState(FieldFocusState.NoEditableFocus)
+        assertFalse(reducer.isPasswordFocus())
+
+        reducer.onFocusState(FieldFocusState.PasswordFocus(PACKAGE_A))
+        assertTrue(reducer.isPasswordFocus())
+
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        assertFalse(reducer.isPasswordFocus())
     }
 
     @Test

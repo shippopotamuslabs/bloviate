@@ -73,6 +73,42 @@ class BubblePositionMathTest {
     }
 
     @Test
+    fun `a folded saved anchor lands fully on screen after unfolding, and vice versa`() {
+        // ENC-145: the show path re-derives the persisted normalized
+        // anchor against the CURRENT bounds — a save from one posture
+        // must land inside the other posture's display, never off-screen.
+        val anchors = listOf(
+            BubblePosition(xFraction = 0f, yFraction = 0f),
+            BubblePosition(xFraction = 1f, yFraction = 0f),
+            BubblePosition(xFraction = 0f, yFraction = 1f),
+            BubblePosition(xFraction = 1f, yFraction = 1f),
+            BubblePosition(xFraction = 0.86f, yFraction = 0.68f),
+            BubblePosition(xFraction = 0.5f, yFraction = 0.5f),
+        )
+
+        for (anchor in anchors) {
+            val unfolded = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, UNFOLDED)
+            assertTrue(
+                unfolded.xPx >= 0 && unfolded.xPx + BUBBLE_PX <= UNFOLDED.widthPx,
+                "unfolded x for $anchor",
+            )
+            assertTrue(
+                unfolded.yPx >= 0 && unfolded.yPx + BUBBLE_PX <= UNFOLDED.heightPx,
+                "unfolded y for $anchor",
+            )
+            val refolded = BubblePositionMath.restingTopLeft(anchor, BUBBLE_PX, BUBBLE_PX, FOLDED)
+            assertTrue(
+                refolded.xPx >= 0 && refolded.xPx + BUBBLE_PX <= FOLDED.widthPx,
+                "refolded x for $anchor",
+            )
+            assertTrue(
+                refolded.yPx >= 0 && refolded.yPx + BUBBLE_PX <= FOLDED.heightPx,
+                "refolded y for $anchor",
+            )
+        }
+    }
+
+    @Test
     fun `a right-edge portrait position lands fully on screen after rotating to landscape`() {
         val pixels = BubblePositionMath.toPixels(
             position = BubblePosition(xFraction = 1f, yFraction = 0.5f),

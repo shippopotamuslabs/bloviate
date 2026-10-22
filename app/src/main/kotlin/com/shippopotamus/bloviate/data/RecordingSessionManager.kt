@@ -4,7 +4,9 @@ import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.AmplitudeCalculator
 import com.shippopotamus.bloviate.domain.evaluator.SilenceTrimmer
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.AudioCapturePort
@@ -31,9 +33,9 @@ import javax.inject.Singleton
 
 /**
  * [RecordingSessionPort] over [AudioCapturePort]. Buffers the whole utterance
- * (dictation is transcribed in one pass — never chunked), enforces the
- * ~3 minute hard cap as a stop (not a cancel), and applies
- * [SilenceTrimmer] when a recording finishes.
+ * (dictation is transcribed in one pass — never chunked), auto-finishes
+ * thirty seconds of dead air or ten minutes of continuous speech as a stop
+ * (not a cancel), and applies [SilenceTrimmer] when a recording finishes.
  *
  * Elapsed time is derived from the captured sample count, not the wall
  * clock, so it always matches the audio that will be transcribed. Mutable
@@ -67,6 +69,7 @@ class RecordingSessionManager @Inject constructor(
     private var discardOnFinish: Boolean = false
     private var chunks: MutableList<FloatArray> = mutableListOf()
     private var totalSamples: Int = 0
+    private var silentSamples: Long = 0L
     private var latestElapsedMs: Long = 0L
     private var latestAmplitude: Float = 0f
     private var captureJob: Job? = null
@@ -77,15 +80,15 @@ class RecordingSessionManager @Inject constructor(
 
     /** Leftover samples not yet filling a whole amplitude window. Guarded by [stateLock]. */
     private var windowCarry: FloatArray = FloatArray(0)
-    private var completion: CompletableDeferred<FloatArray>? = null
-    private var pendingResult: FloatArray? = null
+    private var completion: CompletableDeferred<StopResult>? = null
+    private var pendingResult: StopResult? = null
 
     private val mutableState =
         MutableStateFlow<RecordingSessionState>(RecordingSessionState.Unavailable)
     override val state: StateFlow<RecordingSessionState> = mutableState.asStateFlow()
 
-    private val mutableAutoStopped = MutableSharedFlow<FloatArray>(extraBufferCapacity = 1)
-    override val autoStoppedRecordings: SharedFlow<FloatArray> = mutableAutoStopped.asSharedFlow()
+    private val mutableAutoStopped = MutableSharedFlow<StopResult>(extraBufferCapacity = 1)
+    override val autoStoppedRecordings: SharedFlow<StopResult> = mutableAutoStopped.asSharedFlow()
 
     init {
         sessionScope.launch {
@@ -111,6 +114,7 @@ class RecordingSessionManager @Inject constructor(
             discardOnFinish = false
             chunks = mutableListOf()
             totalSamples = 0
+            silentSamples = 0L
             latestElapsedMs = 0L
             latestAmplitude = 0f
             pendingLevels.clear()
@@ -124,9 +128,9 @@ class RecordingSessionManager @Inject constructor(
         Log.d(TAG, "Recording started")
     }
 
-    override suspend fun stop(): FloatArray {
-        var pending: FloatArray? = null
-        var activeCompletion: CompletableDeferred<FloatArray>? = null
+    override suspend fun stop(): StopResult {
+        var pending: StopResult? = null
+        var activeCompletion: CompletableDeferred<StopResult>? = null
         var jobToCancel: Job? = null
         synchronized(stateLock) {
             if (!recording && pendingResult != null) {
@@ -139,7 +143,7 @@ class RecordingSessionManager @Inject constructor(
             }
         }
         pending?.let {
-            Log.d(TAG, "stop() returning the recording finished by the hard cap")
+            Log.d(TAG, "stop() returning the recording finished by an auto-finish (${it.autoFinish})")
             return it
         }
         val deferred = activeCompletion
@@ -148,15 +152,15 @@ class RecordingSessionManager @Inject constructor(
         jobToCancel?.join()
         // If the capture job was cancelled before its body ever ran, its
         // finally never fires; finish here instead (idempotent).
-        finishRecording(capped = false)
-        val samples = deferred.await()
+        finishRecording(autoFinish = null)
+        val result = deferred.await()
         synchronized(stateLock) {
             if (completion === deferred) {
                 completion = null
                 pendingResult = null
             }
         }
-        return samples
+        return result
     }
 
     override fun cancel() {
@@ -168,7 +172,7 @@ class RecordingSessionManager @Inject constructor(
         }
         jobToCancel?.cancel()
         // Covers a capture job cancelled before its body ran (see stop()).
-        finishRecording(capped = false)
+        finishRecording(autoFinish = null)
     }
 
     private fun onAvailabilityChanged(available: Boolean) {
@@ -183,28 +187,38 @@ class RecordingSessionManager @Inject constructor(
     private suspend fun collectCapture() {
         try {
             audioCapture.chunks().collect { chunk ->
-                val hitCap = synchronized(stateLock) { appendChunkLocked(chunk) }
-                if (hitCap) {
-                    Log.d(TAG, "Hard cap reached (${MAX_RECORDING_SECONDS}s); finishing as a stop")
-                    finishRecording(capped = true)
+                val autoFinish = synchronized(stateLock) { appendChunkLocked(chunk) }
+                if (autoFinish != null) {
+                    Log.d(TAG, "Auto-finish ($autoFinish); finishing as a stop")
+                    finishRecording(autoFinish)
                     currentCoroutineContext().cancel()
                 }
             }
         } finally {
-            finishRecording(capped = false)
+            finishRecording(autoFinish = null)
         }
     }
 
     /**
      * Appends [chunk] to the transcription buffer and slices it into
-     * amplitude windows for the level ticker. Caller holds [stateLock].
+     * amplitude windows for the level ticker. Tracks consecutive
+     * sub-threshold audio for the inactivity auto-finish (ENC-160): any
+     * 10 ms frame at speech level resets the dead-air count. Returns the
+     * finish reason when a bound is hit, null to keep recording. Caller
+     * holds [stateLock].
      */
-    private fun appendChunkLocked(chunk: FloatArray): Boolean {
+    private fun appendChunkLocked(chunk: FloatArray): AutoFinishReason? {
         chunks += chunk
         totalSamples += chunk.size
+        silentSamples =
+            if (SilenceTrimmer.containsSpeech(chunk)) 0L else silentSamples + chunk.size
         latestElapsedMs = totalSamples.toLong() * MS_PER_SECOND / SilenceTrimmer.SAMPLE_RATE_HZ
         sliceLevelsLocked(chunk)
-        return totalSamples >= MAX_RECORDING_SAMPLES
+        return when {
+            totalSamples >= MAX_RECORDING_SAMPLES -> AutoFinishReason.MAX_LENGTH
+            silentSamples >= INACTIVITY_SILENCE_SAMPLES -> AutoFinishReason.SILENCE
+            else -> null
+        }
     }
 
     /**
@@ -251,12 +265,12 @@ class RecordingSessionManager @Inject constructor(
 
     /**
      * Finalizes the active recording exactly once: trims and completes the
-     * pending [stop] (and emits on [autoStoppedRecordings] when [capped]), or
-     * discards everything after a [cancel]. Safe to call from any thread and
-     * any number of times.
+     * pending [stop] (and emits on [autoStoppedRecordings] when
+     * [autoFinish] is set), or discards everything after a [cancel]. Safe
+     * to call from any thread and any number of times.
      */
-    private fun finishRecording(capped: Boolean) {
-        val completionToResolve: CompletableDeferred<FloatArray>?
+    private fun finishRecording(autoFinish: AutoFinishReason?) {
+        val completionToResolve: CompletableDeferred<StopResult>?
         val trimmed: FloatArray
         val discarded: Boolean
         synchronized(stateLock) {
@@ -272,9 +286,10 @@ class RecordingSessionManager @Inject constructor(
             val buffered = assembleLocked()
             chunks = mutableListOf()
             totalSamples = 0
+            silentSamples = 0L
             trimmed = if (discarded) FloatArray(0) else SilenceTrimmer.trim(buffered)
             if (!discarded) {
-                pendingResult = trimmed
+                pendingResult = StopResult(trimmed, autoFinish)
             }
             completionToResolve = completion
             publishIdleOrUnavailableLocked()
@@ -284,18 +299,18 @@ class RecordingSessionManager @Inject constructor(
             Log.d(TAG, "Recording cancelled; buffered audio discarded")
             return
         }
-        completionToResolve?.complete(trimmed)
-        if (capped) {
-            if (!mutableAutoStopped.tryEmit(trimmed)) {
-                Log.w(TAG, "Capped recording had no collector; samples remain available via stop()")
+        completionToResolve?.complete(StopResult(trimmed, autoFinish))
+        if (autoFinish != null) {
+            if (!mutableAutoStopped.tryEmit(StopResult(trimmed, autoFinish))) {
+                Log.w(TAG, "Auto-finished recording had no collector; result remains available via stop()")
             }
-            Log.d(TAG, "Recording auto-stopped at the hard cap; ${trimmed.size} samples after trim")
+            Log.d(TAG, "Recording auto-finished ($autoFinish); ${trimmed.size} samples after trim")
         } else {
             Log.d(TAG, "Recording finished; ${trimmed.size} samples after trim")
         }
     }
 
-    /** Concatenates buffered chunks, truncated at the hard cap. Caller holds [stateLock]. */
+    /** Concatenates buffered chunks, truncated at the safety backstop. Caller holds [stateLock]. */
     private fun assembleLocked(): FloatArray {
         val targetSize = minOf(totalSamples, MAX_RECORDING_SAMPLES)
         val assembled = FloatArray(targetSize)
@@ -324,9 +339,22 @@ class RecordingSessionManager @Inject constructor(
     private companion object {
         const val TAG: String = "RecordingSession"
 
-        /** Hard cap on one dictation (~3 minutes), per `contracts/TRANSCRIPTION_RULES.md` §2. */
-        const val MAX_RECORDING_SECONDS: Int = 180
+        /**
+         * Absolute safety backstop on one dictation (10 minutes, ENC-160),
+         * per `contracts/TRANSCRIPTION_RULES.md` §2. Almost unreachable:
+         * dead air auto-finishes first; this bounds only continuous speech.
+         */
+        const val MAX_RECORDING_SECONDS: Int = 600
         const val MAX_RECORDING_SAMPLES: Int = MAX_RECORDING_SECONDS * SilenceTrimmer.SAMPLE_RATE_HZ
+
+        /**
+         * Dead-air auto-finish (ENC-160): this much consecutive
+         * sub-threshold audio finishes the recording as a stop. Counted in
+         * samples, not wall time, so chunk cadence cannot skew it.
+         */
+        const val INACTIVITY_SILENCE_MS: Long = 30_000L
+        const val INACTIVITY_SILENCE_SAMPLES: Long =
+            INACTIVITY_SILENCE_MS * SilenceTrimmer.SAMPLE_RATE_HZ / 1_000L
 
         /** Wall-time interval between amplitude publishes (~30 Hz level stream). */
         const val AMPLITUDE_TICK_MS: Long = 33L

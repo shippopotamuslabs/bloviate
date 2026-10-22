@@ -5,6 +5,7 @@ import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
@@ -44,9 +45,10 @@ import kotlinx.coroutines.withContext
  *
  * Interaction model (Sean's design, ENC-48): tap the mic bubble to start,
  * tap the bar's X to cancel, tap the bar's check to stop + transcribe.
- * There is no hold-to-talk. Recordings the session's ~3 minute hard cap
- * finishes arrive on [RecordingSessionPort.autoStoppedRecordings] and take
- * the same send path as a check tap.
+ * There is no hold-to-talk. Recordings the session auto-finishes
+ * (dead air, safety backstop) arrive on
+ * [RecordingSessionPort.autoStoppedRecordings] and take the same send
+ * path as a check tap, with the reason riding into Done.
  *
  * Failure keeps the stopped samples for one retry (`ARCHITECTURE_RULES.md`
  * §5.3): while the Error state is up, tapping the bubble re-runs the send
@@ -59,10 +61,12 @@ import kotlinx.coroutines.withContext
  * composition reports its own display-window elapse through
  * [onTransientStateElapsed] as a backstop — whichever fires first wins.
  *
- * The host window hiding (focus left the field — above all: a password
- * field gained focus) cancels any active recording and discards any
- * in-flight transcription: a transcript is never produced for a field the
- * bubble has left.
+ * The host window hiding cancels an active recording and discards an
+ * in-flight send only when a password field gained focus — above all,
+ * nothing is ever produced for a password field. Any other host-hide
+ * (a shade peek, a keyboard dismissal) finishes a live recording
+ * through the stop path and lets a running send deliver or retain
+ * (ENC-156).
  *
  * Owned by [BubbleOverlayService] for its lifetime; all collector and
  * pipeline jobs run on the service's scope, blocking stop/transcribe work
@@ -122,6 +126,27 @@ class BubbleRecordingController(
      */
     private var retainedSamples: FloatArray? = null
 
+    /**
+     * ENC-155: whether this controller has seen an active recording the
+     * send pipeline has not yet consumed. The bar state cannot answer
+     * that — the session publishes Idle before the auto-finish emission
+     * lands, so a session-first ordering parks the bar at Idle while the
+     * auto-finished samples are still in flight. Gating the auto-finish
+     * path on the bar alone is what silently dropped every other
+     * auto-finished dictation.
+     */
+    private var recordingSeen: Boolean = false
+
+    /**
+     * ENC-155: samples already handed to (or through) the send pipeline,
+     * by reference. An auto-finish arrives through two triggers — the
+     * session's Idle (consumed via [RecordingSessionPort.stop]) and the
+     * auto-stopped emission — carrying the same array and the same
+     * reason; whichever lands second is the same recording, not a second
+     * send. Cleared when the bar settles back to Idle.
+     */
+    private var finishedSamples: FloatArray? = null
+
     init {
         sessionCollectJob = scope.launch { collectSessionState() }
         autoStopCollectJob = scope.launch { collectAutoStopped() }
@@ -176,19 +201,23 @@ class BubbleRecordingController(
         if (mutableBarState.value !is RecordingBarState.Recording) return
         session.cancel()
         waveform.clear()
+        recordingSeen = false
+        finishedSamples = null
         mutableBarState.update { RecordingBarState.Idle }
-        Log.d(TAG, "Recording cancelled from the bar")
+        Log.d(TAG, "Recording cancelled from the bar; buffered audio discarded by the user")
     }
 
     /** The bar's check tapped: stop the recording and run the send pipeline. */
     fun onSendTap() {
         if (mutableBarState.value !is RecordingBarState.Recording) return
         cancelResetJob()
+        recordingSeen = false
         mutableBarState.update { RecordingBarState.Transcribing }
         pipelineJob = scope.launch {
             try {
-                val samples = withContext(workDispatcher) { session.stop() }
-                transcribeAndFinish(samples, stoppedAtMs = nowMs())
+                val result = withContext(workDispatcher) { session.stop() }
+                finishedSamples = result.samples
+                transcribeAndFinish(result.samples, stoppedAtMs = nowMs(), autoFinish = result.autoFinish)
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
@@ -200,32 +229,87 @@ class BubbleRecordingController(
 
     /**
      * The bubble window is going away (field focus lost — critically, a
-     * password field may have gained it). An active recording is cancelled
-     * and an in-flight transcription is discarded, never delivered.
+     * password field may have gained it).
+     *
+     * ENC-156: only a genuine password-field focus ([isPasswordFocus])
+     * cancels an active recording and discards an in-flight send —
+     * captured audio is never silently discarded on any other path. A
+     * non-password hide (a notification-shade peek, a keyboard
+     * dismissal the exemption did not cover) finishes a live recording
+     * through the same stop path as a check tap and lets a running
+     * send deliver or retain: the transcript lands, or the samples
+     * stay available for one retry tap. A retained retry belongs to
+     * the password field's predecessor only in the password case; a
+     * non-password hide keeps it, and the sink still refuses to insert
+     * into a password field, so a retry can never leak text there.
      */
-    fun onHostHidden() {
+    fun onHostHidden(isPasswordFocus: Boolean) {
         cancelResetJob()
-        // A retained retry belongs to the field that was just left; it must
-        // never fire into whatever field comes next.
-        retainedSamples = null
-        when (mutableBarState.value) {
+        if (isPasswordFocus) {
+            // A retained retry belongs to the field that was just left;
+            // from a password focus it must never fire anywhere else.
+            retainedSamples = null
+            recordingSeen = false
+            finishedSamples = null
+            when (mutableBarState.value) {
+                is RecordingBarState.Recording -> {
+                    session.cancel()
+                    waveform.clear()
+                    Log.d(TAG, "Host hidden by a password field while recording; recording cancelled")
+                }
+                RecordingBarState.Transcribing,
+                RecordingBarState.Polishing,
+                -> {
+                    pipelineJob?.cancel()
+                    Log.d(TAG, "Host hidden by a password field while sending; transcript discarded with reason: password focus")
+                }
+                RecordingBarState.Idle,
+                is RecordingBarState.Done,
+                RecordingBarState.Error,
+                -> Unit
+            }
+            mutableBarState.update { RecordingBarState.Idle }
+            return
+        }
+        when (val bar = mutableBarState.value) {
             is RecordingBarState.Recording -> {
-                session.cancel()
                 waveform.clear()
-                Log.d(TAG, "Host hidden while recording; recording cancelled")
+                mutableBarState.update { RecordingBarState.Transcribing }
+                Log.d(TAG, "Host hidden by a non-password cause while recording; finishing via stop()")
+                pipelineJob = scope.launch {
+                    try {
+                        val result = withContext(workDispatcher) { session.stop() }
+                        recordingSeen = false
+                        finishedSamples = result.samples
+                        transcribeAndFinish(
+                            result.samples,
+                            stoppedAtMs = nowMs(),
+                            autoFinish = result.autoFinish,
+                        )
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        recordingSeen = false
+                        Log.w(TAG, "Non-password hide found no samples to send; returning to idle", exception)
+                        mutableBarState.update { RecordingBarState.Idle }
+                    }
+                }
             }
             RecordingBarState.Transcribing,
             RecordingBarState.Polishing,
             -> {
-                pipelineJob?.cancel()
-                Log.d(TAG, "Host hidden while the send pipeline ran; transcript discarded")
+                Log.d(TAG, "Host hidden by a non-password cause while sending; letting the send finish")
+            }
+            RecordingBarState.Error -> {
+                Log.d(TAG, "Host hidden by a non-password cause during the error window; keeping the retained retry")
             }
             RecordingBarState.Idle,
-            RecordingBarState.Done,
-            RecordingBarState.Error,
-            -> Unit
+            is RecordingBarState.Done,
+            -> {
+                Log.d(TAG, "Host hidden by a non-password cause while the bar is $bar")
+                mutableBarState.update { RecordingBarState.Idle }
+            }
         }
-        mutableBarState.update { RecordingBarState.Idle }
     }
 
     /** Memory pressure (TRANSCRIPTION_RULES §4): the waveform history is a releasable cache. */
@@ -266,6 +350,7 @@ class BubbleRecordingController(
                         CadenceCounters.begin(nowMs())
                         startCadenceSummary()
                     }
+                    recordingSeen = true
                     val windowChanged = waveform.record(state.amplitude)
                     val bar = mutableBarState.value
                     if (bar == RecordingBarState.Idle) {
@@ -299,11 +384,44 @@ class BubbleRecordingController(
                         Log.d(TAG, CadenceCounters.totalsLine())
                         CadenceCounters.end()
                     }
-                    // The session ended without the bar's buttons (external
-                    // cancel, capture failure): fall back to the mic bubble.
+                    // ENC-155: the session ended under a live bar the bar's
+                    // buttons did not stop — an auto-finish (dead air or
+                    // the safety backstop), or a capture failure. That is
+                    // the SAME single finish path as a check tap: pull the
+                    // stopped samples via stop() (for an auto-finish, the
+                    // trimmed samples the auto-stopped emission also
+                    // carries, with the reason attached) and run the send
+                    // pipeline. Falling straight back to Idle here is what
+                    // silently dropped auto-finished dictations whenever
+                    // this collector won the race against the emission.
                     if (mutableBarState.value is RecordingBarState.Recording) {
                         waveform.clear()
-                        mutableBarState.update { RecordingBarState.Idle }
+                        cancelResetJob()
+                        mutableBarState.update { RecordingBarState.Transcribing }
+                        pipelineJob = scope.launch {
+                            try {
+                                val result = withContext(workDispatcher) { session.stop() }
+                                recordingSeen = false
+                                finishedSamples = result.samples
+                                Log.d(TAG, "Session ended under a live bar; sending via stop()")
+                                transcribeAndFinish(
+                                    result.samples,
+                                    stoppedAtMs = nowMs(),
+                                    autoFinish = result.autoFinish,
+                                )
+                            } catch (exception: CancellationException) {
+                                throw exception
+                            } catch (exception: Exception) {
+                                recordingSeen = false
+                                Log.w(
+                                    TAG,
+                                    "Session ended without samples while recording " +
+                                        "(cancelled); nothing to transcribe",
+                                    exception,
+                                )
+                                mutableBarState.update { RecordingBarState.Idle }
+                            }
+                        }
                     }
                 }
             }
@@ -330,13 +448,43 @@ class BubbleRecordingController(
         cadenceJob = null
     }
 
+    /**
+     * ENC-155: the auto-finish trigger. An auto-finished recording
+     * reaches transcription unconditionally — the gate is the pipeline,
+     * never the bar state. The session publishes Idle before this
+     * emission lands, so a session-first ordering parks the bar at
+     * [RecordingBarState.Transcribing] (via [collectSessionState]'s
+     * stop path) while these samples are still in flight; that arrival
+     * carries the same array and the same reason — not a second send.
+     * Every outcome is logged; silently discarding captured audio from
+     * this path is impossible.
+     */
     private suspend fun collectAutoStopped() {
-        session.autoStoppedRecordings.collect { samples ->
-            if (mutableBarState.value is RecordingBarState.Recording) {
-                Log.d(TAG, "Hard cap reached; sending the auto-stopped recording")
+        session.autoStoppedRecordings.collect { result ->
+            if (result.samples === finishedSamples) {
+                Log.d(TAG, "Duplicate auto-finished emission for samples already in the send path; ignoring")
+                return@collect
+            }
+            val bar = mutableBarState.value
+            if (bar is RecordingBarState.Transcribing || bar is RecordingBarState.Polishing) {
+                Log.w(TAG, "Auto-finished recording arrived while a send is already running; ignoring the duplicate")
+                return@collect
+            }
+            if (bar is RecordingBarState.Done || bar is RecordingBarState.Error) {
+                Log.w(TAG, "Auto-finished recording arrived after the send finished; ignoring")
+                return@collect
+            }
+            if (bar is RecordingBarState.Recording || recordingSeen) {
+                Log.d(TAG, "Auto-finish (${result.autoFinish}); sending the auto-stopped recording")
+                recordingSeen = false
+                finishedSamples = result.samples
                 cancelResetJob()
                 mutableBarState.update { RecordingBarState.Transcribing }
-                pipelineJob = scope.launch { transcribeAndFinish(samples, stoppedAtMs = nowMs()) }
+                pipelineJob = scope.launch {
+                    transcribeAndFinish(result.samples, stoppedAtMs = nowMs(), autoFinish = result.autoFinish)
+                }
+            } else {
+                Log.w(TAG, "Auto-finished recording arrived with no active recording; ignoring")
             }
         }
     }
@@ -361,6 +509,7 @@ class BubbleRecordingController(
         samples: FloatArray,
         stoppedAtMs: Long,
         isRetry: Boolean = false,
+        autoFinish: AutoFinishReason? = null,
     ) {
         try {
             val engineName = (
@@ -399,7 +548,7 @@ class BubbleRecordingController(
             if (cleaned.isBlank()) {
                 Log.d(TAG, "Transcript was empty after cleanup; nothing to insert")
                 retainedSamples = null
-                showDone()
+                showDone(autoFinish = autoFinish)
                 return
             }
             val result = transcriptSink.onTranscript(cleaned)
@@ -412,7 +561,7 @@ class BubbleRecordingController(
             when (result) {
                 is InsertionResult.Inserted -> {
                     retainedSamples = null
-                    showDone()
+                    showDone(autoFinish = autoFinish)
                 }
                 is InsertionResult.Refused -> {
                     Log.w(TAG, "Insertion refused: ${result.reason}")
@@ -449,11 +598,18 @@ class BubbleRecordingController(
 
     /** Keeps [samples] for the retry tap, unless this run already spent the one retry. */
     private fun retainForRetry(samples: FloatArray, isRetry: Boolean) {
-        retainedSamples = if (isRetry) null else samples
+        if (isRetry) {
+            retainedSamples = null
+            Log.d(TAG, "The one retry is spent; discarding ${samples.size} samples with reason: retry consumed")
+        } else {
+            retainedSamples = samples
+            Log.d(TAG, "Send failed; retaining ${samples.size} samples for one retry tap")
+        }
     }
 
-    private fun showDone() {
-        mutableBarState.update { RecordingBarState.Done }
+    private fun showDone(autoFinish: AutoFinishReason? = null) {
+        mutableBarState.update { RecordingBarState.Done(autoFinish = autoFinish) }
+        Log.d(TAG, "Send finished; showing Done (autoFinish=$autoFinish)")
         scheduleReset(doneDisplayMs)
     }
 
@@ -474,12 +630,15 @@ class BubbleRecordingController(
     /** Transient states (Done/Error) fall back to the mic bubble; anything else is left alone. */
     private fun returnToIdleIfTransient() {
         val bar = mutableBarState.value
-        if (bar == RecordingBarState.Done || bar == RecordingBarState.Error) {
+        if (bar is RecordingBarState.Done || bar == RecordingBarState.Error) {
             if (bar == RecordingBarState.Error) {
                 // The retry window has closed; the retained buffer's
                 // lifetime (§5.3: "long enough for one retry tap") is over.
                 retainedSamples = null
+                Log.d(TAG, "Error window elapsed; discarding the retained retry with reason: window elapsed")
             }
+            recordingSeen = false
+            finishedSamples = null
             mutableBarState.update { RecordingBarState.Idle }
         }
     }

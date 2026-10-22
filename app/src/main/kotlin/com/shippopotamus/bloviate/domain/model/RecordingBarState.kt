@@ -43,8 +43,14 @@ sealed interface RecordingBarState {
      */
     data object Polishing : RecordingBarState
 
-    /** Transcription succeeded; the brief check affordance before returning to [Idle]. */
-    data object Done : RecordingBarState
+    /**
+     * Transcription succeeded; the brief check affordance before returning to [Idle].
+     * [autoFinish] marks a recording the session finished on its own
+     * (ENC-155, ENC-160): the send path is identical, but the bubble names
+     * the reason so an auto-send never reads as a crash, and a manual stop
+     * stays a plain check.
+     */
+    data class Done(val autoFinish: AutoFinishReason? = null) : RecordingBarState
 
     /** Something failed (or a tap landed while the session is unavailable); brief error flash. */
     data object Error : RecordingBarState
