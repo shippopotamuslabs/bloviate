@@ -211,18 +211,18 @@ class ObserveBubbleVisibilityUseCaseTest {
         }
     }
 
-    // --- Window-presence reconciliation (ENC-127) ---------------------------
+    // --- Window-visibility reconciliation (ENC-127) ---------------------------
 
     @Test
-    fun `a swallowed show re-shows on the next focus transition after the presence resync`() = runTest {
+    fun `a swallowed show re-shows on the next focus transition after the visibility resync`() = runTest {
         fakeKeyboardVisibilityPort.publish(true)
         useCase().test {
             fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
             assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
 
             // The service applied the show but no window materialized;
-            // its presence report resyncs the machine's belief.
-            assertNull(useCase.onWindowPresenceChanged(false))
+            // its visibility report resyncs the machine's belief.
+            assertNull(useCase.onWindowVisibilityChanged(false))
 
             // The next focus transition commands a fresh show instead of
             // being swallowed by the stale belief.

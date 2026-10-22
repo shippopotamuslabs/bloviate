@@ -230,16 +230,41 @@ class BubbleVisibilityReducerTest {
     }
 
     @Test
-    fun `focus loss during bar activity hides immediately - the exemption is keyboard-only`() {
+    fun `focus loss during bar activity defers, and the hide lands when the bar settles`() {
         reducer.onKeyboardVisibilityChanged(true)
         reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
         reducer.onBarActivityChanged(true)
 
-        assertEquals(
-            BubbleVisibilityCommand.HideBubble,
-            reducer.onFocusState(FieldFocusState.NoEditableFocus),
-        )
+        assertNull(reducer.onFocusState(FieldFocusState.NoEditableFocus))
+
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onBarActivityChanged(false))
+    }
+
+    @Test
+    fun `focus loss during bar activity then editable refocus hides nothing at settle`() {
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        reducer.onBarActivityChanged(true)
+        assertNull(reducer.onFocusState(FieldFocusState.NoEditableFocus))
+
+        // Editable focus returns with the keyboard still up before the
+        // bar settles: the bubble is desired again, so the settle owes
+        // no hide.
+        assertNull(reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A)))
         assertNull(reducer.onBarActivityChanged(false))
+    }
+
+    @Test
+    fun `focus loss plus keyboard hide during bar activity lands a single deferred hide`() {
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        reducer.onBarActivityChanged(true)
+        assertNull(reducer.onFocusState(FieldFocusState.NoEditableFocus))
+        assertNull(reducer.onKeyboardVisibilityChanged(false))
+
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onBarActivityChanged(false))
+        // No duplicate owed afterwards.
+        assertNull(reducer.onFocusState(FieldFocusState.NoEditableFocus))
     }
 
     @Test
@@ -250,10 +275,10 @@ class BubbleVisibilityReducerTest {
         assertNull(reducer.onBarActivityChanged(false))
     }
 
-    // --- Window-presence reconciliation (ENC-127) ---------------------------
+    // --- Window-visibility reconciliation (ENC-127) ---------------------------
 
     @Test
-    fun `a swallowed show resyncs on the presence report, and the next focus transition re-commands the show`() {
+    fun `a swallowed show resyncs on the visibility report, and the next focus transition re-commands the show`() {
         reducer.onKeyboardVisibilityChanged(true)
         assertEquals(
             BubbleVisibilityCommand.ShowBubble,
@@ -263,7 +288,7 @@ class BubbleVisibilityReducerTest {
         // The service applied the show but no window materialized (e.g.
         // overlay permission was missing at apply time): the report
         // resyncs the belief silently — no command here...
-        assertNull(reducer.onWindowPresenceChanged(false))
+        assertNull(reducer.onWindowVisibilityChanged(false))
 
         // ...so the next show-worthy transition commands a fresh show
         // instead of being swallowed by the stale "already visible".
@@ -274,30 +299,55 @@ class BubbleVisibilityReducerTest {
     }
 
     @Test
-    fun `presence reports that agree with the belief command nothing`() {
+    fun `visibility reports that agree with the belief command nothing`() {
         reducer.onKeyboardVisibilityChanged(true)
         reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
 
-        assertNull(reducer.onWindowPresenceChanged(true))
+        assertNull(reducer.onWindowVisibilityChanged(true))
 
         reducer.onFocusState(FieldFocusState.NoEditableFocus)
-        assertNull(reducer.onWindowPresenceChanged(false))
+        assertNull(reducer.onWindowVisibilityChanged(false))
     }
 
     @Test
-    fun `a window present while nothing is desired gets a corrective hide`() {
-        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowPresenceChanged(true))
+    fun `a window shown while nothing is desired gets a corrective hide`() {
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowVisibilityChanged(true))
         // After the correction the belief agrees with the (now removed) window.
-        assertNull(reducer.onWindowPresenceChanged(false))
+        assertNull(reducer.onWindowVisibilityChanged(false))
     }
 
     @Test
-    fun `a window present while the bubble is dismissed gets a corrective hide`() {
+    fun `a shade-swallowed show resyncs on the lift report with no corrective, and the next hide still works`() {
+        // ENC-164: the show was swallowed at the point of effect while
+        // the shade was up, so the reconcile report flipped the belief
+        // back to hidden even though the signals still desire visible.
+        reducer.onKeyboardVisibilityChanged(true)
+        assertEquals(
+            BubbleVisibilityCommand.ShowBubble,
+            reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A)),
+        )
+        assertNull(reducer.onWindowVisibilityChanged(false))
+
+        // The shade lifts with the window actually visible (it never
+        // moved): the belief is restored silently — no corrective hide,
+        // because the bubble is still desired.
+        assertNull(reducer.onWindowVisibilityChanged(true))
+
+        // And the next legitimate hide still commands exactly once.
+        assertEquals(
+            BubbleVisibilityCommand.HideBubble,
+            reducer.onFocusState(FieldFocusState.NoEditableFocus),
+        )
+        assertNull(reducer.onFocusState(FieldFocusState.NoEditableFocus))
+    }
+
+    @Test
+    fun `a window shown while the bubble is dismissed gets a corrective hide`() {
         reducer.onKeyboardVisibilityChanged(true)
         reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
         reducer.onBubbleDismissed()
 
-        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowPresenceChanged(true))
+        assertEquals(BubbleVisibilityCommand.HideBubble, reducer.onWindowVisibilityChanged(true))
     }
 
     private companion object {

@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.service
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
@@ -22,8 +23,11 @@ import tech.apter.junit.jupiter.robolectric.RobolectricExtension
 /**
  * Clipboard choreography of paste-first insertion (ARCHITECTURE_RULES
  * §5.3), against Robolectric's real in-memory clipboard: the transcript
- * must be on the clipboard when the paste fires, and the user's previous
- * clip must be back afterwards — on every path.
+ * must be on the clipboard when the paste fires — sensitive-flagged from
+ * the moment it is set. Restore-on-deliver puts the user's previous clip
+ * back afterwards; leave-on-undeliverable keeps the sensitive-flagged
+ * transcript in place so the user can retrieve it; password outcomes always
+ * restore, never leaving the transcript behind.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(RobolectricExtension::class)
@@ -65,6 +69,7 @@ class WatcherTextInsertionTest {
             assertEquals(1, operator.pasteCallCount)
             assertEquals(0, operator.spliceCallCount)
             assertEquals("dictated text", operator.clipTextSeenAtPaste)
+            assertEquals(true, operator.clipSensitiveSeenAtPaste)
             assertEquals("the user's own words", currentClipboardText())
         }
 
@@ -98,7 +103,7 @@ class WatcherTextInsertionTest {
     }
 
     @Test
-    fun `no editable field refuses and the clipboard is restored`() = runBlocking {
+    fun `no editable field refuses and the sensitive transcript is left on the clipboard`() = runBlocking {
         operator.pasteOutcome = FocusedFieldOutcome.NO_EDITABLE_FIELD
         setClipboardText("the user's own words")
 
@@ -108,8 +113,20 @@ class WatcherTextInsertionTest {
             InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD),
             result,
         )
-        assertEquals("the user's own words", currentClipboardText())
+        assertTranscriptLeftOnClipboard("dictated text")
     }
+
+    @Test
+    fun `a failed paste reports failure and the sensitive transcript is left on the clipboard`() =
+        runBlocking {
+            operator.pasteOutcome = FocusedFieldOutcome.FAILED
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
+            assertTranscriptLeftOnClipboard("dictated text")
+        }
 
     @Test
     fun `paste unsupported falls back to the splice and restores the clipboard`() = runBlocking {
@@ -139,6 +156,33 @@ class WatcherTextInsertionTest {
             result,
         )
         assertEquals("the user's own words", currentClipboardText())
+    }
+
+    @Test
+    fun `splice meeting no editable field refuses and leaves the sensitive transcript`() = runBlocking {
+        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+        operator.spliceOutcome = FocusedFieldOutcome.NO_EDITABLE_FIELD
+        setClipboardText("the user's own words")
+
+        val result = insertion.insert("dictated text")
+
+        assertEquals(
+            InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD),
+            result,
+        )
+        assertTranscriptLeftOnClipboard("dictated text")
+    }
+
+    @Test
+    fun `a failed splice reports failure and leaves the sensitive transcript`() = runBlocking {
+        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+        operator.spliceOutcome = FocusedFieldOutcome.FAILED
+        setClipboardText("the user's own words")
+
+        val result = insertion.insert("dictated text")
+
+        assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
+        assertTranscriptLeftOnClipboard("dictated text")
     }
 
     @Test
@@ -189,4 +233,14 @@ class WatcherTextInsertionTest {
 
     private fun currentClipboardText(): String? =
         clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
+
+    private fun assertTranscriptLeftOnClipboard(transcript: String) {
+        assertEquals(transcript, currentClipboardText())
+        assertTrue(
+            clipboard.primaryClip?.description?.extras?.getBoolean(
+                ClipDescription.EXTRA_IS_SENSITIVE,
+            ) == true,
+            "expected the transcript clip to carry EXTRA_IS_SENSITIVE",
+        )
+    }
 }
