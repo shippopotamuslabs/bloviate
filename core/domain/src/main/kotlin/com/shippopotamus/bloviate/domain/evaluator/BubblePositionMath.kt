@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
+import com.shippopotamus.bloviate.domain.model.BarExpansionSide
 import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
@@ -95,7 +96,7 @@ object BubblePositionMath {
         centerYPx.toFloat() >= bounds.heightPx * (MAX_FRACTION - DISMISS_ZONE_HEIGHT_FRACTION)
 
     /**
-     * Window x for the recording bar the bubble morphs into (ENC-65). The bar
+     * Fit helper for a bar-form row (ENC-65, fit math reused by ENC-167). The bar
      * is much wider than the bubble and the window is anchored at its
      * top-left, so growing rightward from a right-parked bubble would push
      * the bar off-screen. The expansion is positionally aware instead: the
@@ -122,6 +123,62 @@ object BubblePositionMath {
         }
     }
 
+    /**
+     * The expansion side for an anchor at [anchorXPx] with extent
+     * [anchorWidthPx] in [bounds] (ENC-167): the anchor's center is
+     * compared against the screen's center. A center exactly on the
+     * screen center is NOT left of it, so it expands left — the check
+     * sits at the anchor spot and the row unfolds toward the larger
+     * (left) half's interior in the tie the same way a right-half
+     * anchor does.
+     */
+    fun expansionSide(
+        anchorXPx: Int,
+        anchorWidthPx: Int,
+        bounds: ScreenBounds,
+    ): BarExpansionSide {
+        return if (anchorXPx * CENTER_DIVISOR + anchorWidthPx < bounds.widthPx) {
+            BarExpansionSide.EXPAND_RIGHT
+        } else {
+            BarExpansionSide.EXPAND_LEFT
+        }
+    }
+
+    /**
+     * One-shot window x for a bar-form row of [contentWidthPx] unfolding
+     * from the anchor at [anchorXPx] / [anchorWidthPx] (ENC-167).
+     *
+     * Computed ONCE, before the row composes, from the known content
+     * width — never from a measured live view width — so no per-frame
+     * correction follows it. The invariant is the anchor edge: expanding
+     * right, the row's left edge (the X's spot) is the anchor's left
+     * edge; expanding left, the row's right edge (the check's spot) is
+     * the anchor's right edge. The single exception is the pre-computed
+     * fit shift, applied here and only here via [barWindowX]'s fit math:
+     * when the unfolded row would overflow the screen (possible near the
+     * center, where the side is decided but the full row may not fit),
+     * the window shifts once so the whole row stays on-screen with
+     * [edgeMarginPx] clear of the far edge.
+     */
+    fun barWindowXOneShot(
+        anchorXPx: Int,
+        anchorWidthPx: Int,
+        contentWidthPx: Int,
+        bounds: ScreenBounds,
+        edgeMarginPx: Int,
+    ): Int {
+        val idealXPx = when (expansionSide(anchorXPx, anchorWidthPx, bounds)) {
+            BarExpansionSide.EXPAND_RIGHT -> anchorXPx
+            BarExpansionSide.EXPAND_LEFT -> anchorXPx + anchorWidthPx - contentWidthPx
+        }
+        return barWindowX(
+            bubbleXPx = idealXPx,
+            barWidthPx = contentWidthPx,
+            bounds = bounds,
+            edgeMarginPx = edgeMarginPx,
+        )
+    }
+
     private fun maxTravelPx(screenPx: Int, bubblePx: Int): Int = (screenPx - bubblePx).coerceAtLeast(MIN_OFFSET_PX)
 
     private fun fractionOf(offsetPx: Int, travelPx: Int): Float =
@@ -132,4 +189,5 @@ object BubblePositionMath {
         }
 
     private const val MIN_OFFSET_PX: Int = 0
+    private const val CENTER_DIVISOR: Int = 2
 }

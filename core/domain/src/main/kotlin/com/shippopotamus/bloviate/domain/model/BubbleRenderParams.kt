@@ -6,8 +6,7 @@ package com.shippopotamus.bloviate.domain.model
  * floats — the domain stays free of Compose unit types, and the overlay
  * converts at the composition edge. The recording bar inherits the
  * bubble's size step: its height, slots, and glyphs scale from the same
- * factor so the morph between bubble and bar stays one object changing
- * shape, not two objects trading places.
+ * factor so the bubble and the recording row share one geometry scale.
  */
 data class BubbleRenderParams(
     /** Rendered opacity, already coerced into the appearance's legal range. */

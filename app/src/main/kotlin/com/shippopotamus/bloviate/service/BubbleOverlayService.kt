@@ -10,9 +10,11 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.TypedValue
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
@@ -46,6 +48,7 @@ import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.application.port.RecordingSessionPort
 import com.shippopotamus.bloviate.application.port.ResidentPresencePort
 import com.shippopotamus.bloviate.application.port.ShadePresencePort
+import com.shippopotamus.bloviate.presentation.BloviateSpacing
 import com.shippopotamus.bloviate.presentation.BloviateTheme
 import com.shippopotamus.bloviate.application.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.application.port.TranscriptSinkPort
@@ -224,6 +227,7 @@ class BubbleOverlayService : Service() {
         barEdgeMarginPx = ::barEdgeMarginPx,
         savePosition = { position -> serviceScope.launch { saveBubblePosition(position) } },
         isDragging = { dragController?.isDragging == true },
+        barContentWidthPx = ::barContentWidthPx,
     )
     private var dragController: BubbleDragController? = null
 
@@ -268,8 +272,13 @@ class BubbleOverlayService : Service() {
         serviceScope.launch {
             controller.barState.collect { state ->
                 CadenceCounters.snapshotWrite() // ENC-69 cadence counters (L3)
-                barStateSnapshot.value = state
+                // Place the window BEFORE publishing the new state: the
+                // snapshot write can compose the wide recording row in the
+                // same frame, so the one-shot x must already be set or a
+                // right-side row renders off-screen for a frame and then
+                // visibly shoots in when the layout is pushed (ENC-167).
                 windowPlacement.onBarStateChanged(state, currentBounds())
+                barStateSnapshot.value = state
                 // ENC-125: bar activity arms the visibility machine's
                 // keyboard-hide exemption — while the bar is up a keyboard
                 // hide cannot hide the window; when the bar settles back
@@ -626,14 +635,13 @@ class BubbleOverlayService : Service() {
                 )
             }
         }
-        // Bar-form placement rides the window's own layout: whenever the
-        // view's width changes (the bar morph settling, elapsed-time
-        // growth), the placement check keeps the whole bar on-screen.
-        // An appearance size change (ENC-68) resizes the idle bubble in
-        // the same way; the re-clamp then re-derives the resting position
-        // from the persisted anchor at the new size (ENC-123) — the live
-        // view size is never trusted mid-morph. While a drag is active
-        // this is a no-op: the drag controller owns the layout (ENC-154).
+        // Window-resize placement is resting-only (ENC-167): bar-form
+        // placement is one-shot on state entry and a resize while a bar
+        // form is up never moves the window. An appearance size change
+        // (ENC-68) resizes the idle bubble; the re-clamp then re-derives
+        // the resting position from the persisted anchor at the new size
+        // (ENC-123). While a drag is active this is a no-op: the drag
+        // controller owns the layout (ENC-154).
         view.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
             val widthChanged = right - left != oldRight - oldLeft
             val heightChanged = bottom - top != oldBottom - oldTop
@@ -748,6 +756,47 @@ class BubbleOverlayService : Service() {
     private fun barEdgeMarginPx(): Int =
         (BAR_EDGE_MARGIN_DP * resources.displayMetrics.density).roundToInt()
 
+    /**
+     * Known content width for a bar-form state (ENC-167), computed from
+     * fixed geometry — never a measured live view width — so placement
+     * can run once before the state composes. The recording row's width
+     * is its slot/pill constants; the processing pill hugs its label, so
+     * its width is the label measured at the labelLarge size plus its
+     * s24 insets.
+     */
+    private fun barContentWidthPx(state: RecordingBarState): Int {
+        val density = resources.displayMetrics.density
+        return when (state) {
+            is RecordingBarState.Recording -> {
+                val renderParams = BubbleAppearanceMath.renderParams(appearanceSnapshot.value)
+                (recordingRowWidthDp(renderParams) * density).roundToInt()
+            }
+            RecordingBarState.Transcribing,
+            RecordingBarState.Polishing,
+            -> {
+                val labelRes = if (state == RecordingBarState.Transcribing) {
+                    R.string.bubble_stage_transcribing
+                } else {
+                    R.string.bubble_stage_polishing
+                }
+                val paint = Paint().apply {
+                    textSize = TypedValue.applyDimension(
+                        TypedValue.COMPLEX_UNIT_SP,
+                        PROCESSING_LABEL_TEXT_SIZE_SP,
+                        resources.displayMetrics,
+                    )
+                }
+                val textWidthPx = paint.measureText(getString(labelRes))
+                val paddingPx = (BloviateSpacing.s24 * 2).value * density
+                (textWidthPx + paddingPx).roundToInt()
+            }
+            RecordingBarState.Idle,
+            is RecordingBarState.Done,
+            RecordingBarState.Error,
+            -> 0
+        }
+    }
+
     private fun createLayoutParams(): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -816,6 +865,9 @@ class BubbleOverlayService : Service() {
         const val CHANNEL_ID: String = "bubble_overlay"
         const val NOTIFICATION_ID: Int = 1001
         const val REQUEST_CODE_OPEN_APP: Int = 0
+
+        /** The processing pill's label size (labelLarge), for its known-width measurement. */
+        const val PROCESSING_LABEL_TEXT_SIZE_SP: Float = 14f
 
         /** Explicit in-app start (ENC-129): always eligible for the microphone type. */
         const val ACTION_USER_START: String = "com.shippopotamus.bloviate.action.START_BUBBLE_USER"
