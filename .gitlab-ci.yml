@@ -176,7 +176,11 @@ distribute-internal:
       shopt -u nullglob
       if [ ${#APK_FILES[@]} -eq 0 ]; then echo "No APK found" && exit 1; fi
       if [ ${#APK_FILES[@]} -gt 1 ]; then echo "Multiple APKs found: ${APK_FILES[*]}" && exit 1; fi
-      npx firebase-tools appdistribution:distribute "${APK_FILES[0]}" \
+      # firebase-tools is PINNED (ENC-161): unpinned `npx firebase-tools` (latest)
+      # broke uploads on 2026-10-20 with a 403 "caller does not have permission"
+      # (IAM verified healthy with this exact key; 15.34.0 works). Bump the pin
+      # deliberately in a commit — never float on latest.
+      npx firebase-tools@15.34.0 appdistribution:distribute "${APK_FILES[0]}" \
         --app 1:74044613867:android:37d80fbdff97cd7b0d8aae \
         --groups "Internal" \
         --release-notes "Build ${CI_COMMIT_SHORT_SHA} from main" \
