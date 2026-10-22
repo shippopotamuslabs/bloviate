@@ -123,7 +123,11 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
         // signals — the active window is the shade's tree, so any
         // derivation here would be read from SystemUI, not the host
         // app. The first event after the shade leaves re-derives.
-        if (updateShadePresence(windows)) return
+        // ENC-156: the shade's own window-state transition posts before
+        // the census reports it, so the event itself also engages the
+        // freeze — otherwise that first transition leaks exactly one
+        // poisoned focus-loss through the census gap.
+        if (updateShadePresence(windows, event)) return
         publish(FieldFocusEvaluator.evaluate(focusedNodeSnapshot(event)))
         publishKeyboardVisibility()
     }
@@ -313,7 +317,14 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private fun disarmKeyboardWatchdog(reason: KeyboardWatchdogPolicy.StopReason) {
         watchdogHandler.removeCallbacks(watchdogTick)
         watchdogArmedAtMs = null
-        Log.d(TAG, "keyboard watchdog stopped: $reason after $watchdogPolls polls")
+        // ENC-145: the census rides the stop line — an EXPIRED arm on an
+        // unfolded display shows exactly which windows the derivation saw
+        // (an IME that never joins, or joins under another type).
+        Log.d(
+            TAG,
+            "keyboard watchdog stopped: $reason after $watchdogPolls polls " +
+                "(window types: ${windows.typeCensus()})",
+        )
     }
 
     /** Stop polling without a policy reason (service unbinding/destroying). */
@@ -326,15 +337,27 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
      * Recompute shade presence from [currentWindows] per
      * [NotificationShadeFreezePolicy] and log transitions with the
      * window-type census (types only, never content), so a shade
-     * repro is visible in logcat. Returns the current presence.
+     * repro is visible in logcat. [event] — when this recomputation
+     * runs for an accessibility event — also engages the freeze via
+     * the event's own SystemUI origin (ENC-156): the shade's
+     * window-state transition posts before the census reports it.
+     * Returns the current presence.
      */
-    private fun updateShadePresence(currentWindows: List<AccessibilityWindowInfo>): Boolean {
-        val present = NotificationShadeFreezePolicy.isShadePresent(
+    private fun updateShadePresence(
+        currentWindows: List<AccessibilityWindowInfo>,
+        event: AccessibilityEvent? = null,
+    ): Boolean {
+        val byEvent = event != null && NotificationShadeFreezePolicy.isShadeEvent(
+            packageName = event.packageName?.toString(),
+            isWindowStateChange = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        )
+        val present = byEvent || NotificationShadeFreezePolicy.isShadePresent(
             currentWindows.map { window -> window.toSnapshot() },
         )
         if (present != shadePresent) {
             shadePresent = present
-            Log.d(TAG, "notification shade present -> $present (window types: ${currentWindows.typeCensus()})")
+            val origin = if (byEvent) "via SystemUI window-state event" else "via window census"
+            Log.d(TAG, "notification shade present -> $present ($origin; window types: ${currentWindows.typeCensus()})")
         }
         return present
     }

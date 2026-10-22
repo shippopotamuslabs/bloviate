@@ -1,6 +1,8 @@
 package com.shippopotamus.bloviate.testing
 
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,8 +19,8 @@ class FakeRecordingSessionPort : RecordingSessionPort {
     private val mutableState = MutableStateFlow<RecordingSessionState>(RecordingSessionState.Idle)
     override val state: StateFlow<RecordingSessionState> = mutableState
 
-    private val mutableAutoStopped = MutableSharedFlow<FloatArray>(extraBufferCapacity = 1)
-    override val autoStoppedRecordings: SharedFlow<FloatArray> = mutableAutoStopped
+    private val mutableAutoStopped = MutableSharedFlow<StopResult>(extraBufferCapacity = 1)
+    override val autoStoppedRecordings: SharedFlow<StopResult> = mutableAutoStopped
 
     var startCallCount: Int = 0
         private set
@@ -29,8 +31,8 @@ class FakeRecordingSessionPort : RecordingSessionPort {
     var stopCallCount: Int = 0
         private set
 
-    /** Samples returned by [stop]. */
-    var stopResult: FloatArray = floatArrayOf(0.1f, 0.2f, 0.3f)
+    /** Result returned by [stop]: samples plus the finish reason (null for a manual stop). */
+    var stopResult: StopResult = StopResult(floatArrayOf(0.1f, 0.2f, 0.3f))
 
     /** When set, [stop] throws this instead of returning [stopResult]. */
     var stopFailure: Exception? = null
@@ -39,7 +41,7 @@ class FakeRecordingSessionPort : RecordingSessionPort {
         startCallCount++
     }
 
-    override suspend fun stop(): FloatArray {
+    override suspend fun stop(): StopResult {
         stopCallCount++
         stopFailure?.let { throw it }
         return stopResult
@@ -57,8 +59,11 @@ class FakeRecordingSessionPort : RecordingSessionPort {
         mutableState.value = RecordingSessionState.Recording(elapsedMs = elapsedMs, amplitude = amplitude)
     }
 
-    /** Emits a hard-cap recording, as the real session does at ~3 minutes. */
-    fun emitAutoStopped(samples: FloatArray = stopResult) {
-        mutableAutoStopped.tryEmit(samples)
+    /** Emits an auto-finished recording, as the real session does on dead air or the safety backstop. */
+    fun emitAutoStopped(
+        samples: FloatArray = stopResult.samples,
+        reason: AutoFinishReason = stopResult.autoFinish ?: AutoFinishReason.MAX_LENGTH,
+    ) {
+        mutableAutoStopped.tryEmit(StopResult(samples, reason))
     }
 }

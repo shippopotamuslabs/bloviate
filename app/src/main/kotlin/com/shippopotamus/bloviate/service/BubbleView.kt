@@ -64,6 +64,7 @@ import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.ElapsedTimeFormatter
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleRenderParams
 import com.shippopotamus.bloviate.domain.model.BubbleShape
@@ -169,7 +170,7 @@ internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize>
         RecordingBarState.Idle,
         RecordingBarState.Transcribing,
         RecordingBarState.Polishing,
-        RecordingBarState.Done,
+        is RecordingBarState.Done,
         RecordingBarState.Error,
         -> BAR_MORPH_SPRING
     }
@@ -252,7 +253,7 @@ fun BubbleContent(
     val renderParams = remember(appearance) { BubbleAppearanceMath.renderParams(appearance) }
     LaunchedEffect(barState) {
         val displayMs = when (barState) {
-            RecordingBarState.Done -> DONE_DISPLAY_MS
+            is RecordingBarState.Done -> DONE_DISPLAY_MS
             RecordingBarState.Error -> ERROR_DISPLAY_MS
             RecordingBarState.Idle,
             is RecordingBarState.Recording,
@@ -314,7 +315,8 @@ fun BubbleContent(
                 appearance = appearance,
                 renderParams = renderParams,
             )
-            RecordingBarState.Done -> DoneBubble(
+            is RecordingBarState.Done -> DoneBubble(
+                autoFinish = barState.autoFinish,
                 appearance = appearance,
                 renderParams = renderParams,
             )
@@ -544,7 +546,7 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
     RecordingBarState.Polishing -> R.string.bubble_stage_polishing
     RecordingBarState.Idle,
     is RecordingBarState.Recording,
-    RecordingBarState.Done,
+    is RecordingBarState.Done,
     RecordingBarState.Error,
     -> null
 }
@@ -655,11 +657,22 @@ private fun ShimmerText(
 
 @Composable
 private fun DoneBubble(
+    autoFinish: AutoFinishReason?,
     appearance: BubbleAppearance,
     renderParams: BubbleRenderParams,
     modifier: Modifier = Modifier,
 ) {
-    val description = stringResource(R.string.bubble_done_description)
+    // ENC-155/ENC-160: an auto-finished send lands on the same Done
+    // check, but names why the session stopped itself — dead air, the
+    // safety backstop, or (null) a manual check — so an auto-send never
+    // reads as a crash.
+    val description = stringResource(
+        when (autoFinish) {
+            AutoFinishReason.SILENCE -> R.string.bubble_done_silence_description
+            AutoFinishReason.MAX_LENGTH -> R.string.bubble_done_capped_description
+            null -> R.string.bubble_done_description
+        },
+    )
     val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
@@ -959,7 +972,33 @@ private fun BubbleContentPolishingPreview() {
 private fun BubbleContentDonePreview() {
     PreviewTheme {
         BubbleContent(
-            barState = RecordingBarState.Done,
+            barState = RecordingBarState.Done(),
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Done max length", showBackground = true)
+@Composable
+private fun BubbleContentDoneMaxLengthPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH),
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Done silence", showBackground = true)
+@Composable
+private fun BubbleContentDoneSilencePreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Done(autoFinish = AutoFinishReason.SILENCE),
             waveformLevels = { emptyList() },
             inDismissZone = false,
         )

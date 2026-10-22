@@ -47,6 +47,24 @@ object NotificationShadeFreezePolicy {
         }
 
     /**
+     * True when this window-state event comes from SystemUI itself
+     * (ENC-156). The shade's pull-down posts its window-state transition
+     * before the window census reports an active system window, so the
+     * census alone leaks exactly one poisoned derivation — read from
+     * the shade's tree, not the host app's — which flips to
+     * not-editable and kills any in-progress dictation through the
+     * focus path. A SystemUI window-state event engages the freeze one
+     * event earlier, on the transition itself. Only window-state events
+     * qualify ([isWindowStateChange]): content churn from the
+     * always-present status bar must never freeze the signals. The event
+     * type arrives as a plain boolean so this policy stays free of
+     * framework types.
+     */
+    fun isShadeEvent(packageName: String?, isWindowStateChange: Boolean): Boolean =
+        isWindowStateChange &&
+            packageName?.contains(SYSTEM_UI_MARKER, ignoreCase = true) == true
+
+    /**
      * The focus signal to publish, or null to hold the last published
      * state because the shade is present and [derived] was read from
      * the shade's tree, not the host app's.
@@ -60,4 +78,6 @@ object NotificationShadeFreezePolicy {
      */
     fun gateKeyboard(shadePresent: Boolean, derivedVisible: Boolean): Boolean? =
         if (shadePresent) null else derivedVisible
+
+    private const val SYSTEM_UI_MARKER: String = "systemui"
 }

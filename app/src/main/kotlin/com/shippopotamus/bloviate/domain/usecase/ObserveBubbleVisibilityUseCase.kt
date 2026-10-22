@@ -62,8 +62,22 @@ class ObserveBubbleVisibilityUseCase @Inject constructor(
     fun onWindowPresenceChanged(present: Boolean): BubbleVisibilityCommand? =
         reducer.onWindowPresenceChanged(present)
 
+    /**
+     * Whether the hide the overlay is about to apply comes from a
+     * genuine password-field focus (ENC-156). See
+     * [BubbleVisibilityReducer.isPasswordFocus].
+     */
+    fun isPasswordFocus(): Boolean = reducer.isPasswordFocus()
+
     /** Forget reducer state; called when the owning service is destroyed. */
     fun reset() {
         reducer.reset()
     }
+
+    /**
+     * One-line snapshot of the visibility machine's inputs and belief
+     * for decision logging (ENC-145). See
+     * [BubbleVisibilityReducer.describeStateForLog].
+     */
+    fun describeStateForLog(): String = reducer.describeStateForLog()
 }

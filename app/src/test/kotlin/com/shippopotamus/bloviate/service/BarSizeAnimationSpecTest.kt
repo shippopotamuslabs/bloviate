@@ -54,7 +54,7 @@ class BarSizeAnimationSpecTest {
 
     @Test
     fun `idle done and error keep the calm spring`() {
-        listOf(RecordingBarState.Idle, RecordingBarState.Done, RecordingBarState.Error).forEach { state ->
+        listOf(RecordingBarState.Idle, RecordingBarState.Done(), RecordingBarState.Error).forEach { state ->
             assertEquals(Spring.StiffnessMediumLow, state.sizeSpec().stiffness, EXACT)
         }
     }
@@ -79,7 +79,7 @@ class BarSizeAnimationSpecTest {
             RecordingBarState.Recording(elapsedMs = 0L),
             RecordingBarState.Transcribing,
             RecordingBarState.Polishing,
-            RecordingBarState.Done,
+            RecordingBarState.Done(),
             RecordingBarState.Error,
         )
         val distinctSpecs = states.map { state -> state.sizeSpec() }.distinctBy { spec -> spec.stiffness }

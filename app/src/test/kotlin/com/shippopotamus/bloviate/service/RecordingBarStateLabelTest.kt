@@ -33,7 +33,7 @@ class RecordingBarStateLabelTest {
     fun `non pipeline states have no stage label`() {
         assertNull(RecordingBarState.Idle.processingLabelRes())
         assertNull(RecordingBarState.Recording(elapsedMs = 1_000L).processingLabelRes())
-        assertNull(RecordingBarState.Done.processingLabelRes())
+        assertNull(RecordingBarState.Done().processingLabelRes())
         assertNull(RecordingBarState.Error.processingLabelRes())
     }
 }

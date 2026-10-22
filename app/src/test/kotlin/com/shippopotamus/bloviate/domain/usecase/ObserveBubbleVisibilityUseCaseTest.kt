@@ -11,7 +11,9 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ObserveBubbleVisibilityUseCaseTest {
@@ -117,6 +119,28 @@ class ObserveBubbleVisibilityUseCaseTest {
     @Test
     fun `dismiss while hidden returns no command`() {
         assertNull(useCase.onBubbleDismissed())
+    }
+
+    @Test
+    fun `the hide cause follows the latest focus state`() = runTest {
+        // ENC-156: the overlay reads this at hide time — only a real
+        // password focus may cancel the recording.
+        fakeKeyboardVisibilityPort.publish(true)
+        useCase().test {
+            fakeFieldFocusPort.publish(FieldFocusState.EditableFocus(PACKAGE_A))
+            assertEquals(BubbleVisibilityCommand.ShowBubble, awaitItem())
+            assertFalse(useCase.isPasswordFocus())
+
+            fakeFieldFocusPort.publish(FieldFocusState.NoEditableFocus)
+            assertEquals(BubbleVisibilityCommand.HideBubble, awaitItem())
+            assertFalse(useCase.isPasswordFocus())
+
+            fakeFieldFocusPort.publish(FieldFocusState.PasswordFocus(PACKAGE_A))
+            expectNoEvents()
+            assertTrue(useCase.isPasswordFocus())
+
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // --- Keyboard hides are immediate again (ENC-128) -----------------------

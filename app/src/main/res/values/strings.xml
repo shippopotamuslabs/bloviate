@@ -47,6 +47,8 @@
     <string name="bubble_stage_transcribing">Transcribing</string>
     <string name="bubble_stage_polishing">Polishing</string>
     <string name="bubble_done_description">Dictation transcribed</string>
+    <string name="bubble_done_capped_description">Dictation transcribed · max length reached</string>
+    <string name="bubble_done_silence_description">Dictation transcribed · stopped after 30 seconds of silence</string>
     <string name="bubble_error_description">Dictation failed</string>
     <string name="model_card_title">Voice models</string>
     <string name="model_status_downloading_format">Downloading · %1$d%%</string>
