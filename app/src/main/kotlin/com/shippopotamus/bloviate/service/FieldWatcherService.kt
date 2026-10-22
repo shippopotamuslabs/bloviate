@@ -79,7 +79,10 @@ import javax.inject.Inject
  * reads no text at all; the `ACTION_SET_TEXT` splice fallback reads the
  * focused field's text and selection to splice around the cursor — the
  * behavior `contracts/ARCHITECTURE_RULES.md` §5.3 mandates — and never
- * logs or stores what it read. Every [AccessibilityNodeInfo] obtained
+ * logs or stores what it read. The node's hint is compared against the
+ * text (an empty field's reported text is its placeholder) so the hint
+ * is never baked into the field, and is likewise never logged or stored.
+ * Every [AccessibilityNodeInfo] obtained
  * here is recycled before the call returns; no node state survives.
  */
 @AndroidEntryPoint
@@ -184,6 +187,8 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
                         selectionStart = node.textSelectionStart,
                         selectionEnd = node.textSelectionEnd,
                         insertion = insertion,
+                        hintText = node.hintText?.toString(),
+                        isShowingHintText = node.isShowingHintText,
                     )
                     val setTextArguments = Bundle().apply {
                         putCharSequence(
