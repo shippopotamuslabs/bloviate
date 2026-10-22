@@ -176,11 +176,16 @@ distribute-internal:
       shopt -u nullglob
       if [ ${#APK_FILES[@]} -eq 0 ]; then echo "No APK found" && exit 1; fi
       if [ ${#APK_FILES[@]} -gt 1 ]; then echo "Multiple APKs found: ${APK_FILES[*]}" && exit 1; fi
-      # firebase-tools is PINNED (ENC-161): unpinned `npx firebase-tools` (latest)
-      # broke uploads on 2026-10-20 with a 403 "caller does not have permission"
-      # (IAM verified healthy with this exact key; 15.34.0 works). Bump the pin
-      # deliberately in a commit — never float on latest.
-      npx firebase-tools@15.34.0 appdistribution:distribute "${APK_FILES[0]}" \
+      # firebase-tools is PINNED: bump the pin deliberately in a commit —
+      # never float on latest. The 2026-10 upload 403s were NOT a version
+      # problem (ENC-166): the job authenticated as the wrong identity. The
+      # service account in GOOGLE_APPLICATION_CREDENTIALS has full upload
+      # rights on this app (proven against the raw App Distribution API),
+      # but a cached firebase user login in the runner account's
+      # configstore can shadow it. HOME is therefore pointed at a fresh
+      # temp dir for this call so no cached login exists: the upload
+      # authenticates deterministically as the service account.
+      HOME="$(mktemp -d)" npx firebase-tools@15.34.0 appdistribution:distribute "${APK_FILES[0]}" \
         --app 1:74044613867:android:37d80fbdff97cd7b0d8aae \
         --groups "Internal" \
         --release-notes "Build ${CI_COMMIT_SHORT_SHA} from main" \
