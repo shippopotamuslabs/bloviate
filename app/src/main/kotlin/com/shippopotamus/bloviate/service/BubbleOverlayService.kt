@@ -272,8 +272,13 @@ class BubbleOverlayService : Service() {
         serviceScope.launch {
             controller.barState.collect { state ->
                 CadenceCounters.snapshotWrite() // ENC-69 cadence counters (L3)
-                barStateSnapshot.value = state
+                // Place the window BEFORE publishing the new state: the
+                // snapshot write can compose the wide recording row in the
+                // same frame, so the one-shot x must already be set or a
+                // right-side row renders off-screen for a frame and then
+                // visibly shoots in when the layout is pushed (ENC-167).
                 windowPlacement.onBarStateChanged(state, currentBounds())
+                barStateSnapshot.value = state
                 // ENC-125: bar activity arms the visibility machine's
                 // keyboard-hide exemption — while the bar is up a keyboard
                 // hide cannot hide the window; when the bar settles back
