@@ -17,7 +17,7 @@ class ElapsedTimeFormatterTest {
     }
 
     @Test
-    fun `minutes accumulate past the hard cap`() {
+    fun `minutes accumulate without a display cap`() {
         assertEquals("1:00", ElapsedTimeFormatter.format(60_000L))
         assertEquals("3:00", ElapsedTimeFormatter.format(180_000L))
         assertEquals("12:05", ElapsedTimeFormatter.format(725_000L))

@@ -18,6 +18,27 @@ object SilenceTrimmer {
     /** Frame RMS at or above this counts as speech (Enclave's dictation threshold). */
     const val SILENCE_RMS_THRESHOLD: Float = 0.02f
 
+    /**
+     * Whether [samples] (16 kHz mono normalized floats) contain any speech
+     * (ENC-160): true when any 10 ms frame reaches [SILENCE_RMS_THRESHOLD].
+     * That is the same definition of "speech" the trim uses, so the session's
+     * inactivity detector and the trim never disagree about what counts
+     * as voice.
+     */
+    fun containsSpeech(
+        samples: FloatArray,
+        sampleRateHz: Int = SAMPLE_RATE_HZ,
+    ): Boolean {
+        if (samples.isEmpty()) return false
+        val frameSize = sampleRateHz * FRAME_MS / MS_PER_SECOND
+        var frameStart = 0
+        while (frameStart < samples.size) {
+            if (frameRms(samples, frameStart, frameSize) >= SILENCE_RMS_THRESHOLD) return true
+            frameStart += frameSize
+        }
+        return false
+    }
+
     /** Analysis frame length. */
     const val FRAME_MS: Int = 10
 

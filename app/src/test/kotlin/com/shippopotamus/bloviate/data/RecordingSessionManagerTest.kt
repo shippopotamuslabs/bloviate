@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.data
 
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.testing.FakeAudioCapturePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
@@ -172,7 +173,8 @@ class RecordingSessionManagerTest {
         fakeCapture.emit(silentChunk(milliseconds = 500))
         runCurrent()
 
-        val samples = session.stop()
+        val result = session.stop()
+        val samples = result.samples
 
         // 500 ms silence + 200 ms speech + 500 ms silence, padding 100 ms kept per side.
         assertEquals(6_400, samples.size)
@@ -180,6 +182,7 @@ class RecordingSessionManagerTest {
         assertEquals(0.5f, samples[1_600])
         assertEquals(0.5f, samples[4_799])
         assertEquals(0f, samples[4_800])
+        assertEquals(null, result.autoFinish)
         assertEquals(RecordingSessionState.Idle, session.state.value)
     }
 
@@ -215,7 +218,7 @@ class RecordingSessionManagerTest {
     }
 
     @Test
-    fun `hard cap finishes as a stop, emits samples, and a late stop still returns them`() = runTest {
+    fun `ten minutes of continuous speech finishes as a stop with the max-length reason`() = runTest {
         makeAvailable()
         val session = createSession()
         runCurrent()
@@ -223,16 +226,67 @@ class RecordingSessionManagerTest {
         val autoStopped = async { session.autoStoppedRecordings.first() }
         runCurrent()
 
-        repeat(MAX_SECONDS) { fakeCapture.emit(loudChunk(milliseconds = 1_000)) }
+        // The fake's emission buffer holds 256 chunks; drain as we go.
+        repeat(6) {
+            repeat(100) { fakeCapture.emit(loudChunk(milliseconds = 1_000)) }
+            runCurrent()
+        }
         runCurrent()
 
-        val cappedSamples = autoStopped.await()
-        assertEquals(MAX_SAMPLES, cappedSamples.size)
+        val result = autoStopped.await()
+        assertEquals(AutoFinishReason.MAX_LENGTH, result.autoFinish)
+        assertEquals(MAX_SAMPLES, result.samples.size)
         assertEquals(RecordingSessionState.Idle, session.state.value)
 
-        val lateStopSamples = session.stop()
-        assertEquals(MAX_SAMPLES, lateStopSamples.size)
+        val lateStop = session.stop()
+        assertEquals(MAX_SAMPLES, lateStop.samples.size)
+        assertEquals(AutoFinishReason.MAX_LENGTH, lateStop.autoFinish)
         assertTrue(runCatchingStop(session) is IllegalStateException)
+    }
+
+    @Test
+    fun `thirty seconds of dead air finishes as a stop with the silence reason`() = runTest {
+        // ENC-160: the mic-left-on detector — consecutive sub-threshold
+        // audio ends the recording like a stop, with the reason attached.
+        makeAvailable()
+        val session = createSession()
+        runCurrent()
+        session.start()
+        val autoStopped = async { session.autoStoppedRecordings.first() }
+        runCurrent()
+
+        repeat(INACTIVITY_SECONDS) { fakeCapture.emit(silentChunk(milliseconds = 1_000)) }
+        runCurrent()
+
+        val result = autoStopped.await()
+        assertEquals(AutoFinishReason.SILENCE, result.autoFinish)
+        assertEquals(0, result.samples.size)
+        assertEquals(RecordingSessionState.Idle, session.state.value)
+
+        val lateStop = session.stop()
+        assertEquals(AutoFinishReason.SILENCE, lateStop.autoFinish)
+        assertTrue(runCatchingStop(session) is IllegalStateException)
+    }
+
+    @Test
+    fun `voice resets the dead-air count`() = runTest {
+        // ENC-160: thinking pauses never trip the detector — only
+        // *consecutive* dead air counts.
+        makeAvailable()
+        val session = createSession()
+        runCurrent()
+        session.start()
+        runCurrent()
+
+        repeat(25) { fakeCapture.emit(silentChunk(milliseconds = 1_000)) }
+        fakeCapture.emit(loudChunk(milliseconds = 1_000))
+        repeat(29) { fakeCapture.emit(silentChunk(milliseconds = 1_000)) }
+        runCurrent()
+        assertTrue(session.state.value is RecordingSessionState.Recording)
+
+        fakeCapture.emit(silentChunk(milliseconds = 1_000))
+        runCurrent()
+        assertEquals(RecordingSessionState.Idle, session.state.value)
     }
 
     @Test
@@ -287,7 +341,8 @@ class RecordingSessionManagerTest {
 
     private companion object {
         const val SAMPLES_PER_MS: Int = 16
-        const val MAX_SECONDS: Int = 180
-        const val MAX_SAMPLES: Int = 2_880_000
+        const val MAX_SECONDS: Int = 600
+        const val MAX_SAMPLES: Int = 9_600_000
+        const val INACTIVITY_SECONDS: Int = 30
     }
 }

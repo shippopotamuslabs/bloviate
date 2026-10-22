@@ -1,7 +1,9 @@
 package com.shippopotamus.bloviate.service
 
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
+import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
@@ -219,7 +221,7 @@ class BubbleRecordingControllerTest {
 
         assertEquals(1, fakeSession.stopCallCount)
         assertEquals(1, fakeEngine.transcribeCallCount)
-        assertTrue(fakeEngine.transcribedSamples?.contentEquals(fakeSession.stopResult) == true)
+        assertTrue(fakeEngine.transcribedSamples?.contentEquals(fakeSession.stopResult.samples) == true)
         assertEquals(listOf("hello world"), fakeSink.transcripts)
         assertEquals(RecordingBarState.Done(), controller.barState.value)
 
@@ -277,6 +279,7 @@ class BubbleRecordingControllerTest {
         startRecording(controller)
         fakeEngine.nextTranscript = "capped words"
         val cappedSamples = floatArrayOf(0.9f, 0.8f)
+        fakeSession.stopResult = StopResult(cappedSamples, AutoFinishReason.MAX_LENGTH)
 
         fakeSession.emitAutoStopped(cappedSamples)
         fakeSession.setState(RecordingSessionState.Idle)
@@ -285,18 +288,21 @@ class BubbleRecordingControllerTest {
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertTrue(fakeEngine.transcribedSamples?.contentEquals(cappedSamples) == true)
         assertEquals(listOf("capped words"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+        assertEquals(RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH), controller.barState.value)
     }
 
     @Test
-    fun `a capped recording whose session idle lands first still transcribes exactly once`() = runTest {
+    fun `an auto-finished recording whose session idle lands first still transcribes exactly once`() = runTest {
         // ENC-155: the session-first ordering, forced deterministically —
         // the gate holds the session-side send in Transcribing while the
-        // cap emission lands, so the emission can only confirm, never
-        // re-send. One transcription, and Done names the cap.
+        // emission lands, so the emission is ignored as the same
+        // recording, never re-sent. One transcription, and Done names the
+        // reason the stop result carried.
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeEngine.nextTranscript = "capped words"
+        fakeSession.stopResult =
+            StopResult(floatArrayOf(0.4f, 0.5f), AutoFinishReason.MAX_LENGTH)
         val gate = CompletableDeferred<Unit>()
         fakeEngine.gate = gate
 
@@ -312,37 +318,68 @@ class BubbleRecordingControllerTest {
 
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertEquals(listOf("capped words"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+        assertEquals(RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH), controller.barState.value)
     }
 
     @Test
-    fun `a cap confirmation arriving after done still marks the max length`() = runTest {
-        // ENC-155: the slowest ordering — the session-first send already
-        // reached Done before the cap emission lands. The emission is
-        // the same recording, so it upgrades Done instead of re-sending.
+    fun `a late duplicate auto-finished emission after done does not resend`() = runTest {
+        // ENC-155/ENC-160: the slowest ordering — the session-first send
+        // already reached Done (with its reason) before the emission
+        // lands. The emission is the same recording, so it is ignored.
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeEngine.nextTranscript = "capped words"
+        fakeSession.stopResult =
+            StopResult(floatArrayOf(0.4f, 0.5f), AutoFinishReason.MAX_LENGTH)
 
         fakeSession.setState(RecordingSessionState.Idle)
         runCurrent()
         assertEquals(1, fakeEngine.transcribeCallCount)
-        assertEquals(RecordingBarState.Done(), controller.barState.value)
+        assertEquals(
+            RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH),
+            controller.barState.value,
+        )
 
         fakeSession.emitAutoStopped()
         runCurrent()
 
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertEquals(listOf("capped words"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+        assertEquals(
+            RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH),
+            controller.barState.value,
+        )
     }
 
     @Test
-    fun `a repeated capped emission for finished samples never transcribes twice`() = runTest {
+    fun `a silence auto-finish names the dead air in done`() = runTest {
+        // ENC-160: the reason rides the stop result — dead air lands on
+        // Done(SILENCE), not a plain check.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "trailing thought"
+        val samples = floatArrayOf(0.7f, 0.6f)
+        fakeSession.stopResult = StopResult(samples, AutoFinishReason.SILENCE)
+
+        fakeSession.emitAutoStopped(samples, AutoFinishReason.SILENCE)
+        fakeSession.setState(RecordingSessionState.Idle)
+        runCurrent()
+
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("trailing thought"), fakeSink.transcripts)
+        assertEquals(
+            RecordingBarState.Done(autoFinish = AutoFinishReason.SILENCE),
+            controller.barState.value,
+        )
+    }
+
+    @Test
+    fun `a repeated auto-finished emission for finished samples never transcribes twice`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeEngine.nextTranscript = "capped words"
         val cappedSamples = floatArrayOf(0.9f, 0.8f)
+        fakeSession.stopResult = StopResult(cappedSamples, AutoFinishReason.MAX_LENGTH)
 
         fakeSession.emitAutoStopped(cappedSamples)
         fakeSession.setState(RecordingSessionState.Idle)
@@ -354,7 +391,7 @@ class BubbleRecordingControllerTest {
 
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertEquals(listOf("capped words"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+        assertEquals(RecordingBarState.Done(autoFinish = AutoFinishReason.MAX_LENGTH), controller.barState.value)
     }
 
     @Test
