@@ -12,59 +12,63 @@ class StyleCatalogTest {
     }
 
     @Test
-    fun `talkie is an llm style in the 1920s register`() {
+    fun `transatlantic is an llm style in the 1920s register`() {
         // ENC-102: the era-family entry inspired by Talkie-1930 — a
         // prompt-layer register on the existing chain, not a model.
-        val talkie = StyleCatalog.byId("talkie")
+        // ENC-144: the display name is Transatlantic; the id stays
+        // "talkie" so persisted selections survive the rename.
+        val transatlantic = StyleCatalog.byId("talkie")
 
-        assertEquals("Talkie", talkie.displayName)
-        assertEquals(StyleKind.LLM, talkie.kind)
-        assertTrue(talkie.systemInstructions.contains("1920s"), "talkie names no period register")
+        assertEquals("talkie", transatlantic.id)
+        assertEquals("Transatlantic", transatlantic.displayName)
+        assertEquals(StyleKind.LLM, transatlantic.kind)
+        assertTrue(transatlantic.systemInstructions.contains("1920s"), "transatlantic names no period register")
     }
 
     @Test
-    fun `talkie instructions carry the register-of-the-language directive and the form-only law`() {
+    fun `transatlantic instructions carry the register-of-the-language directive and the form-only law`() {
         // ENC-102's multilingual note: the pass restyles whatever
         // language the transcript is in, in THAT language's 1920s
         // register — never Anglicized. And period flavor is form
         // only: modern referents keep the speaker's names, and no
         // period bigotry the speaker did not use may appear.
-        val talkie = StyleCatalog.byId("talkie")
+        val transatlantic = StyleCatalog.byId("talkie")
 
         assertTrue(
-            talkie.systemInstructions.contains("transcript's own language"),
-            "talkie lacks the register-of-the-language directive",
+            transatlantic.systemInstructions.contains("transcript's own language"),
+            "transatlantic lacks the register-of-the-language directive",
         )
         assertTrue(
-            talkie.systemInstructions.contains("never translate"),
-            "talkie does not forbid translating into English",
+            transatlantic.systemInstructions.contains("never translate"),
+            "transatlantic does not forbid translating into English",
         )
         assertTrue(
-            talkie.systemInstructions.contains("FORM ONLY"),
-            "talkie lacks the form-only law",
+            transatlantic.systemInstructions.contains("FORM ONLY"),
+            "transatlantic lacks the form-only law",
         )
         assertTrue(
-            talkie.systemInstructions.contains("my phone stays my phone"),
-            "talkie does not pin the modern-referent rule",
+            transatlantic.systemInstructions.contains("my phone stays my phone"),
+            "transatlantic does not pin the modern-referent rule",
         )
     }
 
     @Test
-    fun `talkie few-shots restyle casual and technical dictation with facts intact`() {
+    fun `transatlantic few-shots restyle casual and technical dictation with facts intact`() {
         // ENC-102's fixture pairs: a casual dictation whose modern
         // referent survives unnamed-by-costume (the phone stays a
         // phone), and a technical one whose load-bearing facts —
-        // the database migration, the third step — survive the
-        // register untouched.
-        val talkie = StyleCatalog.byId("talkie")
+        // the database migration, the third step, two hours of logs —
+        // survive the register untouched.
+        val transatlantic = StyleCatalog.byId("talkie")
 
-        val casual = talkie.fewShots.first { shot -> shot.raw.contains("phone") }
-        assertTrue(casual.styled.contains("phone"), "talkie renamed the speaker's phone: ${casual.styled}")
-        assertTrue(casual.styled.contains("battery"), "talkie dropped the battery: ${casual.styled}")
+        val casual = transatlantic.fewShots.first { shot -> shot.raw.contains("phone") }
+        assertTrue(casual.styled.contains("phone"), "transatlantic renamed the speaker's phone: ${casual.styled}")
+        assertTrue(casual.styled.contains("battery"), "transatlantic dropped the battery: ${casual.styled}")
 
-        val technical = talkie.fewShots.first { shot -> shot.raw.contains("database") }
-        assertTrue(technical.styled.contains("database migration"), "talkie lost the migration: ${technical.styled}")
-        assertTrue(technical.styled.contains("third step"), "talkie lost the step count: ${technical.styled}")
+        val technical = transatlantic.fewShots.first { shot -> shot.raw.contains("database") }
+        assertTrue(technical.styled.contains("database migration"), "transatlantic lost the migration: ${technical.styled}")
+        assertTrue(technical.styled.contains("third step"), "transatlantic lost the step count: ${technical.styled}")
+        assertTrue(technical.styled.contains("two hours of logs"), "transatlantic lost the logs: ${technical.styled}")
     }
 
     @Test
@@ -128,29 +132,45 @@ class StyleCatalogTest {
     }
 
     @Test
-    fun `talkie clips — a word cap, short declaratives, and the periodic swell forbidden`() {
-        // ENC-104: Sean's ear test found Talkie and The Colonel
-        // indistinguishable — both merely "old." The sharpening
-        // defines Talkie AGAINST the Colonel: sentence architecture,
-        // not vocabulary, is the differentiator, and the mandates
-        // are pinned as instruction content.
-        val talkie = StyleCatalog.byId("talkie")
+    fun `transatlantic speaks the period — diction in the words, length follows the source`() {
+        // ENC-144 retires ENC-104's curtness pins: the 1920s
+        // character lives in diction and idiom, not in chopping
+        // sentences — a clipped sentence WITH period words passes,
+        // a clipped one without them was the failure. Sentence
+        // length and formality follow the source instead.
+        val transatlantic = StyleCatalog.byId("talkie")
 
         assertTrue(
-            talkie.systemInstructions.contains("CLIP, never swell"),
-            "talkie lacks the clip mandate",
+            transatlantic.systemInstructions.contains("copacetic"),
+            "transatlantic lacks period diction",
         )
         assertTrue(
-            talkie.systemInstructions.contains("no sentence runs past twelve words"),
-            "talkie lacks the sentence-length cap",
+            transatlantic.systemInstructions.contains("palooka"),
+            "transatlantic lacks period diction",
         )
         assertTrue(
-            talkie.systemInstructions.contains("NEVER write a periodic sentence"),
-            "talkie does not forbid the Colonel's periodic swell",
+            transatlantic.systemInstructions.contains("bee's knees"),
+            "transatlantic lacks the diction bank",
         )
         assertTrue(
-            talkie.systemInstructions.contains("press room"),
-            "talkie lacks the newsroom idiom directive",
+            transatlantic.systemInstructions.contains("twenty-three skidoo"),
+            "transatlantic lacks the diction bank",
+        )
+        assertTrue(
+            transatlantic.systemInstructions.contains("length follows the source"),
+            "transatlantic lacks the length-follows-source rule",
+        )
+        assertTrue(
+            !transatlantic.systemInstructions.contains("no sentence runs past twelve words"),
+            "transatlantic still carries the twelve-word cap",
+        )
+        assertTrue(
+            !transatlantic.systemInstructions.contains("CLIP, never swell"),
+            "transatlantic still carries the clip mandate",
+        )
+        assertTrue(
+            !transatlantic.systemInstructions.contains("NEVER write a periodic sentence"),
+            "transatlantic still bans the periodic sentence",
         )
     }
 
@@ -180,25 +200,28 @@ class StyleCatalogTest {
     }
 
     @Test
-    fun `talkie and the colonel are minimal pairs over the same dictations`() {
+    fun `transatlantic and the colonel are minimal pairs over the same dictations`() {
         // ENC-104: both era styles restyle the SAME source dictations
         // so the fork between the registers is visible in the
-        // examples themselves — and the architecture difference is
-        // measurable in the outputs: Talkie's sentences all fit the
-        // cap, while every Colonel output carries at least one full
-        // period of twenty words or more.
-        val talkie = StyleCatalog.byId("talkie")
+        // examples themselves. ENC-144: the difference is diction,
+        // not chopping — Transatlantic lets sentences run long when
+        // the source does, while every Colonel output still carries
+        // at least one full period of twenty words or more.
+        val transatlantic = StyleCatalog.byId("talkie")
         val colonel = StyleCatalog.byId("the-colonel")
 
         assertEquals(
-            talkie.fewShots.map { shot -> shot.raw },
+            transatlantic.fewShots.map { shot -> shot.raw },
             colonel.fewShots.map { shot -> shot.raw },
             "the era styles no longer share their source dictations",
         )
-        talkie.fewShots.forEach { shot ->
-            val longest = sentencesOf(shot.styled).maxOf { sentence -> wordCount(sentence) }
-            assertTrue(longest <= 12, "talkie example sentence runs past the cap: ${shot.styled}")
+        val transatlanticLongest = transatlantic.fewShots.maxOf { shot ->
+            sentencesOf(shot.styled).maxOf { sentence -> wordCount(sentence) }
         }
+        assertTrue(
+            transatlanticLongest > 12,
+            "no transatlantic example lets a sentence run long",
+        )
         colonel.fewShots.forEach { shot ->
             val longest = sentencesOf(shot.styled).maxOf { sentence -> wordCount(sentence) }
             assertTrue(longest >= 20, "the colonel example never swells to a period: ${shot.styled}")

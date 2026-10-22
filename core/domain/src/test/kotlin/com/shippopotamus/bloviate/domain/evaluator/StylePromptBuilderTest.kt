@@ -12,7 +12,7 @@ class StylePromptBuilderTest {
     private val professional = StyleCatalog.byId("professional")
     private val seneca = StyleCatalog.byId("seneca")
     private val lowercaseCasual = StyleCatalog.byId("lowercase-casual")
-    private val talkie = StyleCatalog.byId("talkie")
+    private val transatlantic = StyleCatalog.byId("talkie")
 
     @Test
     fun `system message carries the style instructions plus the only-text rule`() {
@@ -92,26 +92,40 @@ class StylePromptBuilderTest {
     }
 
     @Test
-    fun `talkie prompt carries the period register for casual and technical dictation`() {
+    fun `transatlantic prompt carries the period register for casual and technical dictation`() {
         // ENC-102's prompt fixtures through the real builder: the
         // era style's definitional material (1920s register, the
         // register-of-the-language directive, the few-shot pairs)
         // rides the system message for everyday and technical input
         // alike, and both user messages keep the demarcated shape.
+        // ENC-144: the register is vernacular diction, and the
+        // curtness pins ride no prompt anymore.
         listOf(CASUAL_TRANSCRIPT, TECHNICAL_TRANSCRIPT).forEach { transcript ->
-            val prompt = builder.build(style = talkie, transcript = transcript)
+            val prompt = builder.build(style = transatlantic, transcript = transcript)
 
-            assertTrue(prompt.system.content.contains("1920s"), "talkie system lacks the period register")
+            assertTrue(prompt.system.content.contains("1920s"), "transatlantic system lacks the period register")
             assertTrue(
                 prompt.system.content.contains("transcript's own language"),
-                "talkie system lacks the register-of-the-language directive",
+                "transatlantic system lacks the register-of-the-language directive",
             )
-            talkie.fewShots.forEach { shot ->
-                assertTrue(prompt.system.content.contains(shot.raw), "talkie system lacks example input")
-                assertTrue(prompt.system.content.contains(shot.styled), "talkie system lacks example output")
+            assertTrue(
+                prompt.system.content.contains("length follows the source"),
+                "transatlantic system lacks the length-follows-source rule",
+            )
+            assertTrue(
+                !prompt.system.content.contains("no sentence runs past twelve words"),
+                "transatlantic system still carries the sentence cap",
+            )
+            assertTrue(
+                !prompt.system.content.contains("NEVER write a periodic sentence"),
+                "transatlantic system still bans the periodic sentence",
+            )
+            transatlantic.fewShots.forEach { shot ->
+                assertTrue(prompt.system.content.contains(shot.raw), "transatlantic system lacks example input")
+                assertTrue(prompt.system.content.contains(shot.styled), "transatlantic system lacks example output")
             }
-            assertTrue(prompt.user.content.contains("<transcript>"), "talkie user message lacks markers")
-            assertTrue(prompt.user.content.contains(transcript), "talkie user message lacks the transcript")
+            assertTrue(prompt.user.content.contains("<transcript>"), "transatlantic user message lacks markers")
+            assertTrue(prompt.user.content.contains(transcript), "transatlantic user message lacks the transcript")
         }
     }
 
@@ -149,25 +163,34 @@ class StylePromptBuilderTest {
     }
 
     @Test
-    fun `the same transcript through both era styles carries opposite architecture mandates`() {
+    fun `the same transcript through both era styles carries diction against period`() {
         // ENC-104: the contrast lives in the assembled prompts, not
-        // just the catalog data — one transcript through Talkie
-        // carries the clip mandate and the ban on the periodic
-        // sentence; through The Colonel it carries the periodic
-        // mandate and the ban on clipping. Both keep the demarcated
-        // shape.
+        // just the catalog data. ENC-144: the fork is diction, not
+        // architecture — one transcript through Transatlantic
+        // carries the vernacular diction bank and the
+        // length-follows-source rule; through The Colonel it carries
+        // the periodic mandate and the ban on clipping. Both keep
+        // the demarcated shape.
         val colonel = StyleCatalog.byId("the-colonel")
 
-        val talkiePrompt = builder.build(style = talkie, transcript = TRANSCRIPT)
+        val transatlanticPrompt = builder.build(style = transatlantic, transcript = TRANSCRIPT)
         assertTrue(
-            talkiePrompt.system.content.contains("no sentence runs past twelve words"),
-            "talkie prompt lacks the sentence cap",
+            transatlanticPrompt.system.content.contains("on the level"),
+            "transatlantic prompt lacks the diction bank",
         )
         assertTrue(
-            talkiePrompt.system.content.contains("NEVER write a periodic sentence"),
-            "talkie prompt lacks the ban on the periodic swell",
+            transatlanticPrompt.system.content.contains("length follows the source"),
+            "transatlantic prompt lacks the length-follows-source rule",
         )
-        assertDemarcatedShape(talkiePrompt, talkie)
+        assertTrue(
+            !transatlanticPrompt.system.content.contains("no sentence runs past twelve words"),
+            "transatlantic prompt still carries the sentence cap",
+        )
+        assertTrue(
+            !transatlanticPrompt.system.content.contains("NEVER write a periodic sentence"),
+            "transatlantic prompt still bans the periodic swell",
+        )
+        assertDemarcatedShape(transatlanticPrompt, transatlantic)
 
         val colonelPrompt = builder.build(style = colonel, transcript = TRANSCRIPT)
         assertTrue(
