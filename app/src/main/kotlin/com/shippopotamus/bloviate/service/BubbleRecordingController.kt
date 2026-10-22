@@ -5,6 +5,7 @@ import android.util.Log
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.evaluator.WaveformHistory
+import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
@@ -44,9 +45,10 @@ import kotlinx.coroutines.withContext
  *
  * Interaction model (Sean's design, ENC-48): tap the mic bubble to start,
  * tap the bar's X to cancel, tap the bar's check to stop + transcribe.
- * There is no hold-to-talk. Recordings the session's ~3 minute hard cap
- * finishes arrive on [RecordingSessionPort.autoStoppedRecordings] and take
- * the same send path as a check tap.
+ * There is no hold-to-talk. Recordings the session auto-finishes
+ * (dead air, safety backstop) arrive on
+ * [RecordingSessionPort.autoStoppedRecordings] and take the same send
+ * path as a check tap, with the reason riding into Done.
  *
  * Failure keeps the stopped samples for one retry (`ARCHITECTURE_RULES.md`
  * §5.3): while the Error state is up, tapping the bubble re-runs the send
@@ -127,31 +129,23 @@ class BubbleRecordingController(
     /**
      * ENC-155: whether this controller has seen an active recording the
      * send pipeline has not yet consumed. The bar state cannot answer
-     * that — the session publishes Idle before the cap emission lands,
-     * so a session-first ordering parks the bar at Idle while the
-     * capped samples are still in flight. Gating the cap path on the
-     * bar alone is what silently dropped every other capped dictation.
+     * that — the session publishes Idle before the auto-finish emission
+     * lands, so a session-first ordering parks the bar at Idle while the
+     * auto-finished samples are still in flight. Gating the auto-finish
+     * path on the bar alone is what silently dropped every other
+     * auto-finished dictation.
      */
     private var recordingSeen: Boolean = false
 
     /**
      * ENC-155: samples already handed to (or through) the send pipeline,
-     * by reference. A cap finishes through two triggers — the session's
-     * Idle (consumed via [RecordingSessionPort.stop]) and the
-     * auto-stopped emission — carrying the same array; whichever lands
-     * second is the same recording, not a second send. Cleared when the
-     * bar settles back to Idle.
+     * by reference. An auto-finish arrives through two triggers — the
+     * session's Idle (consumed via [RecordingSessionPort.stop]) and the
+     * auto-stopped emission — carrying the same array and the same
+     * reason; whichever lands second is the same recording, not a second
+     * send. Cleared when the bar settles back to Idle.
      */
     private var finishedSamples: FloatArray? = null
-
-    /**
-     * ENC-155: set when the session ends under a live bar (a cap or a
-     * capture end the bar did not ask for). A cap confirmation arriving
-     * while that send is in flight flips [capConfirmed] instead of
-     * starting a second send, so the Done state still names the cap.
-     */
-    private var expectingCapConfirmation: Boolean = false
-    private var capConfirmed: Boolean = false
 
     init {
         sessionCollectJob = scope.launch { collectSessionState() }
@@ -209,8 +203,6 @@ class BubbleRecordingController(
         waveform.clear()
         recordingSeen = false
         finishedSamples = null
-        expectingCapConfirmation = false
-        capConfirmed = false
         mutableBarState.update { RecordingBarState.Idle }
         Log.d(TAG, "Recording cancelled from the bar; buffered audio discarded by the user")
     }
@@ -220,14 +212,12 @@ class BubbleRecordingController(
         if (mutableBarState.value !is RecordingBarState.Recording) return
         cancelResetJob()
         recordingSeen = false
-        expectingCapConfirmation = false
-        capConfirmed = false
         mutableBarState.update { RecordingBarState.Transcribing }
         pipelineJob = scope.launch {
             try {
-                val samples = withContext(workDispatcher) { session.stop() }
-                finishedSamples = samples
-                transcribeAndFinish(samples, stoppedAtMs = nowMs())
+                val result = withContext(workDispatcher) { session.stop() }
+                finishedSamples = result.samples
+                transcribeAndFinish(result.samples, stoppedAtMs = nowMs(), autoFinish = result.autoFinish)
             } catch (exception: CancellationException) {
                 throw exception
             } catch (exception: Exception) {
@@ -261,8 +251,6 @@ class BubbleRecordingController(
             retainedSamples = null
             recordingSeen = false
             finishedSamples = null
-            expectingCapConfirmation = false
-            capConfirmed = false
             when (mutableBarState.value) {
                 is RecordingBarState.Recording -> {
                     session.cancel()
@@ -286,21 +274,22 @@ class BubbleRecordingController(
         when (val bar = mutableBarState.value) {
             is RecordingBarState.Recording -> {
                 waveform.clear()
-                expectingCapConfirmation = true
-                capConfirmed = false
                 mutableBarState.update { RecordingBarState.Transcribing }
                 Log.d(TAG, "Host hidden by a non-password cause while recording; finishing via stop()")
                 pipelineJob = scope.launch {
                     try {
-                        val samples = withContext(workDispatcher) { session.stop() }
+                        val result = withContext(workDispatcher) { session.stop() }
                         recordingSeen = false
-                        finishedSamples = samples
-                        transcribeAndFinish(samples, stoppedAtMs = nowMs())
+                        finishedSamples = result.samples
+                        transcribeAndFinish(
+                            result.samples,
+                            stoppedAtMs = nowMs(),
+                            autoFinish = result.autoFinish,
+                        )
                     } catch (exception: CancellationException) {
                         throw exception
                     } catch (exception: Exception) {
                         recordingSeen = false
-                        expectingCapConfirmation = false
                         Log.w(TAG, "Non-password hide found no samples to send; returning to idle", exception)
                         mutableBarState.update { RecordingBarState.Idle }
                     }
@@ -396,32 +385,34 @@ class BubbleRecordingController(
                         CadenceCounters.end()
                     }
                     // ENC-155: the session ended under a live bar the bar's
-                    // buttons did not stop — the hard cap, or a capture
-                    // failure. That is the SAME single finish path as a
-                    // check tap: pull the stopped samples via stop() (for a
-                    // cap, the trimmed samples the auto-stopped emission
-                    // also carries) and run the send pipeline. Falling
-                    // straight back to Idle here is what silently dropped
-                    // capped dictations whenever this collector won the
-                    // race against the cap emission.
+                    // buttons did not stop — an auto-finish (dead air or
+                    // the safety backstop), or a capture failure. That is
+                    // the SAME single finish path as a check tap: pull the
+                    // stopped samples via stop() (for an auto-finish, the
+                    // trimmed samples the auto-stopped emission also
+                    // carries, with the reason attached) and run the send
+                    // pipeline. Falling straight back to Idle here is what
+                    // silently dropped auto-finished dictations whenever
+                    // this collector won the race against the emission.
                     if (mutableBarState.value is RecordingBarState.Recording) {
                         waveform.clear()
                         cancelResetJob()
-                        expectingCapConfirmation = true
-                        capConfirmed = false
                         mutableBarState.update { RecordingBarState.Transcribing }
                         pipelineJob = scope.launch {
                             try {
-                                val samples = withContext(workDispatcher) { session.stop() }
+                                val result = withContext(workDispatcher) { session.stop() }
                                 recordingSeen = false
-                                finishedSamples = samples
+                                finishedSamples = result.samples
                                 Log.d(TAG, "Session ended under a live bar; sending via stop()")
-                                transcribeAndFinish(samples, stoppedAtMs = nowMs())
+                                transcribeAndFinish(
+                                    result.samples,
+                                    stoppedAtMs = nowMs(),
+                                    autoFinish = result.autoFinish,
+                                )
                             } catch (exception: CancellationException) {
                                 throw exception
                             } catch (exception: Exception) {
                                 recordingSeen = false
-                                expectingCapConfirmation = false
                                 Log.w(
                                     TAG,
                                     "Session ended without samples while recording " +
@@ -458,68 +449,42 @@ class BubbleRecordingController(
     }
 
     /**
-     * ENC-155: the hard-cap trigger. A capped recording reaches
-     * transcription unconditionally — the gate is the pipeline, never
-     * the bar state. The session publishes Idle before this emission
-     * lands, so a session-first ordering parks the bar at
+     * ENC-155: the auto-finish trigger. An auto-finished recording
+     * reaches transcription unconditionally — the gate is the pipeline,
+     * never the bar state. The session publishes Idle before this
+     * emission lands, so a session-first ordering parks the bar at
      * [RecordingBarState.Transcribing] (via [collectSessionState]'s
      * stop path) while these samples are still in flight; that arrival
-     * is the same recording, confirmed as a cap — not a second send.
+     * carries the same array and the same reason — not a second send.
      * Every outcome is logged; silently discarding captured audio from
      * this path is impossible.
      */
     private suspend fun collectAutoStopped() {
-        session.autoStoppedRecordings.collect { samples ->
-            if (samples === finishedSamples) {
-                val wasExpected = expectingCapConfirmation
-                expectingCapConfirmation = false
-                val bar = mutableBarState.value
-                if (bar is RecordingBarState.Done && !bar.capped) {
-                    mutableBarState.update { RecordingBarState.Done(capped = true) }
-                    Log.d(TAG, "Cap confirmation arrived after Done; marking the max-length send")
-                } else if (
-                    (bar is RecordingBarState.Transcribing || bar is RecordingBarState.Polishing) &&
-                    wasExpected
-                ) {
-                    capConfirmed = true
-                    Log.d(TAG, "Cap confirmed for the in-flight send; Done will name the max length")
-                } else {
-                    Log.d(TAG, "Duplicate capped emission for samples already in the send path; ignoring")
-                }
+        session.autoStoppedRecordings.collect { result ->
+            if (result.samples === finishedSamples) {
+                Log.d(TAG, "Duplicate auto-finished emission for samples already in the send path; ignoring")
                 return@collect
             }
             val bar = mutableBarState.value
-            if (
-                (bar is RecordingBarState.Transcribing || bar is RecordingBarState.Polishing) &&
-                expectingCapConfirmation
-            ) {
-                expectingCapConfirmation = false
-                capConfirmed = true
-                Log.d(TAG, "Cap confirmed for the in-flight send; Done will name the max length")
-                return@collect
-            }
             if (bar is RecordingBarState.Transcribing || bar is RecordingBarState.Polishing) {
-                Log.w(TAG, "Capped recording arrived while a send is already running; ignoring the duplicate")
+                Log.w(TAG, "Auto-finished recording arrived while a send is already running; ignoring the duplicate")
                 return@collect
             }
             if (bar is RecordingBarState.Done || bar is RecordingBarState.Error) {
-                expectingCapConfirmation = false
-                Log.w(TAG, "Capped recording arrived after the send finished; ignoring")
+                Log.w(TAG, "Auto-finished recording arrived after the send finished; ignoring")
                 return@collect
             }
             if (bar is RecordingBarState.Recording || recordingSeen) {
-                Log.d(TAG, "Hard cap reached; sending the auto-stopped recording")
+                Log.d(TAG, "Auto-finish (${result.autoFinish}); sending the auto-stopped recording")
                 recordingSeen = false
-                expectingCapConfirmation = false
-                capConfirmed = false
-                finishedSamples = samples
+                finishedSamples = result.samples
                 cancelResetJob()
                 mutableBarState.update { RecordingBarState.Transcribing }
                 pipelineJob = scope.launch {
-                    transcribeAndFinish(samples, stoppedAtMs = nowMs(), capped = true)
+                    transcribeAndFinish(result.samples, stoppedAtMs = nowMs(), autoFinish = result.autoFinish)
                 }
             } else {
-                Log.w(TAG, "Capped recording arrived with no active recording; ignoring")
+                Log.w(TAG, "Auto-finished recording arrived with no active recording; ignoring")
             }
         }
     }
@@ -544,7 +509,7 @@ class BubbleRecordingController(
         samples: FloatArray,
         stoppedAtMs: Long,
         isRetry: Boolean = false,
-        capped: Boolean = false,
+        autoFinish: AutoFinishReason? = null,
     ) {
         try {
             val engineName = (
@@ -583,7 +548,7 @@ class BubbleRecordingController(
             if (cleaned.isBlank()) {
                 Log.d(TAG, "Transcript was empty after cleanup; nothing to insert")
                 retainedSamples = null
-                showDone(capped = capped || capConfirmed)
+                showDone(autoFinish = autoFinish)
                 return
             }
             val result = transcriptSink.onTranscript(cleaned)
@@ -596,7 +561,7 @@ class BubbleRecordingController(
             when (result) {
                 is InsertionResult.Inserted -> {
                     retainedSamples = null
-                    showDone(capped = capped || capConfirmed)
+                    showDone(autoFinish = autoFinish)
                 }
                 is InsertionResult.Refused -> {
                     Log.w(TAG, "Insertion refused: ${result.reason}")
@@ -642,9 +607,9 @@ class BubbleRecordingController(
         }
     }
 
-    private fun showDone(capped: Boolean = false) {
-        mutableBarState.update { RecordingBarState.Done(capped = capped) }
-        Log.d(TAG, "Send finished; showing Done (capped=$capped)")
+    private fun showDone(autoFinish: AutoFinishReason? = null) {
+        mutableBarState.update { RecordingBarState.Done(autoFinish = autoFinish) }
+        Log.d(TAG, "Send finished; showing Done (autoFinish=$autoFinish)")
         scheduleReset(doneDisplayMs)
     }
 
@@ -674,8 +639,6 @@ class BubbleRecordingController(
             }
             recordingSeen = false
             finishedSamples = null
-            expectingCapConfirmation = false
-            capConfirmed = false
             mutableBarState.update { RecordingBarState.Idle }
         }
     }

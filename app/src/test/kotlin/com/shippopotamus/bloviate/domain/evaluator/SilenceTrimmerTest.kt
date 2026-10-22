@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -80,5 +81,23 @@ class SilenceTrimmerTest {
         val trimmed = SilenceTrimmer.trim(samples)
         assertEquals(6_400, trimmed.size)
         assertTrue(trimmed.contentEquals(samples))
+    }
+
+    @Test
+    fun `containsSpeech is false for empty and silent input`() {
+        assertFalse(SilenceTrimmer.containsSpeech(FloatArray(0)))
+        assertFalse(SilenceTrimmer.containsSpeech(FloatArray(3_200) { 0f }))
+    }
+
+    @Test
+    fun `containsSpeech is false for below-threshold noise`() {
+        assertFalse(SilenceTrimmer.containsSpeech(FloatArray(3_200) { 0.01f }))
+    }
+
+    @Test
+    fun `containsSpeech is true when any frame reaches the threshold`() {
+        // One loud 10 ms frame in 200 ms of silence still counts as voice.
+        val samples = FloatArray(3_200) { index -> if (index < 160) 0.5f else 0f }
+        assertTrue(SilenceTrimmer.containsSpeech(samples))
     }
 }

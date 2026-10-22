@@ -45,11 +45,12 @@ sealed interface RecordingBarState {
 
     /**
      * Transcription succeeded; the brief check affordance before returning to [Idle].
-     * [capped] marks a recording finished by the ~3 minute hard cap (ENC-155):
-     * the send path is identical, but the bubble names the cap so an
-     * auto-send never reads as a crash.
+     * [autoFinish] marks a recording the session finished on its own
+     * (ENC-155, ENC-160): the send path is identical, but the bubble names
+     * the reason so an auto-send never reads as a crash, and a manual stop
+     * stays a plain check.
      */
-    data class Done(val capped: Boolean = false) : RecordingBarState
+    data class Done(val autoFinish: AutoFinishReason? = null) : RecordingBarState
 
     /** Something failed (or a tap landed while the session is unavailable); brief error flash. */
     data object Error : RecordingBarState
