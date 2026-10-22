@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
-import com.shippopotamus.bloviate.domain.port.SendProgressPort
-import com.shippopotamus.bloviate.domain.port.SendStage
+import com.shippopotamus.bloviate.application.port.SendProgressPort
+import com.shippopotamus.bloviate.application.port.SendStage
 
 /**
  * Hand-written fake of [SendProgressPort]: records every reported stage

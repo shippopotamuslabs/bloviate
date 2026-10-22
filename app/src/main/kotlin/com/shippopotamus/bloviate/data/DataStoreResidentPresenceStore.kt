@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import com.shippopotamus.bloviate.domain.model.ResidentPresenceState
-import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
+import com.shippopotamus.bloviate.application.port.ResidentPresencePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

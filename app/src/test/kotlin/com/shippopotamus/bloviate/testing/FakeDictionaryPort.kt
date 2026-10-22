@@ -2,7 +2,7 @@ package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.DictionaryEditResult
 import com.shippopotamus.bloviate.domain.model.PersonalDictionary
-import com.shippopotamus.bloviate.domain.port.DictionaryPort
+import com.shippopotamus.bloviate.application.port.DictionaryPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

@@ -3,11 +3,11 @@ package com.shippopotamus.bloviate.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.domain.model.DictionaryEditResult
-import com.shippopotamus.bloviate.domain.usecase.AddDictionaryCorrectionUseCase
-import com.shippopotamus.bloviate.domain.usecase.AddDictionaryWordUseCase
-import com.shippopotamus.bloviate.domain.usecase.ObserveDictionaryUseCase
-import com.shippopotamus.bloviate.domain.usecase.RemoveDictionaryCorrectionUseCase
-import com.shippopotamus.bloviate.domain.usecase.RemoveDictionaryWordUseCase
+import com.shippopotamus.bloviate.application.usecase.AddDictionaryCorrectionUseCase
+import com.shippopotamus.bloviate.application.usecase.AddDictionaryWordUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveDictionaryUseCase
+import com.shippopotamus.bloviate.application.usecase.RemoveDictionaryCorrectionUseCase
+import com.shippopotamus.bloviate.application.usecase.RemoveDictionaryWordUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted

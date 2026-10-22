@@ -2,7 +2,7 @@ package com.shippopotamus.bloviate.data
 
 import android.content.Context
 import android.os.PowerManager
-import com.shippopotamus.bloviate.domain.port.BatteryExemptionPort
+import com.shippopotamus.bloviate.application.port.BatteryExemptionPort
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton

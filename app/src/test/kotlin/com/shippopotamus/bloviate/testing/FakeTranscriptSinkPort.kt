@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.InsertionResult
-import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
+import com.shippopotamus.bloviate.application.port.TranscriptSinkPort
 
 /**
  * Hand-written fake of [TranscriptSinkPort]; collects every delivered

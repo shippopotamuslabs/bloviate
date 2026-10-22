@@ -7,9 +7,9 @@ import com.shippopotamus.bloviate.domain.evaluator.StyleOutputGuard
 import com.shippopotamus.bloviate.domain.evaluator.StylePrompt
 import com.shippopotamus.bloviate.domain.evaluator.StylePromptBuilder
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
-import com.shippopotamus.bloviate.domain.port.ApiKeyPort
-import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
-import com.shippopotamus.bloviate.domain.port.LlmStylePort
+import com.shippopotamus.bloviate.application.port.ApiKeyPort
+import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.application.port.LlmStylePort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope

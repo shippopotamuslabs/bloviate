@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.DictationEngine
-import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
+import com.shippopotamus.bloviate.application.port.EnginePreferencePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
