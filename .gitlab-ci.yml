@@ -79,6 +79,18 @@ stages:
       - .ci-gradle-home/wrapper/
   before_script:
     - chmod +x gradlew
+    # Self-heal a corrupt `android` CLI bundle (2026-10-22: the deprecated
+    # sdkmanager shim bootstraps the new CLI into $ANDROID_USER_HOME/cli and
+    # a partial download left a JVM-less skeleton behind, failing every job
+    # with a missing libjvm.so). Only bundles without a JVM are removed;
+    # the CLI re-downloads a fresh one on next use.
+    - |
+      for bundle in "$CI_PROJECT_DIR/../ci-home/android-home/cli/bundles/"*/; do
+        if [ -d "$bundle" ] && [ ! -f "$bundle/jre/lib/server/libjvm.so" ]; then
+          echo "Removing corrupt android CLI bundle: $bundle"
+          rm -rf "$bundle"
+        fi
+      done
     # Shell executor runs non-login shells that may not carry ANDROID_HOME/PATH;
     # fall back to the home-server SDK location so sdkmanager/adb resolve.
     - export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
