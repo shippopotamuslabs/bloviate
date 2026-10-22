@@ -7,8 +7,20 @@ import org.junit.jupiter.api.Test
 class StyleCatalogTest {
 
     @Test
-    fun `the catalog holds exactly eleven styles`() {
-        assertEquals(11, StyleCatalog.ALL.size)
+    fun `the catalog holds exactly twenty-six styles`() {
+        assertEquals(26, StyleCatalog.ALL.size)
+    }
+
+    @Test
+    fun `every godflow persona resolves by id`() {
+        listOf(
+            "polish", "cicero", "shakespeare", "hemingway", "dickens",
+            "noir-detective", "attenborough", "drill-sergeant", "town-crier", "pirate",
+            "corporate-linkedin", "legal-contract", "academic-jargon", "gen-z-brainrot", "belligerent",
+        ).forEach { id ->
+            assertEquals(id, StyleCatalog.byId(id).id, "godflow persona $id does not resolve")
+            assertEquals(StyleKind.LLM, StyleCatalog.byId(id).kind, "godflow persona $id is not LLM")
+        }
     }
 
     @Test
@@ -290,8 +302,12 @@ class StyleCatalogTest {
         // exemption is guarded by the dedicated Marcus test below;
         // every other style, Seneca and Aristotle included, stays
         // under the full audit.
+        // GodFlow exemptions — drill-sergeant and belligerent ONLY, by design
+        // (ENC-176/ENC-185): second-person address is the recorded joke/register
+        // for those two styles, pinned in their own definition tests. Every
+        // other style stays under the full audit, as with Marcus Aurelius above.
         StyleCatalog.ALL
-            .filter { style -> style.id != "marcus-aurelius" }
+            .filter { style -> style.id !in setOf("marcus-aurelius", "drill-sergeant", "belligerent") }
             .forEach { style ->
                 style.fewShots.forEach { shot ->
                     if (SECOND_PERSON.containsMatchIn(shot.styled)) {
