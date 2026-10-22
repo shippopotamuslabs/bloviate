@@ -169,7 +169,7 @@ internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize>
         RecordingBarState.Idle,
         RecordingBarState.Transcribing,
         RecordingBarState.Polishing,
-        RecordingBarState.Done,
+        is RecordingBarState.Done,
         RecordingBarState.Error,
         -> BAR_MORPH_SPRING
     }
@@ -252,7 +252,7 @@ fun BubbleContent(
     val renderParams = remember(appearance) { BubbleAppearanceMath.renderParams(appearance) }
     LaunchedEffect(barState) {
         val displayMs = when (barState) {
-            RecordingBarState.Done -> DONE_DISPLAY_MS
+            is RecordingBarState.Done -> DONE_DISPLAY_MS
             RecordingBarState.Error -> ERROR_DISPLAY_MS
             RecordingBarState.Idle,
             is RecordingBarState.Recording,
@@ -314,7 +314,8 @@ fun BubbleContent(
                 appearance = appearance,
                 renderParams = renderParams,
             )
-            RecordingBarState.Done -> DoneBubble(
+            is RecordingBarState.Done -> DoneBubble(
+                capped = barState.capped,
                 appearance = appearance,
                 renderParams = renderParams,
             )
@@ -544,7 +545,7 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
     RecordingBarState.Polishing -> R.string.bubble_stage_polishing
     RecordingBarState.Idle,
     is RecordingBarState.Recording,
-    RecordingBarState.Done,
+    is RecordingBarState.Done,
     RecordingBarState.Error,
     -> null
 }
@@ -655,11 +656,16 @@ private fun ShimmerText(
 
 @Composable
 private fun DoneBubble(
+    capped: Boolean,
     appearance: BubbleAppearance,
     renderParams: BubbleRenderParams,
     modifier: Modifier = Modifier,
 ) {
-    val description = stringResource(R.string.bubble_done_description)
+    // ENC-155: a cap auto-send lands on the same Done check, but names
+    // the max length so the stop never reads as a crash.
+    val description = stringResource(
+        if (capped) R.string.bubble_done_capped_description else R.string.bubble_done_description,
+    )
     val semantic = BloviateColors.extended.semantic
     Surface(
         modifier = modifier
@@ -959,7 +965,20 @@ private fun BubbleContentPolishingPreview() {
 private fun BubbleContentDonePreview() {
     PreviewTheme {
         BubbleContent(
-            barState = RecordingBarState.Done,
+            barState = RecordingBarState.Done(),
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Done capped", showBackground = true)
+@Composable
+private fun BubbleContentDoneCappedPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.Done(capped = true),
             waveformLevels = { emptyList() },
             inDismissZone = false,
         )

@@ -43,8 +43,13 @@ sealed interface RecordingBarState {
      */
     data object Polishing : RecordingBarState
 
-    /** Transcription succeeded; the brief check affordance before returning to [Idle]. */
-    data object Done : RecordingBarState
+    /**
+     * Transcription succeeded; the brief check affordance before returning to [Idle].
+     * [capped] marks a recording finished by the ~3 minute hard cap (ENC-155):
+     * the send path is identical, but the bubble names the cap so an
+     * auto-send never reads as a crash.
+     */
+    data class Done(val capped: Boolean = false) : RecordingBarState
 
     /** Something failed (or a tap landed while the session is unavailable); brief error flash. */
     data object Error : RecordingBarState

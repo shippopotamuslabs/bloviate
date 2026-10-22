@@ -221,7 +221,7 @@ class BubbleRecordingControllerTest {
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertTrue(fakeEngine.transcribedSamples?.contentEquals(fakeSession.stopResult) == true)
         assertEquals(listOf("hello world"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
 
         advanceTimeBy(DONE_DISPLAY_MS)
         runCurrent()
@@ -285,7 +285,92 @@ class BubbleRecordingControllerTest {
         assertEquals(1, fakeEngine.transcribeCallCount)
         assertTrue(fakeEngine.transcribedSamples?.contentEquals(cappedSamples) == true)
         assertEquals(listOf("capped words"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+    }
+
+    @Test
+    fun `a capped recording whose session idle lands first still transcribes exactly once`() = runTest {
+        // ENC-155: the session-first ordering, forced deterministically —
+        // the gate holds the session-side send in Transcribing while the
+        // cap emission lands, so the emission can only confirm, never
+        // re-send. One transcription, and Done names the cap.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "capped words"
+        val gate = CompletableDeferred<Unit>()
+        fakeEngine.gate = gate
+
+        fakeSession.setState(RecordingSessionState.Idle)
+        runCurrent()
+        assertEquals(RecordingBarState.Transcribing, controller.barState.value)
+        assertEquals(1, fakeEngine.transcribeCallCount)
+
+        fakeSession.emitAutoStopped()
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("capped words"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+    }
+
+    @Test
+    fun `a cap confirmation arriving after done still marks the max length`() = runTest {
+        // ENC-155: the slowest ordering — the session-first send already
+        // reached Done before the cap emission lands. The emission is
+        // the same recording, so it upgrades Done instead of re-sending.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "capped words"
+
+        fakeSession.setState(RecordingSessionState.Idle)
+        runCurrent()
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
+
+        fakeSession.emitAutoStopped()
+        runCurrent()
+
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("capped words"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+    }
+
+    @Test
+    fun `a repeated capped emission for finished samples never transcribes twice`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "capped words"
+        val cappedSamples = floatArrayOf(0.9f, 0.8f)
+
+        fakeSession.emitAutoStopped(cappedSamples)
+        fakeSession.setState(RecordingSessionState.Idle)
+        runCurrent()
+        assertEquals(1, fakeEngine.transcribeCallCount)
+
+        fakeSession.emitAutoStopped(cappedSamples)
+        runCurrent()
+
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("capped words"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(capped = true), controller.barState.value)
+    }
+
+    @Test
+    fun `a session ending with no samples while recording returns the bar to idle`() = runTest {
+        // ENC-155: a cancelled session has nothing to send — the bar
+        // falls back to Idle, and the discard is logged, not silent.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSession.stopFailure = IllegalStateException("nothing active")
+
+        fakeSession.setState(RecordingSessionState.Idle)
+        runCurrent()
+
+        assertEquals(0, fakeEngine.transcribeCallCount)
+        assertTrue(fakeSink.transcripts.isEmpty())
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
     }
 
     @Test
@@ -336,14 +421,19 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `the session ending externally while recording returns the bar to idle`() = runTest {
+    fun `the session ending externally while recording finishes the send`() = runTest {
+        // ENC-155: a session end under a live bar is a finish, not a
+        // drop — the stopped samples take the same send path as a tap.
         val controller = createController(backgroundScope)
         startRecording(controller)
+        fakeEngine.nextTranscript = "capture tail"
 
         fakeSession.setState(RecordingSessionState.Idle)
         runCurrent()
 
-        assertEquals(RecordingBarState.Idle, controller.barState.value)
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("capture tail"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -372,7 +462,7 @@ class BubbleRecordingControllerTest {
         fakeEngine.nextTranscript = "hello world"
         controller.onSendTap()
         runCurrent()
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
 
         // The composition's backstop (ENC-65): no virtual time passes, yet
         // the bubble must not strand on the check.
@@ -420,7 +510,7 @@ class BubbleRecordingControllerTest {
 
         assertEquals(listOf("um hello world"), fakePostProcessor.inputs)
         assertEquals(listOf("Hello world"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -434,7 +524,7 @@ class BubbleRecordingControllerTest {
         runCurrent()
 
         assertTrue(fakeSink.transcripts.isEmpty())
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -482,7 +572,7 @@ class BubbleRecordingControllerTest {
 
         assertEquals(2, fakeEngine.transcribeCallCount)
         assertEquals(2, fakeSink.transcripts.size)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -501,7 +591,7 @@ class BubbleRecordingControllerTest {
 
         assertEquals(2, fakeEngine.transcribeCallCount)
         assertEquals(listOf("hello world"), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -593,17 +683,17 @@ class BubbleRecordingControllerTest {
         runCurrent()
 
         assertEquals(listOf("Polished words."), fakeSink.transcripts)
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
         val stages = emissions.filter {
             it == RecordingBarState.Transcribing ||
                 it == RecordingBarState.Polishing ||
-                it == RecordingBarState.Done
+                it == RecordingBarState.Done()
         }
         assertEquals(
             listOf(
                 RecordingBarState.Transcribing,
                 RecordingBarState.Polishing,
-                RecordingBarState.Done,
+                RecordingBarState.Done(),
             ),
             stages,
         )
@@ -621,7 +711,7 @@ class BubbleRecordingControllerTest {
         controller.onSendTap()
         runCurrent()
 
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
         assertTrue(emissions.contains(RecordingBarState.Transcribing))
         assertTrue(!emissions.contains(RecordingBarState.Polishing), "got $emissions")
         assertEquals(0, fakeLlm.callCount)
@@ -638,7 +728,7 @@ class BubbleRecordingControllerTest {
         controller.onSendTap()
         runCurrent()
 
-        assertEquals(RecordingBarState.Done, controller.barState.value)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
         assertTrue(!emissions.contains(RecordingBarState.Polishing), "got $emissions")
         assertEquals(0, fakeLlm.callCount)
     }
