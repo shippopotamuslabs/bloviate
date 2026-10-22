@@ -63,6 +63,22 @@ class BubbleVisibilityReducerTest {
     }
 
     @Test
+    fun `the decision snapshot names the focus and keyboard signals`() {
+        // ENC-145: one repro line identifies the stuck signal.
+        val idle = reducer.describeStateForLog()
+        assertTrue(idle.contains("focus=NoEditableFocus"))
+        assertTrue(idle.contains("keyboardVisible=false"))
+        assertTrue(idle.contains("bubbleVisible=false"))
+
+        reducer.onKeyboardVisibilityChanged(true)
+        reducer.onFocusState(FieldFocusState.EditableFocus(PACKAGE_A))
+        val showing = reducer.describeStateForLog()
+        assertTrue(showing.contains("EditableFocus"))
+        assertTrue(showing.contains("keyboardVisible=true"))
+        assertTrue(showing.contains("bubbleVisible=true"))
+    }
+
+    @Test
     fun `only a password focus reads as a password hide`() {
         // ENC-156: the sink hardens on this — a shade-peek focus-loss
         // must never cancel a recording.

@@ -73,4 +73,11 @@ class ObserveBubbleVisibilityUseCase @Inject constructor(
     fun reset() {
         reducer.reset()
     }
+
+    /**
+     * One-line snapshot of the visibility machine's inputs and belief
+     * for decision logging (ENC-145). See
+     * [BubbleVisibilityReducer.describeStateForLog].
+     */
+    fun describeStateForLog(): String = reducer.describeStateForLog()
 }

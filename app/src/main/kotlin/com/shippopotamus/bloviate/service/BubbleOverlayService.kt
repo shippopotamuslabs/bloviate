@@ -485,7 +485,15 @@ class BubbleOverlayService : Service() {
         // here and is applied like any other command (it terminates:
         // applying it removes the window, so the nested report agrees).
         val windowPresent = bubbleView != null
-        Log.d(TAG, "visibility command $command applied; window present: $windowPresent")
+        // ENC-145: the machine's inputs ride every command line, so a
+        // device repro where the bubble never appears (or never hides)
+        // resolves to the exact stuck signal — focus, keyboard, bar
+        // exemption, dismissal suppression, or belief — without guessing.
+        Log.d(
+            TAG,
+            "visibility command $command applied; " +
+                "${observeBubbleVisibility.describeStateForLog()}; window present: $windowPresent",
+        )
         val corrective = observeBubbleVisibility.onWindowPresenceChanged(windowPresent)
         if (corrective != null) {
             Log.d(TAG, "visibility reconcile: window present but not desired; applying $corrective")
@@ -599,22 +607,36 @@ class BubbleOverlayService : Service() {
         serviceScope.launch { applyCommand(command) }
     }
 
-    /** Apply the persisted (or default) position once the view has been measured. */
+    /**
+     * Apply the persisted (or default) position once the view is attached.
+     * The anchor is re-derived against the bubble's own appearance size in
+     * the CURRENT bounds (ENC-145) — never the live view size, which can
+     * report a transient (zero or pre-posture) width on the first layout
+     * after a fold/unfold and resolve the show off-screen. Every later
+     * repositioning (reclamp) already uses this same size, so the show
+     * lands exactly where the bubble will rest.
+     */
     private suspend fun restorePosition(view: ComposeView, params: WindowManager.LayoutParams) {
         val saved = observeBubblePosition().first() ?: BubblePosition.DEFAULT
         windowPlacement.restingPosition = saved
         view.post {
             if (bubbleView !== view) return@post
             val bounds = currentBounds()
+            val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
             val pixels = BubblePositionMath.restingTopLeft(
                 position = saved,
-                bubbleWidthPx = view.width,
-                bubbleHeightPx = view.height,
+                bubbleWidthPx = bubbleWidthPx,
+                bubbleHeightPx = bubbleHeightPx,
                 bounds = bounds,
             )
             params.x = pixels.xPx
             params.y = pixels.yPx
             windowManager.updateViewLayout(view, params)
+            Log.d(
+                TAG,
+                "Bubble show at ${pixels.xPx},${pixels.yPx} in " +
+                    "${bounds.widthPx}x${bounds.heightPx} from anchor $saved",
+            )
         }
     }
 
