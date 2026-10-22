@@ -15,15 +15,19 @@ sealed interface RecordingBarState {
     /**
      * Recording in progress: cancel (X), live waveform, elapsed time, and
      * the check (send) affordance. [elapsedMs] is the session's
-     * sample-count-derived duration — it only advances when a recorder
-     * chunk lands (~1 Hz). [frame] is a redraw tick bumped whenever the
-     * waveform window materially changes (~30 Hz while speaking, ENC-69):
-     * without it, successive Recording values between chunks would be
-     * equal, StateFlow conflation would swallow them, and the overlay
-     * composition would never redraw the waveform between chunk arrivals.
-     * The levels themselves stay out of this state — the Canvas reads them
-     * through its deferred lambda (`CODE_STYLE_RULES.md` §4.5); [frame]
-     * only paces the redraw.
+     * sample-count-derived duration — but the republish trigger is a
+     * change in the displayed second ([elapsedMs] / 1000), not any
+     * elapsed change: the session emits per ~33ms amplitude window
+     * (~30 Hz), and republishing at that cadence recomposed the overlay
+     * mid-drag and corrupted pointer deltas (ENC-162). Entry from Idle
+     * always publishes. [frame] is a monotonic tick bumped on
+     * each publish; elapsed-only publishes always differ in [elapsedMs]
+     * already, so [frame] is belt-and-braces distinctness rather than
+     * load-bearing against StateFlow conflation — it is kept so successive
+     * publishes stay distinguishable even if two ever carried the same
+     * elapsed value. The levels themselves stay out of this state — the
+     * Canvas re-reads them through its deferred lambda at display rate via
+     * its own frame clock (`CODE_STYLE_RULES.md` §4.5), with no republish.
      */
     data class Recording(val elapsedMs: Long, val frame: Long = 0L) : RecordingBarState
 
