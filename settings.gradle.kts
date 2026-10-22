@@ -26,6 +26,7 @@ rootProject.name = "bloviate"
 include(":app")
 include(":core:domain")
 include(":core:application")
+include(":core:data")
 
 // whisper-android lives in its own repo (browntown.development-group/whisper-android),
 // vendored as a submodule and consumed via composite build (same pattern as Enclave).

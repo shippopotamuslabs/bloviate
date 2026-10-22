@@ -48,9 +48,10 @@ All rules below are non-negotiable implementations of Clean Architecture.
 | Recycle every `AccessibilityNodeInfo` obtained from the accessibility framework. | Hold node references across events. |
 | Keep the overlay window `FLAG_NOT_FOCUSABLE` (see §5.2). | Let the bubble window take focus — it steals the host field's caret and the bubble hides itself. |
 
-## 1. Layer Boundaries (single-module form)
+## 1. Layer Boundaries
 
-Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split):
+Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split;
+`:core:data` added by ENC-169):
 
 ```text
 :core:domain       domain.model, domain.evaluator, domain.port (domain-only
@@ -58,8 +59,10 @@ Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split):
                    — pure Kotlin/JVM, framework-free, depends on nothing in the app
 :core:application  application.usecase, application.port, application.evaluator
                    (port-chaining processors) — pure Kotlin/JVM, -> :core:domain
+:core:data         data — Android library; application-port implementations:
+                   persistence, downloads, platform adapters
+                   -> :core:domain + :core:application
 :app
- ├─ data/          application-port implementations: persistence, downloads, platform adapters
  ├─ service/       FieldWatcherService, BubbleOverlayService, insertion
  ├─ presentation/  Compose UI, ViewModels, presentation models
  └─ di/            Hilt wiring (the only place ports meet implementations)
@@ -74,9 +77,9 @@ service/evaluator stays in `:core:domain`. See
 
 ```text
 :core:application → :core:domain
+:core:data     → application, domain   (implements application ports)
 presentation/  → application, domain   (ViewModels call use cases; UI renders UiState)
 service/       → application, domain   (services drive use cases / ports)
-data/          → application, domain   (implements application ports)
 di/            → domain, application, data, service   (composition root)
 domain/        → nothing else in the app; no Android framework types in public APIs
 whisper-android (library) → consumed behind an application port; its types do not leak
@@ -84,11 +87,11 @@ whisper-android (library) → consumed behind an application port; its types do 
 ```
 
 The module graph is enforced by Gradle: `:core:domain` cannot import
-`:core:application` or `:app`, and `:core:application` cannot import `:app`.
-**Growth path:** `:core:data` → `:core:domain` + `:core:application`,
-`:core:ui` → `:core:domain`, `:core:testing` → `:core:domain` may be split out
-of `:app` later with exactly Enclave's graph; package names map to modules
-one-to-one.
+`:core:application`, `:core:data`, or `:app`; `:core:application` cannot
+import `:core:data` or `:app`; and `:core:data` cannot import `:app`.
+**Growth path:** `:core:ui` → `:core:domain`, `:core:testing` → `:core:domain`
+may be split out of `:app` later with exactly Enclave's graph; package names
+map to modules one-to-one.
 
 No reverse dependencies into `domain/` are allowed.
 
@@ -98,7 +101,7 @@ No reverse dependencies into `domain/` are allowed.
 |--------|-----------------|
 | `domain/` (`:core:domain`) | `application/`, `data/`, `service/`, `presentation/`, Compose, Hilt annotations on domain types, Android framework types in public APIs, `com.shippopotamus.whisper` implementation classes |
 | `application/` (`:core:application`) | `data/`, `service/`, `presentation/`, Compose, Android framework types, `com.shippopotamus.whisper` implementation classes |
-| `data/` | Compose UI |
+| `data/` (`:core:data`) | Compose UI, `service/`, `presentation/`, `di/` (anything in `:app`) |
 | `presentation/` | `data/` classes, `com.shippopotamus.whisper` types (go through application ports/use cases) |
 
 Reusable UI code lives with the presentation layer; screens are wired by the app shell.
@@ -109,7 +112,7 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 
 - **`domain/` (`:core:domain`)** — Domain models, evaluators/policies, diagnostics, and domain-only ports. Keep domain APIs free of Android/UI/storage/native implementation types. Owns the `TextPostProcessor` seam and `ProcessingMode` (see `TRANSCRIPTION_RULES.md`); `TranscriptionEngine` is an application port.
 - **`application/` (`:core:application`)** — Use cases, application ports (ports consumed by use cases or services), and port-chaining processors (`StylingTextPostProcessor`, `StyleAwareTextPostProcessor`, `DictionaryAwareTextPostProcessor`). Depends only on `:core:domain`.
-- **`data/`** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports. No Compose UI.
+- **`data/` (`:core:data`)** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports. Android library module; the vendored sherpa-onnx AAR lives in its `libs/`. No Compose UI.
 - **`service/`** — The two long-lived platform services (accessibility watcher, bubble overlay) and text insertion. Services are thin: they translate platform events into use-case calls and render bubble state.
 - **`presentation/`** — Compose UI and presentation logic (settings, onboarding, model manager). ViewModels map domain → presentation models.
 - **`:app` shell / `di/`** — Application class, navigation wiring, DI composition, app resources, platform entrypoints.

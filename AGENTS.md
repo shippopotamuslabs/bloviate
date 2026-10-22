@@ -39,14 +39,15 @@ context.
 
 ## 2. Repository Map
 
-Bloviate is currently a **single-module** Android app with strict package
-layering (see `contracts/ARCHITECTURE_RULES.md` for the layering rules and the
-growth path to Enclave-style modules if the app ever justifies them).
+Bloviate is a **multi-module** Android app with strict layering (see
+`contracts/ARCHITECTURE_RULES.md` for the binding layering rules): `:app` plus
+the `:core` library modules below, packages mapping to modules one-to-one.
 
+- `core/domain/`: `:core:domain` — domain models, evaluators, domain-only ports, diagnostics. Pure Kotlin/JVM, framework-free, depends on nothing (ENC-159).
+- `core/application/`: `:core:application` — use cases, application ports, port-chaining processors. Pure Kotlin/JVM, depends on `:core:domain` only (ENC-159).
+- `core/data/`: `:core:data` — implementations of application ports (persistence, downloads, platform adapters, transcription engines). Android library, depends on `:core:domain` + `:core:application` (ENC-169).
 - `app/`: the application — shell, DI wiring, launcher activity, app resources.
   Packages under `com.shippopotamus.bloviate`:
-  - `domain/` — domain models, ports, use cases. Framework-free.
-  - `data/` — implementations of domain ports (persistence, downloads, platform adapters).
   - `presentation/` — Compose UI, ViewModels, presentation models.
   - `service/` — `FieldWatcherService` (accessibility), `BubbleOverlayService` (foreground service + overlay), insertion.
   - `di/` — Hilt modules wiring ports to implementations.
@@ -69,7 +70,7 @@ Compose / Hilt, CMake/Android NDK via the `whisper-android` library only.
 - Domain models are **never** passed directly to composables. ViewModels map domain → presentation. Presentation models (`*UiState`, `*UiEvent`) must not embed domain types.
 - No `NavController` passed into composables. Navigation via pure callbacks hoisted to the route level.
 - **ViewModels depend on use cases only** — never on `*Repository`/`*Port` interfaces or `data/` classes directly. Multi-source `Flow` composition lives in a domain use case; write paths go through use cases. (Agent-enforced; Enclave enforces the twin rules with a custom Detekt rule set that Bloviate does not have yet — do not weaken the rule because it is not machine-checked here.)
-- If modules are ever split out of `:app`, the dependency graph in `contracts/ARCHITECTURE_RULES.md` §1 becomes binding verbatim; the package rules above are its single-module form.
+- The modules are split out of `:app` (`:core:domain`/`:core:application` in ENC-159, `:core:data` in ENC-169); the dependency graph in `contracts/ARCHITECTURE_RULES.md` §1 is binding verbatim.
 
 **Violation response:** Reply with exactly: `"Contract violation detected in [file]. Request explicit 'Contract Waiver' from user."` Then stop. Do not generate code.
 
