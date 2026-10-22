@@ -374,46 +374,55 @@ object StyleCatalog {
         kind = StyleKind.LLM,
     )
 
-    private val Talkie: StyleDefinition = StyleDefinition(
+    private val Transatlantic: StyleDefinition = StyleDefinition(
         id = "talkie",
-        displayName = "Talkie",
-        description = "Bright, clipped 1920s newspaper English.",
-        sample = "Wire just in. The vote is Thursday. I am for it, and so is the town.",
-        systemInstructions = "Casing: crisp 1920s newspaper sentence case — capitals where a " +
-            "quality daily of 1925 would put them, no more. Punctuation: plain — full stops " +
-            "do the work, commas are rationed, and the semicolon is left to the other fellow. " +
-            "Sentence architecture: CLIP, never swell. Every sentence is short, declarative, " +
-            "and finished before it can gather finery — no sentence runs past twelve words, " +
-            "facts stand one to a line in a wire-service row, and NEVER write a periodic " +
-            "sentence that holds its meaning back for a grand arrival; that swell belongs " +
-            "to the veranda, not the newsroom. Paragraphing: one brisk paragraph, no " +
-            "lingering. Register: educated 1920s American newspaper prose — bright, " +
-            "assured, plain-spoken, the slang of the press room rather than the salon, " +
-            "period idiom ('rather', 'quite', 'splendid') sprinkled, never poured. " +
-            "Render the 1920s register of the transcript's own language — restyle the text " +
-            "in its own tongue in that language's period voice; never translate it into " +
-            "English. Period flavor touches FORM ONLY — diction, rhythm, idiom: a modern " +
-            "thing keeps the speaker's name for it (my phone stays my phone, never a period " +
-            "apparatus), and no period slur or item of bigotry the speaker did not use may " +
-            "ever appear. " + NEVER_CLAUSE,
+        displayName = "Transatlantic",
+        description = "Bright 1920s American vernacular — period words, the speaker's own stride.",
+        sample = "Say, I am feeling in the pink today, so let us cut a rug tonight — " +
+            "everything is copacetic, see?",
+        systemInstructions = "Casing: easy 1920s American sentence case — capitals where a " +
+            "bright talkie of 1929 would put them, no more. Punctuation: plain and spoken — " +
+            "full stops do the work, commas fall where a talking voice breathes, and fancy " +
+            "stops are left to the other fellow. Sentence architecture: length follows " +
+            "the source — a punchy dictation comes out punchy, a flowing dictation comes " +
+            "out flowing, and long sentences are welcome whenever the speaker runs long; " +
+            "the era lives in the words, never in chopping the thought. Paragraphing: one " +
+            "easy paragraph, no lingering. Register: the 1920s American spoken vernacular " +
+            "first and foremost — bright, joshing, good-natured talk, swell and keen and " +
+            "copacetic, the palookas and the flat tires named as such; the letter's " +
+            "courteous period constructions wait above as an upper register for a long or " +
+            "formal dictation, never the default. Speak it in period idiom woven into the " +
+            "grammar, about one touch every sentence or two — bee's knees, jake, in the " +
+            "pink, the Real McCoy, cut a rug, flivver, cat's pajamas, Oxford bags, flush " +
+            "with jack, giggle water, on the level, keep my nose clean, sheik, " +
+            "twenty-three skidoo, the bulls, sheba, the berries, swell, keen, copacetic, " +
+            "joshing, flat tire, palooka, the runaround, the dope, on the square — " +
+            "native to the sentence, never pasted on. Render the 1920s register of the " +
+            "transcript's own language — restyle the text in its own tongue in that " +
+            "language's period voice; never translate it into English. Period flavor " +
+            "touches FORM ONLY — diction, rhythm, idiom: a modern thing keeps the " +
+            "speaker's name for it (my phone stays my phone, never a period apparatus), " +
+            "and no period slur or item of bigotry the speaker did not use may ever " +
+            "appear. " + NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
                 raw = "i took some photos of the kids at the park with my new phone " +
                     "and the battery lasted all day",
-                styled = "I took photos of the kids at the park. My new phone did the work. " +
-                    "The battery lasted all day.",
+                styled = "Say, I took the kids to the park for some photos with my new phone, " +
+                    "and the battery stayed in the pink the whole day.",
             ),
             FewShot(
                 raw = "the backup script failed at step three, the database migration " +
                     "filled the disk and we lost two hours of logs",
-                styled = "The backup script failed at the third step. " +
-                    "The database migration filled the disk. Two hours of logs are gone.",
+                styled = "The backup script went flat at the third step, and the database " +
+                    "migration filled the disk to bursting, so here is the dope, straight: " +
+                    "we are out two hours of logs.",
             ),
             FewShot(
                 raw = "i disagree with the plan, the cost is too high " +
                     "and the timeline is unrealistic",
-                styled = "I disagree with the plan. The cost is too high. " +
-                    "The timeline is pure fantasy.",
+                styled = "I disagree with the plan, old sport: the cost is too high and the " +
+                    "timeline is pure applesauce, on the level.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -485,7 +494,7 @@ object StyleCatalog {
         Seneca,
         MarcusAurelius,
         OscarWilde,
-        Talkie,
+        Transatlantic,
         TheColonel,
     )
 
