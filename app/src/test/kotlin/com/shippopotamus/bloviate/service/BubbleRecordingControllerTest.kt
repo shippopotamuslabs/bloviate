@@ -386,11 +386,11 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `host hidden during recording cancels and never transcribes`() = runTest {
+    fun `a password hide during recording cancels and never transcribes`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
 
-        controller.onHostHidden()
+        controller.onHostHidden(isPasswordFocus = true)
 
         assertEquals(1, fakeSession.cancelCallCount)
         assertEquals(RecordingBarState.Idle, controller.barState.value)
@@ -401,7 +401,26 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `host hidden during transcribing discards the transcript`() = runTest {
+    fun `a non-password hide during recording finishes the send instead of cancelling`() = runTest {
+        // ENC-156: a shade peek is not a password field — the live
+        // recording finishes through the stop path and transcribes.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeEngine.nextTranscript = "shade peek words"
+
+        controller.onHostHidden(isPasswordFocus = false)
+        assertEquals(RecordingBarState.Transcribing, controller.barState.value)
+
+        runCurrent()
+
+        assertEquals(0, fakeSession.cancelCallCount)
+        assertEquals(1, fakeEngine.transcribeCallCount)
+        assertEquals(listOf("shade peek words"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
+    }
+
+    @Test
+    fun `a password hide during transcribing discards the transcript`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         val gate = CompletableDeferred<Unit>()
@@ -412,12 +431,38 @@ class BubbleRecordingControllerTest {
         assertEquals(RecordingBarState.Transcribing, controller.barState.value)
         assertEquals(1, fakeEngine.transcribeCallCount)
 
-        controller.onHostHidden()
+        controller.onHostHidden(isPasswordFocus = true)
         runCurrent()
 
         assertEquals(RecordingBarState.Idle, controller.barState.value)
         assertTrue(fakeSink.transcripts.isEmpty())
         gate.complete(Unit)
+    }
+
+    @Test
+    fun `a non-password hide during transcribing lets the send finish`() = runTest {
+        // ENC-156: the in-flight send is never cancelled for a
+        // non-password cause — the transcript still lands.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        val gate = CompletableDeferred<Unit>()
+        fakeEngine.gate = gate
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Transcribing, controller.barState.value)
+
+        controller.onHostHidden(isPasswordFocus = false)
+        runCurrent()
+
+        assertEquals(RecordingBarState.Transcribing, controller.barState.value)
+        assertTrue(fakeSink.transcripts.isEmpty())
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
     }
 
     @Test
@@ -639,7 +684,7 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `host hidden during the error window drops the retained retry`() = runTest {
+    fun `a password hide during the error window drops the retained retry`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeSink.nextResult = InsertionResult.Failed("paste exploded")
@@ -648,7 +693,7 @@ class BubbleRecordingControllerTest {
         runCurrent()
         assertEquals(RecordingBarState.Error, controller.barState.value)
 
-        controller.onHostHidden()
+        controller.onHostHidden(isPasswordFocus = true)
         assertEquals(RecordingBarState.Idle, controller.barState.value)
 
         // A tap now starts a new recording; the retained samples are gone.
@@ -657,6 +702,31 @@ class BubbleRecordingControllerTest {
         runCurrent()
         assertEquals(2, fakeSession.startCallCount)
         assertEquals(1, fakeEngine.transcribeCallCount)
+    }
+
+    @Test
+    fun `a non-password hide during the error window keeps the retained retry`() = runTest {
+        // ENC-156: a shade peek must not silently discard the retained
+        // samples — the Error state and the one retry tap survive it.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeSink.nextResult = InsertionResult.Failed("paste exploded")
+
+        controller.onSendTap()
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        controller.onHostHidden(isPasswordFocus = false)
+        runCurrent()
+        assertEquals(RecordingBarState.Error, controller.barState.value)
+
+        fakeSink.nextResult =
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE)
+        controller.onBubbleTap()
+        runCurrent()
+
+        assertEquals(2, fakeEngine.transcribeCallCount)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
     }
 
     @Test
@@ -759,7 +829,7 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `host hidden during polishing discards the transcript`() = runTest {
+    fun `a password hide during polishing discards the transcript`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeStylePreference.setSelected("professional")
@@ -773,7 +843,7 @@ class BubbleRecordingControllerTest {
         assertEquals(RecordingBarState.Polishing, controller.barState.value)
         assertEquals(1, fakeLlm.callCount)
 
-        controller.onHostHidden()
+        controller.onHostHidden(isPasswordFocus = true)
         runCurrent()
 
         assertEquals(RecordingBarState.Idle, controller.barState.value)

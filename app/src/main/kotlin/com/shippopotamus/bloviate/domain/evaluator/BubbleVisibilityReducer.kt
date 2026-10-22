@@ -105,6 +105,16 @@ class BubbleVisibilityReducer @Inject constructor() {
     }
 
     /**
+     * Whether the hide the overlay is about to apply comes from a
+     * genuine password-field focus (ENC-156). Only that cause may
+     * cancel a recording or discard an in-flight send — every other
+     * host-hide must let the session finish and deliver the transcript
+     * or retain it for retry. A notification-shade peek is not a
+     * password field.
+     */
+    fun isPasswordFocus(): Boolean = lastFocusState is FieldFocusState.PasswordFocus
+
+    /**
      * The overlay service reports the window's actual presence after
      * applying a command (ENC-127 reconciliation). A mismatch resyncs
      * the visibility belief to reality:

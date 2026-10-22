@@ -59,10 +59,12 @@ import kotlinx.coroutines.withContext
  * composition reports its own display-window elapse through
  * [onTransientStateElapsed] as a backstop — whichever fires first wins.
  *
- * The host window hiding (focus left the field — above all: a password
- * field gained focus) cancels any active recording and discards any
- * in-flight transcription: a transcript is never produced for a field the
- * bubble has left.
+ * The host window hiding cancels an active recording and discards an
+ * in-flight send only when a password field gained focus — above all,
+ * nothing is ever produced for a password field. Any other host-hide
+ * (a shade peek, a keyboard dismissal) finishes a live recording
+ * through the stop path and lets a running send deliver or retain
+ * (ENC-156).
  *
  * Owned by [BubbleOverlayService] for its lifetime; all collector and
  * pipeline jobs run on the service's scope, blocking stop/transcribe work
@@ -237,32 +239,88 @@ class BubbleRecordingController(
 
     /**
      * The bubble window is going away (field focus lost — critically, a
-     * password field may have gained it). An active recording is cancelled
-     * and an in-flight transcription is discarded, never delivered.
+     * password field may have gained it).
+     *
+     * ENC-156: only a genuine password-field focus ([isPasswordFocus])
+     * cancels an active recording and discards an in-flight send —
+     * captured audio is never silently discarded on any other path. A
+     * non-password hide (a notification-shade peek, a keyboard
+     * dismissal the exemption did not cover) finishes a live recording
+     * through the same stop path as a check tap and lets a running
+     * send deliver or retain: the transcript lands, or the samples
+     * stay available for one retry tap. A retained retry belongs to
+     * the password field's predecessor only in the password case; a
+     * non-password hide keeps it, and the sink still refuses to insert
+     * into a password field, so a retry can never leak text there.
      */
-    fun onHostHidden() {
+    fun onHostHidden(isPasswordFocus: Boolean) {
         cancelResetJob()
-        // A retained retry belongs to the field that was just left; it must
-        // never fire into whatever field comes next.
-        retainedSamples = null
-        when (mutableBarState.value) {
+        if (isPasswordFocus) {
+            // A retained retry belongs to the field that was just left;
+            // from a password focus it must never fire anywhere else.
+            retainedSamples = null
+            recordingSeen = false
+            finishedSamples = null
+            expectingCapConfirmation = false
+            capConfirmed = false
+            when (mutableBarState.value) {
+                is RecordingBarState.Recording -> {
+                    session.cancel()
+                    waveform.clear()
+                    Log.d(TAG, "Host hidden by a password field while recording; recording cancelled")
+                }
+                RecordingBarState.Transcribing,
+                RecordingBarState.Polishing,
+                -> {
+                    pipelineJob?.cancel()
+                    Log.d(TAG, "Host hidden by a password field while sending; transcript discarded with reason: password focus")
+                }
+                RecordingBarState.Idle,
+                is RecordingBarState.Done,
+                RecordingBarState.Error,
+                -> Unit
+            }
+            mutableBarState.update { RecordingBarState.Idle }
+            return
+        }
+        when (val bar = mutableBarState.value) {
             is RecordingBarState.Recording -> {
-                session.cancel()
                 waveform.clear()
-                Log.d(TAG, "Host hidden while recording; recording cancelled")
+                expectingCapConfirmation = true
+                capConfirmed = false
+                mutableBarState.update { RecordingBarState.Transcribing }
+                Log.d(TAG, "Host hidden by a non-password cause while recording; finishing via stop()")
+                pipelineJob = scope.launch {
+                    try {
+                        val samples = withContext(workDispatcher) { session.stop() }
+                        recordingSeen = false
+                        finishedSamples = samples
+                        transcribeAndFinish(samples, stoppedAtMs = nowMs())
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (exception: Exception) {
+                        recordingSeen = false
+                        expectingCapConfirmation = false
+                        Log.w(TAG, "Non-password hide found no samples to send; returning to idle", exception)
+                        mutableBarState.update { RecordingBarState.Idle }
+                    }
+                }
             }
             RecordingBarState.Transcribing,
             RecordingBarState.Polishing,
             -> {
-                pipelineJob?.cancel()
-                Log.d(TAG, "Host hidden while the send pipeline ran; transcript discarded")
+                Log.d(TAG, "Host hidden by a non-password cause while sending; letting the send finish")
+            }
+            RecordingBarState.Error -> {
+                Log.d(TAG, "Host hidden by a non-password cause during the error window; keeping the retained retry")
             }
             RecordingBarState.Idle,
             is RecordingBarState.Done,
-            RecordingBarState.Error,
-            -> Unit
+            -> {
+                Log.d(TAG, "Host hidden by a non-password cause while the bar is $bar")
+                mutableBarState.update { RecordingBarState.Idle }
+            }
         }
-        mutableBarState.update { RecordingBarState.Idle }
     }
 
     /** Memory pressure (TRANSCRIPTION_RULES §4): the waveform history is a releasable cache. */

@@ -60,6 +60,48 @@ class NotificationShadeFreezePolicyTest {
         assertFalse(NotificationShadeFreezePolicy.isShadePresent(emptyList()))
     }
 
+    // --- Early shade event (ENC-156) -------------------------------------------
+
+    @Test
+    fun `a systemui window-state event is the shade one event before the census`() {
+        assertTrue(
+            NotificationShadeFreezePolicy.isShadeEvent(
+                packageName = "com.android.systemui",
+                isWindowStateChange = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a host app window-state event is not the shade`() {
+        assertFalse(
+            NotificationShadeFreezePolicy.isShadeEvent(
+                packageName = PACKAGE,
+                isWindowStateChange = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `systemui content churn is not the shade - only window-state events qualify`() {
+        assertFalse(
+            NotificationShadeFreezePolicy.isShadeEvent(
+                packageName = "com.android.systemui",
+                isWindowStateChange = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `a null package is not the shade`() {
+        assertFalse(
+            NotificationShadeFreezePolicy.isShadeEvent(
+                packageName = null,
+                isWindowStateChange = true,
+            ),
+        )
+    }
+
     // --- Focus gate ----------------------------------------------------------
 
     @Test

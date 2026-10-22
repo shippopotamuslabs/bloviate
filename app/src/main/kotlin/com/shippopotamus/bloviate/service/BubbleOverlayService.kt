@@ -570,10 +570,13 @@ class BubbleOverlayService : Service() {
     }
 
     private fun hideBubble() {
-        // The window going away cancels any active recording and discards
-        // any in-flight transcription — critically when a password field
-        // takes focus, nothing may be transcribed for it.
-        recordingController?.onHostHidden()
+        // The window going away cancels an active recording and discards
+        // an in-flight send only when a password field takes focus —
+        // nothing may ever be transcribed for it. Any other hide lets a
+        // live recording finish through the stop path and lets a running
+        // send deliver or retain (ENC-156); a shade peek is not a
+        // password field.
+        recordingController?.onHostHidden(observeBubbleVisibility.isPasswordFocus())
         // The window is gone; any bar-form placement bookkeeping dies with
         // it. The next show starts from the persisted bubble position.
         barFormAnchorXPx = null
