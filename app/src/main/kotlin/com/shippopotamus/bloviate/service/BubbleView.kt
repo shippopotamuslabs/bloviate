@@ -1,20 +1,16 @@
 package com.shippopotamus.bloviate.service
 
-import android.view.MotionEvent
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
@@ -29,14 +25,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithCache
@@ -49,23 +41,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.domain.diagnostics.CadenceCounters
@@ -85,15 +71,12 @@ import com.shippopotamus.bloviate.presentation.BloviateTheme
 import com.shippopotamus.bloviate.presentation.barShape
 import com.shippopotamus.bloviate.presentation.bubbleShape
 import com.shippopotamus.bloviate.presentation.tintColors
-import kotlin.math.hypot
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 private val BUBBLE_ELEVATION: Dp = 6.dp
 
-/** The bar's inner horizontal inset is the gospel's micro spacing (ENC-86). */
-private val BAR_HORIZONTAL_PADDING: Dp = BloviateSpacing.s4
 private val WAVEFORM_BAR_WIDTH: Dp = 4.dp
 private val WAVEFORM_BAR_SPACING: Dp = 3.dp
 private val WAVEFORM_MIN_BAR_HEIGHT: Dp = 4.dp
@@ -137,64 +120,30 @@ private val WAVEFORM_WIDTH: Dp =
     WAVEFORM_BAR_WIDTH * WaveformHistory.DEFAULT_BAR_COUNT +
         WAVEFORM_BAR_SPACING * (WaveformHistory.DEFAULT_BAR_COUNT - 1)
 
-/**
- * The calm width-morph spring between bar states (ENC-89): a state
- * change swaps the whole content (bubble ↔ recording bar ↔ the hugged
- * processing pill), and the root's `animateContentSize` settles the
- * window to the new width on this spring — no bounce, low stiffness,
- * calm by design (the Compose Gospel's spring motion, §6.6). Each
- * state's own geometry is exactly what it was; only the transition
- * animates. Since ENC-93 this spring governs the SETTLE transitions
- * (into the processing pill, the transient bubbles, and back to
- * idle); the recording-start expansion has its own spec below.
- */
-private val BAR_MORPH_SPRING = spring<IntSize>(
-    dampingRatio = Spring.DampingRatioNoBouncy,
-    stiffness = Spring.StiffnessMediumLow,
-)
+/** Spacing between the separate recording-row elements (ENC-167). */
+internal val RECORDING_ELEMENT_SPACING: Dp = BloviateSpacing.s8
+
+/** Fixed width of the elapsed readout slot inside the recording pill. */
+internal val ELAPSED_SLOT_WIDTH: Dp = 40.dp
+
+/** Horizontal inset inside the waveform + elapsed pill. */
+internal val RECORDING_PILL_HORIZONTAL_PADDING: Dp = BloviateSpacing.s12
+
+/** Gap between the waveform and the elapsed readout inside the pill. */
+internal val RECORDING_PILL_INNER_SPACING: Dp = BloviateSpacing.s8
+
+/** Width of the waveform + elapsed pill, from fixed constants only (ENC-167). */
+internal fun recordingPillWidthDp(): Float =
+    (RECORDING_PILL_HORIZONTAL_PADDING * 2 + WAVEFORM_WIDTH +
+        RECORDING_PILL_INNER_SPACING + ELAPSED_SLOT_WIDTH).value
+
+/** Total width of the separate recording row, from fixed constants only (ENC-167). */
+internal fun recordingRowWidthDp(renderParams: BubbleRenderParams): Float =
+    renderParams.barSlotDp * 2 + recordingPillWidthDp() + RECORDING_ELEMENT_SPACING.value * 2
 
 /**
- * The recording-start expansion spring (ENC-93): tapping the bubble
- * must SNAP the bar out to its full width — inside half a second, not
- * on ENC-89's calm settle, which the expansion originally inherited
- * (Sean's acceptance test: "it expands very, very slowly... it should
- * snap out to the full pill"). High stiffness (the gospel's
- * high-stiffness spring language, §6.2), still no bounce: the spring's
- * displacement envelope is under 1% by ~250 ms, and a shorter
- * animation also means fewer per-frame window relayouts in the
- * overlay. Only the transition INTO [RecordingBarState.Recording]
- * uses it — see [RecordingBarState.sizeAnimationSpec].
- */
-private val BAR_EXPANSION_SPRING = spring<IntSize>(
-    dampingRatio = Spring.DampingRatioNoBouncy,
-    stiffness = Spring.StiffnessHigh,
-)
-
-/**
- * The size-animation spec for a transition INTO this state (ENC-93).
- * Motion is per-transition, not per-root: the recording-start
- * expansion snaps on [BAR_EXPANSION_SPRING]; every other state
- * change — the Listening → Processing settle ENC-89 made calm, the
- * transient Done/Error bubbles, the return to idle — keeps
- * [BAR_MORPH_SPRING]. `BubbleContent` reads this off the incoming
- * state on every recomposition, and `animateContentSize` animates a
- * size change with the spec in its current composition, so the spec
- * that governs a transition is the destination state's.
- */
-internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize> =
-    when (this) {
-        is RecordingBarState.Recording -> BAR_EXPANSION_SPRING
-        RecordingBarState.Idle,
-        RecordingBarState.Transcribing,
-        RecordingBarState.Polishing,
-        is RecordingBarState.Done,
-        RecordingBarState.Error,
-        -> BAR_MORPH_SPRING
-    }
-
-/**
- * The floating dictation bubble and the recording bar it transforms into —
- * one overlay window, two shapes (Sean's ENC-48 design, states per
+ * The floating dictation bubble and the recording row it swaps to —
+ * one overlay window, instant content swaps (ENC-167; states per
  * `contracts/UI_DESIGN_SPEC.md` §3):
  *
  * - [RecordingBarState.Idle]: the mic bubble. Tap starts a recording; drag
@@ -203,12 +152,11 @@ internal fun RecordingBarState.sizeAnimationSpec(): FiniteAnimationSpec<IntSize>
  *   ENC-126) the bubble shows a spinner in place of the mic and taps are
  *   clean no-ops — the bubble appears on schedule instead of staying
  *   absent for the seconds the engine needs, which read as broken.
- * - [RecordingBarState.Recording]: the bar — **X** cancels, a live
- *   ~10-bar waveform plus elapsed time in the middle, and the **check**
- *   stops + transcribes. There is no hold-to-talk. The bar drags (by its
- *   body) exactly like the bubble; hit-testing in the bar's gesture
- *   handler decides tap-vs-drag by movement, so a press that moves is a
- *   drag and never a button tap.
+ * - [RecordingBarState.Recording]: separate elements in a row —
+ *   an **X** bubble cancels, a pill carries a live ~10-bar waveform
+ *   plus elapsed time, and a **check** bubble stops + transcribes.
+ *   There is no hold-to-talk and no drag in this layout: X and check
+ *   are independent tap targets (ENC-167).
  * - [RecordingBarState.Transcribing] / [RecordingBarState.Polishing]:
  *   the bar while the send pipeline runs, showing the stage's name as
  *   small shimmering text (ENC-76) — the pipeline has two stages with
@@ -284,17 +232,13 @@ fun BubbleContent(
         }
     }
     // One root for every state, sized by its content: the window is
-    // WRAP_CONTENT, so this Box IS the window's size, and its
-    // animateContentSize springs the width between state geometries.
-    // The spec is per-transition (ENC-93): the incoming state picks
-    // it — the recording expansion snaps, the processing settle and
-    // the transient bubbles stay on ENC-89's calm spring. The user's
-    // opacity rides the same root (ENC-68), so every state — bubble,
-    // bar, transient — wears it uniformly.
+    // WRAP_CONTENT, so this Box IS the window's size. Every state
+    // change is an instant content swap (ENC-167) — no size animation
+    // ever runs on this root. The user's opacity rides the root
+    // (ENC-68), so every state wears it uniformly.
     Box(
         modifier = modifier
-            .graphicsLayer { alpha = renderParams.opacity }
-            .animateContentSize(animationSpec = barState.sizeAnimationSpec()),
+            .graphicsLayer { alpha = renderParams.opacity },
     ) {
         when (barState) {
             RecordingBarState.Idle -> MicBubble(
@@ -316,10 +260,6 @@ fun BubbleContent(
                 renderParams = renderParams,
                 onCancelRecording = onCancelRecording,
                 onSendRecording = onSendRecording,
-                onDragStart = onDragStart,
-                onDrag = onDrag,
-                onDragEnd = onDragEnd,
-                onDragCancel = onDragCancel,
             )
             RecordingBarState.Transcribing,
             RecordingBarState.Polishing,
@@ -427,17 +367,9 @@ private fun RecordingBar(
     renderParams: BubbleRenderParams,
     onCancelRecording: () -> Unit,
     onSendRecording: () -> Unit,
-    onDragStart: () -> Unit,
-    onDrag: (Float, Float, Long) -> Unit,
-    onDragEnd: () -> Unit,
-    onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Frame-clock redraw for the waveform (ENC-69 round 2): this loop runs
-    // only while the Recording branch is composed, and the waveform Canvas
-    // reads the tick inside its draw block, so the wave redraws at display
-    // rate from the live levels — draw-phase only, no recomposition, and
-    // the gesture handlers below never see it.
+    // Frame-clock redraw for the waveform (ENC-69 round 2).
     val drawTick = remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (currentCoroutineContext().isActive) {
@@ -459,52 +391,33 @@ private fun RecordingBar(
         tint.content
     }
     val scale = if (inDismissZone) DISMISS_ZONE_SCALE else FULL_SCALE
-    // Slop and slot width in px come from composition locals (the interop
-    // filter below has no Density scope), and the laid-out bar width via
-    // onSizeChanged for the UP hit test.
-    val touchSlopPx = LocalViewConfiguration.current.touchSlop
-    val slotWidthPx = with(LocalDensity.current) { renderParams.barSlotDp.dp.toPx() }
-    var barWidthPx by remember { mutableIntStateOf(0) }
-    Surface(
+    // Separate elements, instant swap (ENC-167): [X bubble]
+    // [waveform + elapsed pill] [check bubble]. X and check are
+    // independent tap targets (Surface onClick); there is no drag
+    // gesture in this layout at all.
+    Row(
         modifier = modifier
-            .height(renderParams.barHeightDp.dp)
-            .onSizeChanged { barWidthPx = it.width }
-            .recordingBarGestures(
-                touchSlopPx = touchSlopPx,
-                barWidthPx = barWidthPx,
-                slotWidthPx = slotWidthPx,
-                onCancelTap = onCancelRecording,
-                onSendTap = onSendRecording,
-                onDragStart = onDragStart,
-                onDrag = onDrag,
-                onDragEnd = onDragEnd,
-                onDragCancel = onDragCancel,
-            )
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
             .semantics { contentDescription = recordingDescription },
-        shape = appearance.shape.barShape(),
-        color = containerColor,
-        contentColor = contentColor,
-        shadowElevation = BUBBLE_ELEVATION,
+        horizontalArrangement = Arrangement.spacedBy(RECORDING_ELEMENT_SPACING),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = BAR_HORIZONTAL_PADDING),
-            verticalAlignment = Alignment.CenterVertically,
+        Surface(
+            onClick = onCancelRecording,
+            modifier = Modifier.size(renderParams.barSlotDp.dp),
+            shape = appearance.shape.bubbleShape(),
+            color = containerColor,
+            contentColor = contentColor,
+            shadowElevation = BUBBLE_ELEVATION,
         ) {
             Box(
-                modifier = Modifier
-                    .size(renderParams.barSlotDp.dp)
-                    .semantics {
-                        contentDescription = cancelDescription
-                        role = Role.Button
-                        onClick {
-                            onCancelRecording()
-                            true
-                        }
-                    },
+                modifier = Modifier.semantics {
+                    contentDescription = cancelDescription
+                    role = Role.Button
+                },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -513,47 +426,58 @@ private fun RecordingBar(
                     modifier = Modifier.size(renderParams.barIconDp.dp),
                 )
             }
-            WaveformCanvas(
-                levels = waveformLevels,
-                drawTick = { drawTick.value },
-                barColor = contentColor,
-                modifier = Modifier
-                    .width(WAVEFORM_WIDTH)
-                    .height(renderParams.waveformHeightDp.dp),
-            )
-            // Fixed-width elapsed slot (ENC-162): the readout ticks `0:00`
-            // → `0:01` → … at ~1 Hz, and every width change relaid out the
-            // bar mid-drag. The slot measures the widest readout the bar
-            // can show — the 10-minute safety backstop formats as `10:00`,
-            // five glyphs where every live value has four or five — via an
-            // invisible reference, so the window width stays constant while
-            // recording and `animateContentSize` only runs on state changes.
-            // Centered, so the live value sits where the reference does.
-            Box(
-                modifier = Modifier.padding(horizontal = BAR_HORIZONTAL_PADDING),
-                contentAlignment = Alignment.Center,
+        }
+        Surface(
+            modifier = Modifier
+                .height(renderParams.barHeightDp.dp)
+                .width(recordingPillWidthDp().dp),
+            shape = appearance.shape.barShape(),
+            color = containerColor,
+            contentColor = contentColor,
+            shadowElevation = BUBBLE_ELEVATION,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = RECORDING_PILL_HORIZONTAL_PADDING),
+                horizontalArrangement = Arrangement.spacedBy(RECORDING_PILL_INNER_SPACING),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = ELAPSED_SLOT_REFERENCE,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+                WaveformCanvas(
+                    levels = waveformLevels,
+                    drawTick = { drawTick.value },
+                    barColor = contentColor,
+                    modifier = Modifier
+                        .width(WAVEFORM_WIDTH)
+                        .height(renderParams.waveformHeightDp.dp),
                 )
-                Text(
-                    text = ElapsedTimeFormatter.format(elapsedMs),
-                    style = MaterialTheme.typography.labelMedium,
-                )
+                Box(
+                    modifier = Modifier.width(ELAPSED_SLOT_WIDTH),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = ELAPSED_SLOT_REFERENCE,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+                    )
+                    Text(
+                        text = ElapsedTimeFormatter.format(elapsedMs),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
             }
+        }
+        Surface(
+            onClick = onSendRecording,
+            modifier = Modifier.size(renderParams.barSlotDp.dp),
+            shape = appearance.shape.bubbleShape(),
+            color = containerColor,
+            contentColor = contentColor,
+            shadowElevation = BUBBLE_ELEVATION,
+        ) {
             Box(
-                modifier = Modifier
-                    .size(renderParams.barSlotDp.dp)
-                    .semantics {
-                        contentDescription = sendDescription
-                        role = Role.Button
-                        onClick {
-                            onSendRecording()
-                            true
-                        }
-                    },
+                modifier = Modifier.semantics {
+                    contentDescription = sendDescription
+                    role = Role.Button
+                },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -603,10 +527,8 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
  * waveform and no buttons, so the recording bar's wide skeleton (two
  * slots + a weighted center) stretched a nearly full-width pill around
  * one short word. Here the width is the label plus gospel padding
- * (s24 each side, the button-grade horizontal inset); the root's calm
- * [BAR_MORPH_SPRING] animates the settle from the recording bar into
- * this pill (ENC-93 keeps that direction calm — only the expansion
- * out of the bubble snaps). Height stays the bar's, and the word
+ * (s24 each side, the button-grade horizontal inset). The swap into
+ * this pill is instant (ENC-167). Height stays the bar's, and the word
  * stays the content description, so TalkBack still announces the
  * stage.
  */
@@ -827,144 +749,6 @@ private fun Modifier.bubbleGestures(
             onDragCancel = { onDragCancel() },
         )
     }
-
-/** Per-gesture accumulators for the raw-coordinate bar drag below. */
-private class RawBarGestureState {
-    var dragging: Boolean = false
-    var downLocalX: Float = 0f
-    var lastRawX: Float = 0f
-    var lastRawY: Float = 0f
-    var totalX: Float = 0f
-    var totalY: Float = 0f
-}
-
-/**
- * Gesture arbitration for the recording bar. One pointer stream decides:
- * released within the touch slop → a tap, hit-tested against the cancel
- * slot (left [slotWidthPx]) and the send slot (right [slotWidthPx]);
- * moved past the slop → a drag ([BubbleDragSession] semantics, the same
- * drag the bubble uses) and never a button tap. Doing the arbitration in
- * one handler is what keeps the bar's buttons and its drag from fighting
- * over the stream the way sibling detectors on parent/child would. The
- * slot width is a parameter (ENC-68) because the user's size step scales
- * the bar — the hit test must measure the slots that are actually drawn.
- *
- * Drag deltas come from [MotionEvent] raw screen coordinates, not from
- * differencing window-local `change.position` values (ENC-162): the bar
- * lives in an overlay window that moves under the finger while dragging,
- * so window-local positions shift with the window and corrupt the deltas
- * (device-confirmed jitter). Raw screen coordinates are immune — the
- * window's own motion never enters them. The delta contract matches the
- * bubble's drag: slop crossing emits the accumulated total, later moves
- * emit per-event deltas, all in px, which is exactly what
- * [BubbleDragController] already consumes. The tap hit test still uses
- * the LOCAL x, and the touch semantics blocks on the slots are untouched
- * (TalkBack-driven, unaffected by touch consumption).
- */
-@OptIn(ExperimentalComposeUiApi::class)
-@Composable
-private fun Modifier.recordingBarGestures(
-    touchSlopPx: Float,
-    barWidthPx: Int,
-    slotWidthPx: Float,
-    onCancelTap: () -> Unit,
-    onSendTap: () -> Unit,
-    onDragStart: () -> Unit,
-    onDrag: (Float, Float, Long) -> Unit,
-    onDragEnd: () -> Unit,
-    onDragCancel: () -> Unit,
-): Modifier {
-    val latestCancelTap by rememberUpdatedState(onCancelTap)
-    val latestSendTap by rememberUpdatedState(onSendTap)
-    val latestDragStart by rememberUpdatedState(onDragStart)
-    val latestDrag by rememberUpdatedState(onDrag)
-    val latestDragEnd by rememberUpdatedState(onDragEnd)
-    val latestDragCancel by rememberUpdatedState(onDragCancel)
-    // Remembered so an elapsed-tick recomposition mid-gesture does not
-    // reset the accumulators; reset per gesture on ACTION_DOWN.
-    val gesture = remember { RawBarGestureState() }
-    return pointerInteropFilter { event ->
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                gesture.dragging = false
-                gesture.downLocalX = event.x
-                gesture.lastRawX = event.rawX
-                gesture.lastRawY = event.rawY
-                gesture.totalX = 0f
-                gesture.totalY = 0f
-                true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val deltaX = event.rawX - gesture.lastRawX
-                val deltaY = event.rawY - gesture.lastRawY
-                gesture.lastRawX = event.rawX
-                gesture.lastRawY = event.rawY
-                gesture.totalX += deltaX
-                gesture.totalY += deltaY
-                if (!gesture.dragging && hypot(gesture.totalX, gesture.totalY) > touchSlopPx) {
-                    gesture.dragging = true
-                    latestDragStart()
-                    latestDrag(gesture.totalX, gesture.totalY, event.eventTime)
-                } else if (gesture.dragging && (deltaX != 0f || deltaY != 0f)) {
-                    latestDrag(deltaX, deltaY, event.eventTime)
-                }
-                true
-            }
-            MotionEvent.ACTION_UP -> {
-                finishBarGesture(
-                    wasCancelled = false,
-                    wasDragging = gesture.dragging,
-                    downX = gesture.downLocalX,
-                    widthPx = barWidthPx.toFloat(),
-                    slotWidthPx = slotWidthPx,
-                    onCancelTap = latestCancelTap,
-                    onSendTap = latestSendTap,
-                    onDragEnd = latestDragEnd,
-                    onDragCancel = latestDragCancel,
-                )
-                gesture.dragging = false
-                true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                finishBarGesture(
-                    wasCancelled = true,
-                    wasDragging = gesture.dragging,
-                    downX = gesture.downLocalX,
-                    widthPx = barWidthPx.toFloat(),
-                    slotWidthPx = slotWidthPx,
-                    onCancelTap = latestCancelTap,
-                    onSendTap = latestSendTap,
-                    onDragEnd = latestDragEnd,
-                    onDragCancel = latestDragCancel,
-                )
-                gesture.dragging = false
-                true
-            }
-            else -> false
-        }
-    }
-}
-
-@Suppress("LongParameterList") // One-shot gesture verdict: every input is needed exactly once.
-private fun finishBarGesture(
-    wasCancelled: Boolean,
-    wasDragging: Boolean,
-    downX: Float,
-    widthPx: Float,
-    slotWidthPx: Float,
-    onCancelTap: () -> Unit,
-    onSendTap: () -> Unit,
-    onDragEnd: () -> Unit,
-    onDragCancel: () -> Unit,
-) {
-    when {
-        wasCancelled -> if (wasDragging) onDragCancel()
-        wasDragging -> onDragEnd()
-        downX < slotWidthPx -> onCancelTap()
-        downX > widthPx - slotWidthPx -> onSendTap()
-        else -> Unit // A tap on the waveform/elapsed area does nothing.
-    }
-}
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
 @Preview(name = "Idle", showBackground = true)

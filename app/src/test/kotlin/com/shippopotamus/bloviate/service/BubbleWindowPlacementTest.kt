@@ -16,11 +16,11 @@ import org.robolectric.annotation.Config
 import tech.apter.junit.jupiter.robolectric.RobolectricExtension
 
 /**
- * ENC-154: the single-writer rule, pinned at the placement seam. While a
- * drag is active the drag controller owns the window's layout: width
- * churn must not move the window, and the drag end runs exactly one
- * placement pass. Resting and bar-form drag routing (ENC-123) is
- * preserved verbatim through the extraction.
+ * ENC-167: bar-form placement is capture-anchor → one-shot place →
+ * restore-on-exit. The window x is computed once per bar-form state
+ * from the known content width (injected here), never from a measured
+ * view width; a resize while a bar form is up moves nothing. Resting
+ * drag routing (ENC-123/ENC-154) is preserved.
  */
 @ExtendWith(RobolectricExtension::class)
 @Config(sdk = [34])
@@ -32,6 +32,11 @@ class BubbleWindowPlacementTest {
     private val pushes = mutableListOf<Pair<Int, Int>>()
     private val savedPositions = mutableListOf<BubblePosition>()
     private var dragging: Boolean = false
+    private var contentWidths: Map<String, Int> = mapOf(
+        "Recording" to BAR_PX,
+        "Transcribing" to PROCESSING_PX,
+        "Polishing" to PROCESSING_PX,
+    )
 
     @BeforeEach
     fun setup() {
@@ -46,43 +51,118 @@ class BubbleWindowPlacementTest {
             barEdgeMarginPx = { MARGIN_PX },
             savePosition = { position -> savedPositions += position },
             isDragging = { dragging },
+            barContentWidthPx = { state ->
+                contentWidths[state::class.simpleName] ?: 0
+            },
         )
         placement.attach(view, params)
-        sizeView(BUBBLE_PX, BUBBLE_PX)
     }
 
     @Test
-    fun `width churn while dragging performs no placement writes`() {
-        enterBarFormFromDock()
-        assertEquals(BAR_REST_X, params.x)
-        pushes.clear()
+    fun `entering recording from the right dock places the row in one computation`() {
+        dockRight()
 
-        dragging = true
-        sizeView(BAR_WIDE_PX, BAR_HEIGHT_PX)
-        placement.onWindowResized(widthChanged = true, heightChanged = true, bounds = BOUNDS)
-        sizeView(BAR_PX, BAR_HEIGHT_PX)
-        placement.onWindowResized(widthChanged = true, heightChanged = false, bounds = BOUNDS)
-        placement.onConfigurationChanged(bounds = BOUNDS)
-
-        assertTrue(pushes.isEmpty(), "no placement write may land mid-drag, got $pushes")
-    }
-
-    @Test
-    fun `drag end runs exactly one placement pass for a dragged bar`() {
-        enterBarFormFromDock()
-        assertEquals(BAR_REST_X, params.x)
-        pushes.clear()
-
-        // The drag controller moved the window; the end pass re-clamps
-        // the dragged bar position exactly once and persists nothing.
-        dragging = true
-        params.x = DRAGGED_BAR_X
-        dragging = false
-        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
 
         assertEquals(1, pushes.size)
         assertEquals(BAR_REST_X, params.x)
+        assertEquals(DOCK_Y, params.y)
+    }
+
+    @Test
+    fun `entering recording from the left dock unfolds rightward from the anchor`() {
+        placement.restingPosition = BubblePosition(xFraction = 0f, yFraction = 0.5f)
+        params.x = 0
+        params.y = DOCK_Y
+
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+
+        // Already at the computed x: one-shot placement needs no push.
+        assertTrue(pushes.isEmpty())
+        assertEquals(0, params.x)
+    }
+
+    @Test
+    fun `a resize callback during recording does not move the window`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        assertEquals(BAR_REST_X, params.x)
+        pushes.clear()
+
+        placement.onWindowResized(widthChanged = true, heightChanged = true, bounds = BOUNDS)
+        placement.onWindowResized(widthChanged = true, heightChanged = false, bounds = BOUNDS)
+        placement.onWindowResized(widthChanged = false, heightChanged = true, bounds = BOUNDS)
+
+        assertTrue(pushes.isEmpty(), "no placement write may land during recording, got $pushes")
+        assertEquals(BAR_REST_X, params.x)
+    }
+
+    @Test
+    fun `recording to processing re-places once keeping the anchor edge invariant`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        pushes.clear()
+
+        placement.onBarStateChanged(RecordingBarState.Transcribing, bounds = BOUNDS)
+
+        // Right side: ideal right edge is the anchor's right edge (1080),
+        // fit-shifted to the margin limit (1056) for the 300px pill.
+        assertEquals(1, pushes.size)
+        assertEquals(BOUNDS.widthPx - MARGIN_PX - PROCESSING_PX, params.x)
+        assertEquals(DOCK_Y, params.y)
+    }
+
+    @Test
+    fun `processing to done returns the single bubble to the anchor spot`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        placement.onBarStateChanged(RecordingBarState.Transcribing, bounds = BOUNDS)
+        pushes.clear()
+
+        placement.onBarStateChanged(RecordingBarState.Done(), bounds = BOUNDS)
+
+        assertEquals(1, pushes.size)
+        assertEquals(DOCK_X, params.x)
+        assertEquals(DOCK_Y, params.y)
+
+        pushes.clear()
+        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
+        assertTrue(pushes.isEmpty(), "Done is already at the anchor; Idle must not move it")
+        assertEquals(DOCK_X, params.x)
+    }
+
+    @Test
+    fun `an undragged record cycle returns the bubble to its dock on both sides`() {
+        // Right dock.
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
+        assertEquals(DOCK_X, params.x)
+        assertEquals(DOCK_X to DOCK_Y, pushes.last())
+
+        // Left dock.
+        pushes.clear()
+        placement.restingPosition = BubblePosition(xFraction = 0f, yFraction = 0.5f)
+        params.x = 0
+        params.y = DOCK_Y
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
+        assertEquals(0, params.x)
+        assertEquals(0 to DOCK_Y, pushes.last())
+    }
+
+    @Test
+    fun `a drag end reported in bar form persists nothing and moves nothing`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        pushes.clear()
+        val placedX = params.x
+
+        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
+
         assertTrue(savedPositions.isEmpty())
+        assertTrue(pushes.isEmpty())
+        assertEquals(placedX, params.x)
     }
 
     @Test
@@ -91,6 +171,7 @@ class BubbleWindowPlacementTest {
             xFraction = REST_X.toFloat() / (BOUNDS.widthPx - BUBBLE_PX).toFloat(),
             yFraction = REST_Y.toFloat() / (BOUNDS.heightPx - BUBBLE_PX).toFloat(),
         )
+        placement.restingPosition = anchor
         params.x = REST_X
         params.y = REST_Y
 
@@ -104,82 +185,33 @@ class BubbleWindowPlacementTest {
     }
 
     @Test
-    fun `an undragged record cycle returns the bubble to its dock`() {
-        dockRight()
-        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
-        sizeView(BAR_PX, BAR_HEIGHT_PX)
+    fun `width churn while dragging performs no placement writes`() {
+        params.x = REST_X
+        params.y = REST_Y
+        dragging = true
+
         placement.onWindowResized(widthChanged = true, heightChanged = true, bounds = BOUNDS)
+        placement.onConfigurationChanged(bounds = BOUNDS)
 
-        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
-
-        assertEquals(DOCK_X, params.x)
-        assertEquals(DOCK_X to DOCK_Y, pushes.last())
-    }
-
-    @Test
-    fun `a dragged bar lands the bubble on the dragged edge at close`() {
-        dockRight()
-        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
-        sizeView(BAR_PX, BAR_HEIGHT_PX)
-        placement.onWindowResized(widthChanged = true, heightChanged = true, bounds = BOUNDS)
-        pushes.clear()
-
-        // The bar was dragged left; closing persists the bar's final edge
-        // as the bubble's new anchor, computed with the bubble's size.
-        params.x = DRAGGED_REST_X
-        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
-        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
-
-        val expectedXFraction = DRAGGED_REST_X.toFloat() / (BOUNDS.widthPx - BUBBLE_PX).toFloat()
-        assertEquals(1, savedPositions.size)
-        assertEquals(expectedXFraction, savedPositions.single().xFraction, 0.001f)
-        assertEquals(DRAGGED_REST_X, params.x)
-    }
-
-    /** Parks the bubble at the right dock and enters bar form with the bubble-sized view. */
-    private fun enterBarFormFromDock() {
-        dockRight()
-        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
-        sizeView(BAR_PX, BAR_HEIGHT_PX)
-        placement.onWindowResized(widthChanged = true, heightChanged = true, bounds = BOUNDS)
+        assertTrue(pushes.isEmpty(), "no placement write may land mid-drag, got $pushes")
     }
 
     private fun dockRight() {
         placement.restingPosition = BubblePosition(xFraction = 1f, yFraction = 0.5f)
         params.x = DOCK_X
         params.y = DOCK_Y
-        sizeView(BUBBLE_PX, BUBBLE_PX)
-    }
-
-    private fun sizeView(widthPx: Int, heightPx: Int) {
-        val widthSpec = View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY)
-        val heightSpec = View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY)
-        view.measure(widthSpec, heightSpec)
-        view.layout(0, 0, widthPx, heightPx)
     }
 
     private companion object {
         const val BUBBLE_PX: Int = 168
         const val BAR_PX: Int = 640
-        const val BAR_WIDE_PX: Int = 700
-        const val BAR_HEIGHT_PX: Int = 128
+        const val PROCESSING_PX: Int = 300
         const val MARGIN_PX: Int = 24
-
-        /** Right dock for the 168px bubble in 1080x2400 bounds. */
         const val DOCK_X: Int = 912
         const val DOCK_Y: Int = 1116
-
-        /** A dragged bar x that still overflows at bar width: re-clamps to [BAR_REST_X]. */
-        const val DRAGGED_BAR_X: Int = 500
         const val BAR_REST_X: Int = 416
-
-        /** A mid-screen resting drag end, consistent with its anchor. */
         const val REST_X: Int = 319
         const val REST_Y: Int = 893
-
-        /** A dragged resting x inside the bubble's own travel range. */
-        const val DRAGGED_REST_X: Int = 200
-
         val BOUNDS = ScreenBounds(widthPx = 1080, heightPx = 2400)
     }
 }
