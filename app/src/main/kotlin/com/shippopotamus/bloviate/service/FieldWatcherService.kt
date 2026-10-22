@@ -317,7 +317,14 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private fun disarmKeyboardWatchdog(reason: KeyboardWatchdogPolicy.StopReason) {
         watchdogHandler.removeCallbacks(watchdogTick)
         watchdogArmedAtMs = null
-        Log.d(TAG, "keyboard watchdog stopped: $reason after $watchdogPolls polls")
+        // ENC-145: the census rides the stop line — an EXPIRED arm on an
+        // unfolded display shows exactly which windows the derivation saw
+        // (an IME that never joins, or joins under another type).
+        Log.d(
+            TAG,
+            "keyboard watchdog stopped: $reason after $watchdogPolls polls " +
+                "(window types: ${windows.typeCensus()})",
+        )
     }
 
     /** Stop polling without a policy reason (service unbinding/destroying). */

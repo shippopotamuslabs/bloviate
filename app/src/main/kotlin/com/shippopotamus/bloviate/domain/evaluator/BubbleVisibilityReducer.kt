@@ -139,6 +139,22 @@ class BubbleVisibilityReducer @Inject constructor() {
         }
     }
 
+    /**
+     * One-line snapshot of the machine's inputs and belief for decision
+     * logging (ENC-145): a device repro that shows the bubble never
+     * appearing (or never hiding) resolves to the exact stuck signal
+     * from this line alone.
+     */
+    fun describeStateForLog(): String {
+        val focus = when (val focusState = lastFocusState) {
+            FieldFocusState.NoEditableFocus -> "NoEditableFocus"
+            is FieldFocusState.EditableFocus -> "EditableFocus(${focusState.packageName})"
+            is FieldFocusState.PasswordFocus -> "PasswordFocus(${focusState.packageName})"
+        }
+        return "focus=$focus keyboardVisible=$keyboardVisible barActive=$barActive " +
+            "dismissedThisFieldSession=$dismissedThisFieldSession bubbleVisible=$bubbleVisible"
+    }
+
     /** Forget visibility, dismissal, and both signal states; called when the owning service is destroyed. */
     fun reset() {
         bubbleVisible = false
