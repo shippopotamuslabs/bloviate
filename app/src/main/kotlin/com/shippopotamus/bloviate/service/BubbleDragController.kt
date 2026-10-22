@@ -30,6 +30,14 @@ import com.shippopotamus.bloviate.domain.model.ScreenBounds
  * dismiss zone (driving the shrink affordance), and on release a drag
  * persists its end position via [onDragEnded] while a drag released in the
  * dismiss zone requests dismissal via [onDismissRequested].
+ *
+ * Single-writer rule (ENC-154): while [isDragging] is true this controller
+ * owns the window's layout exclusively — every window write flows through
+ * [onDrag], and the overlay's placement paths ([BubbleWindowPlacement])
+ * no-op until the drag ends, then run exactly once. Clamping reads the
+ * size captured at drag start, never the live view: while recording, the
+ * bar republishes at ~30 Hz and its width churns mid-drag, and clamping
+ * against the live width is what shook the window between two x values.
  */
 class BubbleDragController(
     private val windowManager: WindowManager,
@@ -46,6 +54,22 @@ class BubbleDragController(
 
     private var session: BubbleDragSession? = null
 
+    /**
+     * Single-writer flag (ENC-154): true from [onDragStart] until
+     * [onDragEnd]/[onDragCancel]. While true, the overlay's placement
+     * paths must not touch the window's layout.
+     */
+    var isDragging: Boolean = false
+        private set
+
+    /**
+     * The window size the active drag clamps against, captured at drag
+     * start (ENC-154). The bar's width churns at ~30 Hz mid-drag; reading
+     * the live view here moved the clamp target under the finger.
+     */
+    private var dragWidthPx: Int = 0
+    private var dragHeightPx: Int = 0
+
     fun onTap() {
         onTapGesture()
     }
@@ -56,6 +80,9 @@ class BubbleDragController(
             originTopLeft = BubblePixelPosition(xPx = layoutParams.x, yPx = layoutParams.y),
             startTimeMs = SystemClock.uptimeMillis(),
         )
+        dragWidthPx = bubbleView.width
+        dragHeightPx = bubbleView.height
+        isDragging = true
     }
 
     fun onDrag(deltaXPx: Float, deltaYPx: Float, timeMs: Long) {
@@ -65,20 +92,21 @@ class BubbleDragController(
             deltaXPx = deltaXPx,
             deltaYPx = deltaYPx,
             timeMs = timeMs,
-            bubbleWidthPx = bubbleView.width,
-            bubbleHeightPx = bubbleView.height,
+            bubbleWidthPx = dragWidthPx,
+            bubbleHeightPx = dragHeightPx,
             bounds = bounds,
         )
         layoutParams.x = moved.xPx
         layoutParams.y = moved.yPx
         windowManager.updateViewLayout(bubbleView, layoutParams)
         inDismissZone.value = BubblePositionMath.isInDismissZone(
-            centerYPx = moved.yPx + bubbleView.height / CENTER_DIVISOR,
+            centerYPx = moved.yPx + dragHeightPx / CENTER_DIVISOR,
             bounds = bounds,
         )
     }
 
     fun onDragEnd() {
+        isDragging = false
         val activeSession = session ?: return
         session = null
         val gesture = activeSession.finish(
@@ -97,6 +125,7 @@ class BubbleDragController(
     }
 
     fun onDragCancel() {
+        isDragging = false
         session = null
         inDismissZone.value = false
     }
@@ -104,8 +133,8 @@ class BubbleDragController(
     private fun currentNormalizedPosition(): BubblePosition =
         BubblePositionMath.toNormalized(
             topLeft = BubblePixelPosition(xPx = layoutParams.x, yPx = layoutParams.y),
-            bubbleWidthPx = bubbleView.width,
-            bubbleHeightPx = bubbleView.height,
+            bubbleWidthPx = dragWidthPx,
+            bubbleHeightPx = dragHeightPx,
             bounds = currentBounds(),
         )
 

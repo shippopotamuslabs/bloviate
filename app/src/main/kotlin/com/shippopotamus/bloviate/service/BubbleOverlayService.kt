@@ -36,7 +36,6 @@ import com.shippopotamus.bloviate.domain.evaluator.EngineWarmingEvaluator
 import com.shippopotamus.bloviate.domain.evaluator.WatcherSupervisionEvaluator
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleForegroundType
-import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.BubbleServiceStartOrigin
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
@@ -206,22 +205,20 @@ class BubbleOverlayService : Service() {
     // emission — the window is never recreated for an appearance change.
     private val appearanceSnapshot = mutableStateOf(BubbleAppearance.DEFAULT)
 
-    // The persisted anchor's in-memory mirror (ENC-123): collected for the
-    // service's whole lifetime and updated synchronously wherever this
-    // service persists a position, so re-deriving the resting position
-    // (see reclampBubble) never lags the store.
-    private var restingPosition: BubblePosition = BubblePosition.DEFAULT
-
-    // Bar-form window placement (ENC-65): the recording bar is far wider
-    // than the bubble and the window is anchored top-left, so the morph
-    // repositions the window to keep the whole bar on-screen. These fields
-    // remember the bubble's own anchor while the bar is up; the bar's
-    // placement is never persisted as the bubble's position.
-    private var previousBarState: RecordingBarState = RecordingBarState.Idle
-    private var barFormAnchorXPx: Int? = null
-    private var barFormAnchorWidthPx: Int = 0
-    private var barFormAnchorHeightPx: Int = 0
-    private var barFormMoved: Boolean = false
+    // Window placement (ENC-65 bar form, ENC-123 drag-end/resting, ENC-154
+    // single-writer gate): all window-position math lives in
+    // [BubbleWindowPlacement] so it is unit-testable; this service owns
+    // the window lifecycle and forwards events. The drag controller below
+    // feeds the gate — while it reports an active drag, it owns the
+    // window's layout exclusively.
+    private val windowPlacement = BubbleWindowPlacement(
+        pushLayout = { view, params -> windowManager.updateViewLayout(view, params) },
+        bubbleSizePx = ::bubbleSizePx,
+        barEdgeMarginPx = ::barEdgeMarginPx,
+        savePosition = { position -> serviceScope.launch { saveBubblePosition(position) } },
+        isDragging = { dragController?.isDragging == true },
+    )
+    private var dragController: BubbleDragController? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -267,7 +264,7 @@ class BubbleOverlayService : Service() {
             controller.barState.collect { state ->
                 CadenceCounters.snapshotWrite() // ENC-69 cadence counters (L3)
                 barStateSnapshot.value = state
-                onBarStateChanged(state)
+                windowPlacement.onBarStateChanged(state, currentBounds())
                 // ENC-125: bar activity arms the visibility machine's
                 // keyboard-hide exemption — while the bar is up a keyboard
                 // hide cannot hide the window; when the bar settles back
@@ -291,7 +288,9 @@ class BubbleOverlayService : Service() {
             observeBubbleAppearance().collect { appearance -> appearanceSnapshot.value = appearance }
         }
         serviceScope.launch {
-            observeBubblePosition().collect { saved -> restingPosition = saved ?: BubblePosition.DEFAULT }
+            observeBubblePosition().collect { saved ->
+                windowPlacement.restingPosition = saved ?: BubblePosition.DEFAULT
+            }
         }
         serviceScope.launch {
             modelStore.state.collect { state -> onModelStateChanged(state) }
@@ -401,7 +400,7 @@ class BubbleOverlayService : Service() {
         // Rotation / fold-unfold: keep the same window and re-clamp the current
         // position into the new bounds; the persisted normalized position is
         // left untouched so the user's anchor survives posture changes.
-        reclampBubble()
+        windowPlacement.onConfigurationChanged(currentBounds())
     }
 
     override fun onDestroy() {
@@ -517,15 +516,18 @@ class BubbleOverlayService : Service() {
         }
         // Gestures are detected inside the composition (see BubbleContent):
         // the drag controller only handles the high-level events it reports.
-        val dragController = BubbleDragController(
+        // It is kept as a field so the placement gate can see the active
+        // drag: while it drags, it owns the window's layout (ENC-154).
+        val drag = BubbleDragController(
             windowManager = windowManager,
             bubbleView = view,
             layoutParams = params,
             onTapGesture = controller::onBubbleTap,
             onDismissRequested = ::onBubbleDismissRequested,
-            onDragEnded = ::handleDragEnded,
+            onDragEnded = { position -> windowPlacement.onDragEnded(position, currentBounds()) },
             inDismissZone = inDismissZone,
         )
+        dragController = drag
         view.setContent {
             // The overlay wears the same canonical palette as the app
             // (ENC-85): one fixed dark scheme, no system-theme branch.
@@ -536,14 +538,14 @@ class BubbleOverlayService : Service() {
                     inDismissZone = inDismissZone.value,
                     engineWarming = warmingSnapshot.value,
                     appearance = appearanceSnapshot.value,
-                    onTap = dragController::onTap,
+                    onTap = drag::onTap,
                     onCancelRecording = controller::onCancelTap,
                     onSendRecording = controller::onSendTap,
                     onTransientStateElapsed = controller::onTransientStateElapsed,
-                    onDragStart = dragController::onDragStart,
-                    onDrag = dragController::onDrag,
-                    onDragEnd = dragController::onDragEnd,
-                    onDragCancel = dragController::onDragCancel,
+                    onDragStart = drag::onDragStart,
+                    onDrag = drag::onDrag,
+                    onDragEnd = drag::onDragEnd,
+                    onDragCancel = drag::onDragCancel,
                 )
             }
         }
@@ -553,17 +555,18 @@ class BubbleOverlayService : Service() {
         // An appearance size change (ENC-68) resizes the idle bubble in
         // the same way; the re-clamp then re-derives the resting position
         // from the persisted anchor at the new size (ENC-123) — the live
-        // view size is never trusted mid-morph (see reclampBubble).
+        // view size is never trusted mid-morph. While a drag is active
+        // this is a no-op: the drag controller owns the layout (ENC-154).
         view.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
             val widthChanged = right - left != oldRight - oldLeft
             val heightChanged = bottom - top != oldBottom - oldTop
-            if (widthChanged) applyBarPlacement()
-            if ((widthChanged || heightChanged) && barFormAnchorXPx == null) reclampBubble()
+            windowPlacement.onWindowResized(widthChanged, heightChanged, currentBounds())
         }
         windowManager.addView(view, params)
         lifecycleOwner = owner
         bubbleView = view
         layoutParams = params
+        windowPlacement.attach(view, params)
         owner.create()
         restorePosition(view, params)
         Log.d(TAG, "Bubble shown")
@@ -579,9 +582,8 @@ class BubbleOverlayService : Service() {
         recordingController?.onHostHidden(observeBubbleVisibility.isPasswordFocus())
         // The window is gone; any bar-form placement bookkeeping dies with
         // it. The next show starts from the persisted bubble position.
-        barFormAnchorXPx = null
-        barFormMoved = false
-        previousBarState = RecordingBarState.Idle
+        windowPlacement.detach()
+        dragController = null
         val view = bubbleView ?: return
         windowManager.removeViewImmediate(view)
         bubbleView = null
@@ -592,118 +594,6 @@ class BubbleOverlayService : Service() {
         Log.d(TAG, "Bubble hidden")
     }
 
-    /**
-     * Drag-end routing: a normal bubble drag persists its end position.
-     * A drag that ends while the recording bar is up must NOT persist the
-     * position the drag controller computed — it normalized against the
-     * bar's width, and the bar's placement is not the bubble's position.
-     * Instead the drag is remembered and the bubble's anchor is re-derived
-     * (and persisted) when the bar closes, in [exitBarForm].
-     */
-    private fun handleDragEnded(position: BubblePosition) {
-        if (barFormAnchorXPx != null) {
-            barFormMoved = true
-        } else {
-            restingPosition = position
-            serviceScope.launch { saveBubblePosition(position) }
-        }
-    }
-
-    /** Tracks bar-state transitions for window placement (see [enterBarForm] / [exitBarForm]). */
-    private fun onBarStateChanged(newState: RecordingBarState) {
-        val previous = previousBarState
-        previousBarState = newState
-        when {
-            previous == RecordingBarState.Idle && newState is RecordingBarState.Recording ->
-                enterBarForm()
-            newState == RecordingBarState.Idle && previous != RecordingBarState.Idle ->
-                exitBarForm()
-        }
-    }
-
-    /**
-     * The bubble is morphing into the recording bar: capture the bubble's
-     * own anchor (position + size) before the bar lays out, then place the
-     * window so the bar grows toward the screen interior (ENC-65).
-     */
-    private fun enterBarForm() {
-        val view = bubbleView ?: return
-        val params = layoutParams ?: return
-        barFormAnchorXPx = params.x
-        barFormAnchorWidthPx = view.width
-        barFormAnchorHeightPx = view.height
-        barFormMoved = false
-        applyBarPlacement()
-    }
-
-    /**
-     * The bar is closing back to the mic bubble: the window returns to the
-     * bubble's own anchor. If the bar was dragged, the bubble takes the
-     * bar's final left edge (clamped to the bubble's own travel range) as
-     * its new anchor, and that — computed with the bubble's size, never
-     * the bar's — is what gets persisted.
-     */
-    private fun exitBarForm() {
-        val anchorXPx = barFormAnchorXPx
-        barFormAnchorXPx = null
-        val moved = barFormMoved
-        barFormMoved = false
-        val view = bubbleView ?: return
-        val params = layoutParams ?: return
-        if (anchorXPx == null) return
-        if (moved) {
-            val bounds = currentBounds()
-            val landed = BubblePositionMath.clamp(
-                topLeft = BubblePixelPosition(xPx = params.x, yPx = params.y),
-                bubbleWidthPx = barFormAnchorWidthPx,
-                bubbleHeightPx = barFormAnchorHeightPx,
-                bounds = bounds,
-            )
-            params.x = landed.xPx
-            params.y = landed.yPx
-            val landedPosition = BubblePositionMath.toNormalized(
-                topLeft = landed,
-                bubbleWidthPx = barFormAnchorWidthPx,
-                bubbleHeightPx = barFormAnchorHeightPx,
-                bounds = bounds,
-            )
-            restingPosition = landedPosition
-            serviceScope.launch { saveBubblePosition(landedPosition) }
-        } else {
-            params.x = anchorXPx
-        }
-        windowManager.updateViewLayout(view, params)
-    }
-
-    /**
-     * (Re)place the window so the current bar form sits fully on-screen:
-     * [BubblePositionMath.barWindowX] from the bubble's anchor — or, once
-     * the user has dragged the bar, from its dragged position, so a width
-     * change re-clamps instead of snapping the bar back to the anchor.
-     * Runs when the bar form is entered and whenever the window's width
-     * changes while the bar is up.
-     */
-    private fun applyBarPlacement() {
-        val anchorXPx = barFormAnchorXPx ?: return
-        val view = bubbleView ?: return
-        val params = layoutParams ?: return
-        if (view.width <= 0) return
-        val baseXPx = if (barFormMoved) params.x else anchorXPx
-        val targetXPx = BubblePositionMath.barWindowX(
-            bubbleXPx = baseXPx,
-            barWidthPx = view.width,
-            bounds = currentBounds(),
-            edgeMarginPx = barEdgeMarginPx(),
-        )
-        if (targetXPx != params.x) {
-            params.x = targetXPx
-            windowManager.updateViewLayout(view, params)
-        }
-    }
-
-    private fun barEdgeMarginPx(): Int =
-        (BAR_EDGE_MARGIN_DP * resources.displayMetrics.density).roundToInt()
-
     private fun onBubbleDismissRequested() {
         val command = observeBubbleVisibility.onBubbleDismissed() ?: return
         serviceScope.launch { applyCommand(command) }
@@ -712,7 +602,7 @@ class BubbleOverlayService : Service() {
     /** Apply the persisted (or default) position once the view has been measured. */
     private suspend fun restorePosition(view: ComposeView, params: WindowManager.LayoutParams) {
         val saved = observeBubblePosition().first() ?: BubblePosition.DEFAULT
-        restingPosition = saved
+        windowPlacement.restingPosition = saved
         view.post {
             if (bubbleView !== view) return@post
             val bounds = currentBounds()
@@ -728,61 +618,15 @@ class BubbleOverlayService : Service() {
         }
     }
 
-    /**
-     * Keep the resting bubble on-screen when its size or the bounds change
-     * around it (ENC-123).
-     *
-     * Outside bar form the resting position is RE-DERIVED from the
-     * persisted anchor against the bubble's own appearance size — never
-     * pixel-clamped against the view's live size. The old clamp read the
-     * view mid-morph: on collapse the view is still bar-wide for the whole
-     * settle animation, so each frame's clamp pulled a docked bubble's x
-     * left toward the bar's width, and the one-way clamp never let it
-     * back — the bubble came to rest displaced toward mid-screen after
-     * every record cycle. The same clamp stranded a bubble off its docked
-     * edge when an ENC-68 size step shrank it. Re-derivation is a
-     * constant during a morph (the anchor and the bubble's size do not
-     * change), preserves the docked edge at every size step, and moves
-     * mid-screen positions only as the anchor model prescribes.
-     *
-     * In bar form the window's placement belongs to [applyBarPlacement] /
-     * [exitBarForm]; the clamp below only keeps the bar itself on-screen
-     * across a posture change.
-     */
-    private fun reclampBubble() {
-        val view = bubbleView ?: return
-        val params = layoutParams ?: return
-        val bounds = currentBounds()
-        val target = if (barFormAnchorXPx != null) {
-            BubblePositionMath.clamp(
-                topLeft = BubblePixelPosition(xPx = params.x, yPx = params.y),
-                bubbleWidthPx = view.width,
-                bubbleHeightPx = view.height,
-                bounds = bounds,
-            )
-        } else {
-            val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
-            BubblePositionMath.restingTopLeft(
-                position = restingPosition,
-                bubbleWidthPx = bubbleWidthPx,
-                bubbleHeightPx = bubbleHeightPx,
-                bounds = bounds,
-            )
-        }
-        if (target.xPx != params.x || target.yPx != params.y) {
-            params.x = target.xPx
-            params.y = target.yPx
-            windowManager.updateViewLayout(view, params)
-        }
-        Log.d(TAG, "Bubble re-clamped into ${bounds.widthPx}x${bounds.heightPx}")
-    }
-
     /** The bubble's own extent in pixels, from the appearance's size step (ENC-68). */
     private fun bubbleSizePx(): Pair<Int, Int> {
         val sizePx = (BubbleAppearanceMath.bubbleSizeDp(appearanceSnapshot.value.size) *
             resources.displayMetrics.density).roundToInt()
         return sizePx to sizePx
     }
+
+    private fun barEdgeMarginPx(): Int =
+        (BAR_EDGE_MARGIN_DP * resources.displayMetrics.density).roundToInt()
 
     private fun createLayoutParams(): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
