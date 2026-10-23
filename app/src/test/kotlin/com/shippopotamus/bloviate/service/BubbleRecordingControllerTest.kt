@@ -7,7 +7,6 @@ import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
 import com.shippopotamus.bloviate.application.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
-import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
@@ -43,7 +42,6 @@ class BubbleRecordingControllerTest {
     private val fakeParakeetStore = FakeParakeetModelStorePort()
     private val fakeStylePreference = FakeStylePreferencePort()
     private val fakeLlm = FakeLlmStylePort()
-    private val fakeApiKeys = FakeApiKeyPort()
 
     private fun createController(
         scope: CoroutineScope,
@@ -56,7 +54,6 @@ class BubbleRecordingControllerTest {
                 local = fakePostProcessor,
                 stylePreference = fakeStylePreference,
                 llm = fakeLlm,
-                apiKeys = fakeApiKeys,
             ),
             transcriptSink = fakeSink,
             enginePreference = fakeEnginePreference,
@@ -836,7 +833,6 @@ class BubbleRecordingControllerTest {
         backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
         startRecording(controller)
         fakeStylePreference.setSelected("professional")
-        fakeApiKeys.setKey("test-key")
         fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 900L)
         val gate = CompletableDeferred<Unit>()
         fakeLlm.gate = gate
@@ -875,8 +871,7 @@ class BubbleRecordingControllerTest {
         val emissions = mutableListOf<RecordingBarState>()
         backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
         startRecording(controller)
-        // Even with a key stored, the default style is mechanical.
-        fakeApiKeys.setKey("test-key")
+        // The default style is mechanical.
 
         controller.onSendTap()
         runCurrent()
@@ -888,19 +883,26 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
-    fun `send with an ai style but no key never shows polishing`() = runTest {
+    fun `send with an ai style shows polishing and falls back to local text`() = runTest {
         val controller = createController(backgroundScope)
         val emissions = mutableListOf<RecordingBarState>()
         backgroundScope.launch { controller.barState.collect { emissions.add(it) } }
         startRecording(controller)
         fakeStylePreference.setSelected("professional")
+        val gate = CompletableDeferred<Unit>()
+        fakeLlm.gate = gate
 
         controller.onSendTap()
         runCurrent()
 
+        assertEquals(RecordingBarState.Polishing, controller.barState.value)
+        assertEquals(1, fakeLlm.callCount)
+
+        gate.complete(Unit)
+        runCurrent()
+
         assertEquals(RecordingBarState.Done(), controller.barState.value)
-        assertTrue(!emissions.contains(RecordingBarState.Polishing), "got $emissions")
-        assertEquals(0, fakeLlm.callCount)
+        assertTrue(emissions.contains(RecordingBarState.Polishing), "got $emissions")
     }
 
     @Test
@@ -908,7 +910,6 @@ class BubbleRecordingControllerTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeStylePreference.setSelected("professional")
-        fakeApiKeys.setKey("test-key")
         fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 10L)
         fakeSink.nextResult = InsertionResult.Failed("paste exploded")
         val gate = CompletableDeferred<Unit>()
@@ -933,7 +934,6 @@ class BubbleRecordingControllerTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
         fakeStylePreference.setSelected("professional")
-        fakeApiKeys.setKey("test-key")
         fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 10L)
         val gate = CompletableDeferred<Unit>()
         fakeLlm.gate = gate

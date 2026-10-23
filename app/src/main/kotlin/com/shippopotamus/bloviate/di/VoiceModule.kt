@@ -13,18 +13,14 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
-import com.shippopotamus.bloviate.data.AndroidKeystoreCipher
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
-import com.shippopotamus.bloviate.data.EncryptedApiKeyStore
-import com.shippopotamus.bloviate.data.HttpURLConnectionStyleTransport
-import com.shippopotamus.bloviate.data.KeyCipher
-import com.shippopotamus.bloviate.data.OpenRouterStyleClient
-import com.shippopotamus.bloviate.data.StyleHttpTransport
-import com.shippopotamus.bloviate.domain.evaluator.LlmResponseCleaner
+import com.shippopotamus.bloviate.data.FirebaseAuthSession
+import com.shippopotamus.bloviate.data.FirebaseStyleClient
+import com.shippopotamus.bloviate.data.FirebaseStyleFunctionGateway
+import com.shippopotamus.bloviate.data.StyleFunctionGateway
 import com.shippopotamus.bloviate.application.evaluator.StyleAwareTextPostProcessor
-import com.shippopotamus.bloviate.domain.evaluator.StylePromptBuilder
 import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
-import com.shippopotamus.bloviate.application.port.ApiKeyPort
+import com.shippopotamus.bloviate.application.port.AuthSessionPort
 import com.shippopotamus.bloviate.application.port.AudioCapturePort
 import com.shippopotamus.bloviate.application.port.DictionaryPort
 import com.shippopotamus.bloviate.application.port.EnginePreferencePort
@@ -95,40 +91,27 @@ abstract class VoiceModule {
     abstract fun bindStylePreferencePort(store: DataStoreStylePreferenceStore): StylePreferencePort
 
     @Binds
-    abstract fun bindApiKeyPort(store: EncryptedApiKeyStore): ApiKeyPort
+    abstract fun bindAuthSessionPort(session: FirebaseAuthSession): AuthSessionPort
 
     @Binds
-    abstract fun bindKeyCipher(cipher: AndroidKeystoreCipher): KeyCipher
+    abstract fun bindStyleFunctionGateway(gateway: FirebaseStyleFunctionGateway): StyleFunctionGateway
 
     companion object {
 
         /**
-         * The LLM styling client (ENC-73): provided rather than bound so
-         * the clock stays a defaulted constructor parameter — unit tests
-         * pass a fake clock while production reads the device clock.
+         * The Function-backed styling client (ENC-151): provided rather
+         * than bound so the clock stays a defaulted constructor parameter.
          */
         @Provides
         @Singleton
         fun provideLlmStylePort(
-            transport: StyleHttpTransport,
-            prompts: StylePromptBuilder,
-            cleaner: LlmResponseCleaner,
-            apiKeys: ApiKeyPort,
+            gateway: StyleFunctionGateway,
+            auth: AuthSessionPort,
         ): LlmStylePort =
-            OpenRouterStyleClient(
-                transport = transport,
-                prompts = prompts,
-                cleaner = cleaner,
-                apiKeys = apiKeys,
+            FirebaseStyleClient(
+                gateway = gateway,
+                auth = auth,
             )
-
-        /**
-         * Plain `HttpURLConnection` transport: provided rather than bound
-         * so the IO dispatcher stays a defaulted constructor parameter.
-         */
-        @Provides
-        @Singleton
-        fun provideStyleHttpTransport(): StyleHttpTransport = HttpURLConnectionStyleTransport()
 
         @Provides
         @Singleton

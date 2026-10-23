@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "74044613867",
+    "project_id": "bloviate-app",
+    "storage_bucket": "bloviate-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:74044613867:android:37d80fbdff97cd7b0d8aae",
+        "android_client_info": {
+          "package_name": "com.shippopotamus.bloviate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXXmJHCG-V8sbNdkqm58d1aqrH4d_JyM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
