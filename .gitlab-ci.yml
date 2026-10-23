@@ -3,8 +3,8 @@
 # Mirrors Stratum's pipeline shape (home-server runner, .android-job template,
 # distribute-internal lane) with Bloviate-specific adaptations:
 #
-# - NO google-services.json: Bloviate does not integrate the Firebase SDK
-#   (App Distribution needs no in-app SDK), so there is no
+# - google-services.json IS committed (app/google-services.json; Firebase SDK
+#   integrated since ENC-151/ENC-197), so unlike Stratum there is no
 #   GOOGLE_SERVICES_JSON variable and no config-copy step.
 # - COMPOSITE BUILD: whisper-android is a git submodule consumed via
 #   includeBuild. GIT_SUBMODULE_STRATEGY=recursive clones it plus its nested
@@ -15,11 +15,14 @@
 #   location per build (see README / AGENTS.md §4), so before_script writes
 #   sdk.dir local.properties at the root AND into third_party/whisper-android,
 #   and installs the pinned NDK 28.2.13676358 the native build requires.
-# - SIGNING: v1 distributes the DEBUG-signed APK. App Distribution accepts
-#   debug-signed builds and Sean dogfoods personally; a real keystore is
-#   deferred together with the Play-publication decision (ENC-63).
+# - SIGNING: distribute-internal ships the RELEASE-signed APK. Release
+#   signing material comes from CI/CD variables (see ONE-TIME SETUP below);
+#   the assemble-release job reconstructs the gitignored keystore.properties
+#   + .jks exactly like a local release build. The distribute path fails
+#   loudly (exit 1) when signing material is missing — a debug/unsigned
+#   build is never uploaded.
 #
-# ONE-TIME SETUP (done 2026-10-18, ENC-63 — recorded for posterity):
+# ONE-TIME SETUP (Firebase part done 2026-10-18, ENC-63 — recorded for posterity):
 # - Firebase project `bloviate-app` (#74044613867); Android app
 #   1:74044613867:android:37d80fbdff97cd7b0d8aae for
 #   com.shippopotamus.bloviate; App Distribution group "Internal" with Sean
@@ -28,6 +31,14 @@
 #   the app-distribution-uploader@stratum-a1a5b service-account key (same
 #   account Stratum's CI uses), granted roles/firebaseappdistro.admin on the
 #   bloviate-app project.
+# - Release signing (GitLab project -> Settings -> CI/CD -> Variables):
+#   - KEYSTORE_BASE64 (type: File, protected): base64 of the release
+#     keystore, never committed:
+#       base64 -w0 .keystore/bloviate_keystore.jks
+#   - STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD (masked, protected):
+#     keystore.properties values (see keystore.properties.example).
+#     These reconstruct the gitignored keystore.properties; the resulting
+#     .keystore-signed-flag artifact proves the APK was signed.
 # - whisper-android GitLab project: this project added to its CI/CD job
 #   token allowlist.
 
@@ -112,6 +123,37 @@ stages:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Shared keystore bootstrap (mirrors Stratum's .keystore-setup): reconstructs
+# the gitignored keystore.properties + .jks from CI/CD variables, so
+# app/build.gradle.kts signs exactly like a local release build.
+# KEYSTORE_BASE64 is a File variable: a path to a file holding base64 text.
+.keystore-setup: &keystore-setup
+  - |
+    if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+      mkdir -p .keystore
+      base64 -d "$KEYSTORE_BASE64" > .keystore/bloviate_keystore.jks
+      printf 'storeFile=.keystore/bloviate_keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+        "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+      echo "SIGNED=true" > .keystore-signed-flag
+      echo "Keystore configured — building signed APK"
+    else
+      echo "Keystore secrets not available — building unsigned APK"
+      rm -f .keystore-signed-flag
+    fi
+
+# Fails if secrets are missing — for jobs that MUST be signed.
+# Referenced via `!reference [.keystore-bootstrap, script]`.
+.keystore-bootstrap:
+  script:
+    - *keystore-setup
+    - test -f .keystore-signed-flag || (echo "Missing keystore secrets (KEYSTORE_BASE64 / STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD) — see header of .gitlab-ci.yml" && exit 1)
+
+# Optional keystore bootstrap: signs if secrets are available, builds unsigned
+# otherwise. For jobs like assemble-release that run on MRs without secrets.
+.keystore-bootstrap-optional:
+  script:
+    - *keystore-setup
+
 # Static analysis in one job (mirrors Stratum STR-76): detekt (hard gate,
 # maxIssues: 0) and Android lint share one compile.
 static-analysis:
@@ -153,26 +195,55 @@ assemble-debug:
       - app/build/outputs/apk/debug/*.apk
     expire_in: 1 week
 
+# Release build feeding distribute-internal (mirrors Stratum's
+# assemble-release): signs when keystore secrets are available (main),
+# builds unsigned otherwise (MRs run without secrets) — the
+# .keystore-signed-flag artifact proves which happened, and
+# distribute-internal refuses an unsigned APK.
+assemble-release:
+  extends: .android-job
+  tags: [home-server]
+  stage: test
+  needs: []
+  # Scheduled pipelines must not spend a release build feeding distributions
+  # that schedules never trigger (same guard as Stratum).
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != 'schedule'
+  script:
+    - !reference [.keystore-bootstrap-optional, script]
+    - ./gradlew :app:assembleRelease
+  artifacts:
+    paths:
+      - app/build/outputs/apk/release/*.apk
+      - .keystore-signed-flag
+    expire_in: 1 week
+
 # Firebase App Distribution: merge-to-phone for Sean's dogfooding (ENC-63).
-# Auto-runs on every main merge. Uploads the DEBUG-signed APK produced by
-# assemble-debug — no version bump required, upload as often as needed.
-# Targets the "Internal" tester group.
+# Auto-runs on every main merge. Uploads the RELEASE-signed APK produced by
+# assemble-release — no version bump required, upload as often as needed.
+# Targets the "Internal" tester group. Fails loudly rather than distributing
+# a debug/unsigned build.
 distribute-internal:
   extends: .android-job
   tags: [home-server]
   stage: deploy
   rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != 'schedule'
   # needs: opts out of stage gating, so list the gate jobs explicitly to
-  # prevent distributing an unbuilt/untested change.
-  needs: [assemble-debug, unit-tests, static-analysis]
+  # prevent distributing an unbuilt/untested change. The signed release APK
+  # arrives via the assemble-release artifact — no Gradle rebuild here.
+  needs: [assemble-release, unit-tests, static-analysis]
   script:
     - test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Missing FIREBASE_SERVICE_ACCOUNT_JSON file variable — see header of .gitlab-ci.yml" && exit 1)
     - export GOOGLE_APPLICATION_CREDENTIALS="$FIREBASE_SERVICE_ACCOUNT_JSON"
-    # Explicit contract: assemble-debug must have produced exactly one APK.
+    # Explicit contract: assemble-release must have produced a SIGNED APK.
+    # The .keystore-signed-flag artifact proves secrets were available there.
+    - test -f .keystore-signed-flag || (echo "APK was not signed — assemble-release lacked KEYSTORE_BASE64 / STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD; see header of .gitlab-ci.yml" && exit 1)
+    # Explicit contract: assemble-release must have produced exactly one APK.
     - |
       shopt -s nullglob
-      APK_FILES=(app/build/outputs/apk/debug/*.apk)
+      APK_FILES=(app/build/outputs/apk/release/*.apk)
       shopt -u nullglob
       if [ ${#APK_FILES[@]} -eq 0 ]; then echo "No APK found" && exit 1; fi
       if [ ${#APK_FILES[@]} -gt 1 ]; then echo "Multiple APKs found: ${APK_FILES[*]}" && exit 1; fi
@@ -192,5 +263,5 @@ distribute-internal:
         --non-interactive
   artifacts:
     paths:
-      - app/build/outputs/apk/debug/*.apk
+      - app/build/outputs/apk/release/*.apk
     expire_in: 1 week

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -25,6 +27,16 @@ val gitShortSha: String = try {
     "dev"
 }
 
+// Release signing: gitignored root `keystore.properties` (see keystore.properties.example).
+// Without it, release builds fall back to the debug signing config.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+val hasReleaseKeystore = keystorePropertiesFile.exists().also { exists ->
+    if (exists) {
+        keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+    }
+}
+
 android {
     namespace = "com.shippopotamus.bloviate"
     compileSdk = 37
@@ -45,6 +57,17 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -52,6 +75,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -102,6 +128,15 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    // FirebaseAuth for the auth providers (ENC-197); the session
+    // implementation itself stays in :core:data.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+
+    // Credential Manager exception types for the sign-in error mapper
+    // (ENC-197); the session itself lives in :core:data.
+    implementation(libs.androidx.credentials)
 
     // sherpa-onnx lives with the Parakeet engine in :core:data (ENC-169):
     // see core/data/libs/README.md.

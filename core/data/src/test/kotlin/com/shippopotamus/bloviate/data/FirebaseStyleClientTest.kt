@@ -1,8 +1,13 @@
 package com.shippopotamus.bloviate.data
 
 import com.shippopotamus.bloviate.application.port.AuthSessionPort
+import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.application.port.UserProfile
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -38,12 +43,26 @@ class FirebaseStyleClientTest {
         var ensureCallCount: Int = 0
             private set
 
+        override val authState: StateFlow<AuthState> =
+            MutableStateFlow(
+                if (uid != null) {
+                    AuthState.Authenticated(UserProfile(uid = uid!!, displayName = null, email = null, photoUrl = null))
+                } else {
+                    AuthState.Unauthenticated
+                },
+            ).asStateFlow()
+
         override fun currentUid(): String? = uid
 
         override suspend fun ensureSignedIn(): String? {
             ensureCallCount++
             return uid
         }
+
+        override suspend fun signInWithGoogle(): Result<UserProfile> =
+            Result.failure(UnsupportedOperationException("FakeAuthSession never signs in"))
+
+        override suspend fun signOut(): Result<Unit> = Result.success(Unit)
     }
 
     @Test

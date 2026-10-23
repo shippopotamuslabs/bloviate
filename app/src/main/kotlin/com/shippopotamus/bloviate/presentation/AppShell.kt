@@ -48,6 +48,20 @@ fun MainRoute(
     onboardingViewModel: OnboardingViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
+    // The launcher auth gate (ENC-197): signed-out users see the
+    // sign-in screen instead of the whole shell; the gate reads the
+    // same ViewModel state Setup's account card signs out from.
+    val authState by viewModel.uiState.collectAsStateWithLifecycle()
+    if (authState.auth !is AuthUi.SignedIn) {
+        SignInScreen(
+            isSigningIn = authState.isSigningIn,
+            signInError = authState.signInError,
+            onSignInClick = viewModel::onSignInClick,
+            onErrorDismiss = viewModel::onSignInErrorDismiss,
+            modifier = modifier,
+        )
+        return
+    }
     val onboardingUiState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
     if (onboardingUiState.showWizard) {
         OnboardingScreen(
@@ -88,6 +102,7 @@ fun MainRoute(
                 onBubbleSizeChange = viewModel::onBubbleSizeChange,
                 onBubbleShapeChange = viewModel::onBubbleShapeChange,
                 onBubbleTintChange = viewModel::onBubbleTintChange,
+                onSignOut = viewModel::onSignOutClick,
                 onRunSetupAgain = onboardingViewModel::onRunSetupAgain,
             )
         },

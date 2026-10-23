@@ -14,6 +14,10 @@ import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemp
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.shippopotamus.bloviate.application.port.AuthState
+import com.shippopotamus.bloviate.application.port.UserProfile
+import com.shippopotamus.bloviate.application.usecase.ObserveAuthStateUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveBubbleServiceRunningUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveEnginePreferenceUseCase
@@ -27,6 +31,9 @@ import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCas
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
+import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
+import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
+import com.shippopotamus.bloviate.testing.FakeAuthSession
 import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
@@ -39,8 +46,10 @@ import com.shippopotamus.bloviate.testing.FakeResidentPresencePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.FakeWatcherConnectionPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -65,6 +74,7 @@ class MainViewModelTest {
     private val fakeWatcherConnectionPort = FakeWatcherConnectionPort()
     private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
     private val fakeResidentPresencePort = FakeResidentPresencePort()
+    private val fakeAuthSession = FakeAuthSession()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -89,6 +99,9 @@ class MainViewModelTest {
             setAutoStartEnabled = SetAutoStartEnabledUseCase(fakeResidentPresencePort),
             recordBubbleUserStart = RecordBubbleUserStartUseCase(fakeResidentPresencePort),
             recordBubbleUserStop = RecordBubbleUserStopUseCase(fakeResidentPresencePort),
+            observeAuthState = ObserveAuthStateUseCase(fakeAuthSession),
+            signInWithGoogle = SignInWithGoogleUseCase(fakeAuthSession),
+            signOut = SignOutUseCase(fakeAuthSession),
         )
     }
 
@@ -506,5 +519,125 @@ class MainViewModelTest {
             viewModel.onBubbleStartRequested()
             advanceUntilIdle()
             assertFalse(fakeResidentPresencePort.state.value.userStopped)
+        }
+
+    // ENC-197: the launcher auth gate.
+
+    @Test
+    fun `gate starts signed out while the session is unauthenticated`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                val initial = awaitItem()
+                assertTrue(initial.auth is AuthUi.SignedOut)
+                assertFalse(initial.isSigningIn)
+                assertNull(initial.signInError)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `published google session maps to a signed-in gate with profile strings`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+
+                fakeAuthSession.publish(
+                    AuthState.Authenticated(
+                        UserProfile(
+                            uid = "uid-1",
+                            displayName = "Sean",
+                            email = "sean@example.com",
+                            photoUrl = null,
+                        ),
+                    ),
+                )
+
+                val signedIn = awaitItem().auth
+                assertTrue(signedIn is AuthUi.SignedIn)
+                assertEquals("Sean", (signedIn as AuthUi.SignedIn).displayName)
+                assertEquals("sean@example.com", signedIn.email)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `sign-in success spins then clears without an error`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeAuthSession.stubSignIn(
+                Result.success(UserProfile(uid = "uid-1", displayName = null, email = null, photoUrl = null)),
+            )
+            val gate = CompletableDeferred<Unit>()
+            fakeAuthSession.signInGate = gate
+
+            viewModel.uiState.test {
+                awaitItem()
+
+                viewModel.onSignInClick()
+
+                assertTrue(awaitItem().isSigningIn)
+                gate.complete(Unit)
+                val done = awaitItem()
+                assertFalse(done.isSigningIn)
+                assertNull(done.signInError)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `sign-in failure maps to its user-facing message`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeAuthSession.stubSignIn(Result.failure(IOException("timeout")))
+            val gate = CompletableDeferred<Unit>()
+            fakeAuthSession.signInGate = gate
+
+            viewModel.uiState.test {
+                awaitItem()
+
+                viewModel.onSignInClick()
+
+                assertTrue(awaitItem().isSigningIn)
+                gate.complete(Unit)
+                val done = awaitItem()
+                assertFalse(done.isSigningIn)
+                assertEquals(MSG_NETWORK, done.signInError)
+
+                viewModel.onSignInErrorDismiss()
+                assertNull(awaitItem().signInError)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `sign-in cancellation stays silent`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeAuthSession.stubSignIn(
+                Result.failure(GetCredentialCancellationException()),
+            )
+            val gate = CompletableDeferred<Unit>()
+            fakeAuthSession.signInGate = gate
+
+            viewModel.uiState.test {
+                awaitItem()
+
+                viewModel.onSignInClick()
+
+                assertTrue(awaitItem().isSigningIn)
+                gate.complete(Unit)
+                val done = awaitItem()
+                assertFalse(done.isSigningIn)
+                assertNull(done.signInError)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `sign-out click runs the sign-out use case`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            assertEquals(0, fakeAuthSession.signOutCallCount)
+
+            viewModel.onSignOutClick()
+            advanceUntilIdle()
+
+            assertEquals(1, fakeAuthSession.signOutCallCount)
         }
 }
