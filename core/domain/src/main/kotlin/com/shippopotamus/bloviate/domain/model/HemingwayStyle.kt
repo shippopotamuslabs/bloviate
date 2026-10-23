@@ -50,4 +50,5 @@ internal val HemingwayStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.WRITERS,
 )

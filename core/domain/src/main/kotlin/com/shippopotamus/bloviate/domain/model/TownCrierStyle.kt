@@ -53,4 +53,5 @@ internal val TownCrierStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.PERSONAS,
 )

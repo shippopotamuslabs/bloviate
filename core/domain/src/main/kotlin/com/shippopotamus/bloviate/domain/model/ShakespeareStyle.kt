@@ -64,4 +64,5 @@ internal val ShakespeareStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.WRITERS,
 )

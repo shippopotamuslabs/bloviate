@@ -77,4 +77,5 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.MODERN_PARODY,
 )
