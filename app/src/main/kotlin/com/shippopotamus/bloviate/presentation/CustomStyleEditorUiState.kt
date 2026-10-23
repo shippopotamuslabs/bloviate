@@ -40,6 +40,12 @@ data class FewShotPairUi(
  * [saveSucceeded] is a one-shot event the route observes to navigate
  * back; [loadFailed] means the edited style is gone (deleted elsewhere)
  * and the screen offers its way back.
+ *
+ * Generated-mode fields (BLO-160 S7): [isGenerated] marks a create opened
+ * from an AI draft — only it shows the Regenerate action, and edit-existing
+ * never sets it. [regenerateConfirmPending] is the route's
+ * discard-confirmation signal when the draft is dirty; [isRegenerating]
+ * and [regenerateError] track the in-flight regenerate call.
  */
 data class CustomStyleEditorUiState(
     val isCreate: Boolean = true,
@@ -56,4 +62,8 @@ data class CustomStyleEditorUiState(
     val saveError: CustomStyleSaveError? = null,
     val isDirty: Boolean = false,
     val loadFailed: Boolean = false,
+    val isGenerated: Boolean = false,
+    val isRegenerating: Boolean = false,
+    val regenerateError: CustomStyleGenerationError? = null,
+    val regenerateConfirmPending: Boolean = false,
 )

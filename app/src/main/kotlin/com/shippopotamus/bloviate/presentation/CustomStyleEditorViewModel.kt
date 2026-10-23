@@ -3,7 +3,10 @@ package com.shippopotamus.bloviate.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.application.port.CustomStyleGenerationOutcome
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
+import com.shippopotamus.bloviate.application.port.GeneratedStyleDraft
+import com.shippopotamus.bloviate.application.usecase.GenerateCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleOutcome
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleUseCase
@@ -52,11 +55,17 @@ internal const val MAX_CUSTOM_STYLE_FEWSHOT_SIDE_CHARS: Int = 1500
  * contract. An edit sends the real id with the revision read at load, so
  * a concurrent change elsewhere surfaces as a conflict instead of a
  * silent overwrite.
+ *
+ * Generated mode (BLO-160 S7): [loadGenerated] opens a create prefilled
+ * from an AI draft, keeping the draft as the clean baseline and the
+ * source description for [onRegenerateClick]. Edit-existing targets never
+ * enter generated mode, so they never regenerate.
  */
 @HiltViewModel
 class CustomStyleEditorViewModel @Inject constructor(
     private val observeCustoms: ObserveCustomStylesUseCase,
     private val saveSynced: SaveSyncedCustomStyleUseCase,
+    private val generate: GenerateCustomStyleUseCase,
     private val validator: CustomStyleValidator,
 ) : ViewModel() {
 
@@ -83,36 +92,102 @@ class CustomStyleEditorViewModel @Inject constructor(
                 systemInstructions = definition.systemInstructions,
                 pairs = definition.fewShots.map { shot -> shot.raw to shot.styled },
             )
+
+            fun fromGenerated(generated: GeneratedStyleDraft): Draft = Draft(
+                displayName = generated.displayName,
+                description = generated.description,
+                sample = generated.sample,
+                systemInstructions = generated.systemInstructions,
+                pairs = generated.fewShots.map { shot -> shot.raw to shot.styled },
+            )
         }
     }
+
+    /**
+     * The generated clean baseline plus the source description that
+     * produced it (BLO-160 S7). Null outside generated mode; set by
+     * [loadGenerated] and replaced by every successful regenerate, so the
+     * draft reads clean again right after a fresh draft lands.
+     */
+    private data class GeneratedBasis(
+        val draft: Draft,
+        val sourceDescription: String,
+    )
 
     private val loaded = MutableStateFlow<LoadedTarget?>(null)
     private val draft = MutableStateFlow(Draft())
     private val saving = MutableStateFlow(false)
     private val saveError = MutableStateFlow<CustomStyleSaveError?>(null)
     private val loadFailed = MutableStateFlow(false)
+    private val generatedBasis = MutableStateFlow<GeneratedBasis?>(null)
+    private val regenerating = MutableStateFlow(false)
+    private val regenerateError = MutableStateFlow<CustomStyleGenerationError?>(null)
+    private val regenerateConfirmPending = MutableStateFlow(false)
 
     private var hasLoadedFor: String? = null
     private var hasLoaded: Boolean = false
     private var savedSinceLoad: Boolean = false
     private var loadGeneration: Int = 0
 
-    val uiState: StateFlow<CustomStyleEditorUiState> = combine(
+    /**
+     * The two [uiState] slices, combined separately: this coroutines build
+     * ships `combine` overloads only up to five flows, so the nine
+     * underlying flows ride as two groups.
+     */
+    private data class EditorBase(
+        val target: LoadedTarget?,
+        val draft: Draft,
+        val saving: Boolean,
+        val saveError: CustomStyleSaveError?,
+        val loadFailed: Boolean,
+    )
+
+    /** The generated-mode slice of [CustomStyleEditorUiState]. */
+    private data class GeneratedUi(
+        val basis: GeneratedBasis?,
+        val regenerating: Boolean,
+        val error: CustomStyleGenerationError?,
+        val confirmPending: Boolean,
+    )
+
+    private val editorBase: Flow<EditorBase> = combine(
         loaded,
         draft,
         saving,
         saveError,
         loadFailed,
+        ::EditorBase,
+    )
+
+    private val generatedUi: Flow<GeneratedUi> = combine(
+        generatedBasis,
+        regenerating,
+        regenerateError,
+        regenerateConfirmPending,
+        ::GeneratedUi,
+    )
+
+    val uiState: StateFlow<CustomStyleEditorUiState> = combine(
+        editorBase,
+        generatedUi,
         ::buildUiState,
     ).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
         initialValue = buildUiState(
-            loaded.value,
-            draft.value,
-            saving.value,
-            saveError.value,
-            loadFailed.value,
+            EditorBase(
+                target = loaded.value,
+                draft = draft.value,
+                saving = saving.value,
+                saveError = saveError.value,
+                loadFailed = loadFailed.value,
+            ),
+            GeneratedUi(
+                basis = generatedBasis.value,
+                regenerating = regenerating.value,
+                error = regenerateError.value,
+                confirmPending = regenerateConfirmPending.value,
+            ),
         ),
     )
 
@@ -127,7 +202,12 @@ class CustomStyleEditorViewModel @Inject constructor(
      * recomposition never clobber the draft; a new target resets it.
      */
     fun load(styleId: String?) {
-        if (hasLoaded && hasLoadedFor == styleId && !savedSinceLoad) {
+        // A lingering generated basis blocks the same-target no-op: the
+        // route reaches load() without a handoff only when the user asked
+        // for a manual target, so a stale AI draft must reset, never
+        // survive behind the early return.
+        val isSameTargetReload = hasLoaded && hasLoadedFor == styleId && !savedSinceLoad
+        if (isSameTargetReload && generatedBasis.value == null) {
             return
         }
         hasLoaded = true
@@ -137,6 +217,10 @@ class CustomStyleEditorViewModel @Inject constructor(
         saving.update { false }
         saveError.update { null }
         loadFailed.update { false }
+        generatedBasis.update { null }
+        regenerating.update { false }
+        regenerateError.update { null }
+        regenerateConfirmPending.update { false }
         if (styleId == null) {
             loaded.update { LoadedTarget(styleId = null, revision = null, original = null) }
             draft.update { Draft() }
@@ -164,6 +248,30 @@ class CustomStyleEditorViewModel @Inject constructor(
                 draft.update { Draft.from(record.definition) }
             }
         }
+    }
+
+    /**
+     * Opens a create prefilled from an AI draft (BLO-160 S7): the draft
+     * fields land verbatim for review, the draft becomes the clean
+     * baseline, and [sourceDescription] is retained for regenerates. The
+     * save path is unchanged — a generated create still sends a blank id
+     * with a null revision, and the server allocates the id.
+     */
+    fun loadGenerated(draft: GeneratedStyleDraft, sourceDescription: String) {
+        hasLoaded = true
+        hasLoadedFor = null
+        savedSinceLoad = false
+        loadGeneration++
+        saving.update { false }
+        saveError.update { null }
+        loadFailed.update { false }
+        regenerating.update { false }
+        regenerateError.update { null }
+        regenerateConfirmPending.update { false }
+        val fresh = Draft.fromGenerated(draft)
+        generatedBasis.update { GeneratedBasis(draft = fresh, sourceDescription = sourceDescription) }
+        loaded.update { LoadedTarget(styleId = null, revision = null, original = null) }
+        this.draft.update { fresh }
     }
 
     fun onDisplayNameChange(value: String) {
@@ -216,9 +324,70 @@ class CustomStyleEditorViewModel @Inject constructor(
         }
     }
 
-    /** Dismisses the save error line; the draft is kept. */
+    /**
+     * Dismisses the error lines; the draft is kept. Save and regenerate
+     * failures share one dismiss because they share one screen and one
+     * retry posture — a failed call reports inline, and the next keystroke
+     * clears it anyway.
+     */
     fun onSaveErrorDismiss() {
         saveError.update { null }
+        regenerateError.update { null }
+    }
+
+    /**
+     * Regenerate entry point (BLO-160 S7, generated mode only): a clean
+     * draft regenerates immediately, a dirty one raises the route's
+     * discard-confirmation first. A no-op outside generated mode, so
+     * edit-existing can never regenerate.
+     */
+    fun onRegenerateClick() {
+        val basis = generatedBasis.value ?: return
+        if (draft.value != basis.draft) {
+            regenerateConfirmPending.update { true }
+        } else {
+            launchRegenerate(basis.sourceDescription)
+        }
+    }
+
+    /** Confirms the dirty-draft discard and regenerates from the retained description. */
+    fun onRegenerateConfirm() {
+        regenerateConfirmPending.update { false }
+        val basis = generatedBasis.value ?: return
+        launchRegenerate(basis.sourceDescription)
+    }
+
+    /** Keeps editing; the dirty draft is untouched. */
+    fun onRegenerateDismissConfirm() {
+        regenerateConfirmPending.update { false }
+    }
+
+    /**
+     * Regenerates from [sourceDescription] and replaces the draft fields,
+     * resetting the clean baseline — the fresh draft reads clean, and the
+     * retained description is unchanged, so back-to-back regenerates are
+     * always possible. A regenerate failure keeps the draft and reports.
+     */
+    private fun launchRegenerate(sourceDescription: String) {
+        if (saving.value || regenerating.value) {
+            return
+        }
+        viewModelScope.launch {
+            regenerating.update { true }
+            regenerateError.update { null }
+            when (val outcome = generate(sourceDescription)) {
+                is CustomStyleGenerationOutcome.Ok -> {
+                    val fresh = Draft.fromGenerated(outcome.draft)
+                    draft.update { fresh }
+                    generatedBasis.update {
+                        GeneratedBasis(draft = fresh, sourceDescription = sourceDescription)
+                    }
+                }
+                is CustomStyleGenerationOutcome.Failed ->
+                    regenerateError.update { outcome.failure.toGenerationError() }
+            }
+            regenerating.update { false }
+        }
     }
 
     /**
@@ -229,7 +398,10 @@ class CustomStyleEditorViewModel @Inject constructor(
     fun onSaveClick() {
         val target = loaded.value ?: return
         val snapshot = draft.value
-        if (saving.value || !validator.validate(snapshot.toDefinition(target.styleId).forValidation(target.styleId)).isEmpty()) {
+        val violations = validator.validate(
+            snapshot.toDefinition(target.styleId).forValidation(target.styleId),
+        )
+        if (saving.value || regenerating.value || violations.isNotEmpty()) {
             return
         }
         viewModelScope.launch {
@@ -252,12 +424,15 @@ class CustomStyleEditorViewModel @Inject constructor(
 
     /**
      * A create is dirty once any field differs from the blank start; an
-     * edit is dirty once the draft differs from the loaded record. While
-     * the target is still resolving, nothing counts as dirty.
+     * edit is dirty once the draft differs from the loaded record; a
+     * generated create is dirty once the draft differs from the last
+     * generated baseline. While the target is still resolving, nothing
+     * counts as dirty.
      */
-    private fun LoadedTarget?.isDirty(draft: Draft): Boolean =
+    private fun LoadedTarget?.isDirty(draft: Draft, basis: GeneratedBasis?): Boolean =
         when {
             this == null -> false
+            basis != null -> draft != basis.draft
             original == null -> draft != Draft()
             else -> draft != Draft.from(original)
         }
@@ -265,18 +440,18 @@ class CustomStyleEditorViewModel @Inject constructor(
     private fun updateDraft(transform: Draft.() -> Draft) {
         draft.update(transform)
         saveError.update { null }
+        regenerateError.update { null }
     }
 
     private fun buildUiState(
-        target: LoadedTarget?,
-        draft: Draft,
-        saving: Boolean,
-        saveError: CustomStyleSaveError?,
-        loadFailed: Boolean,
+        base: EditorBase,
+        generated: GeneratedUi,
     ): CustomStyleEditorUiState {
-        if (target == null && !loadFailed) {
-            return CustomStyleEditorUiState(isSaving = saving)
+        val target = base.target
+        if (target == null && !base.loadFailed) {
+            return CustomStyleEditorUiState(isSaving = base.saving)
         }
+        val draft = base.draft
         val violations = validator.validate(draft.toDefinition(target?.styleId).forValidation(target?.styleId))
         return CustomStyleEditorUiState(
             isCreate = target?.styleId == null,
@@ -289,10 +464,14 @@ class CustomStyleEditorViewModel @Inject constructor(
             isValid = violations.isEmpty(),
             canAddPair = draft.pairs.size < MAX_FEWSHOT_PAIRS,
             canRemovePair = draft.pairs.size > MIN_FEWSHOT_PAIRS,
-            isSaving = saving,
-            saveError = saveError,
-            isDirty = target.isDirty(draft),
-            loadFailed = loadFailed,
+            isSaving = base.saving,
+            saveError = base.saveError,
+            isDirty = target.isDirty(draft, generated.basis),
+            loadFailed = base.loadFailed,
+            isGenerated = generated.basis != null,
+            isRegenerating = generated.regenerating,
+            regenerateError = generated.error,
+            regenerateConfirmPending = generated.confirmPending,
         )
     }
 
