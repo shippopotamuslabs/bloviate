@@ -39,11 +39,12 @@ class StyleViewModel @Inject constructor(
             initialValue = buildUiState(observeSelectedStyle().value),
         )
 
-    /** Groups the catalog by category in enum order, preserving catalog order within a section. */
+    /** Groups the catalog by category in enum order, alphabetical by display name within a section. */
     private fun buildUiState(selectedId: String): StyleUiState =
         StyleUiState(
             sections = StyleCategory.entries.mapNotNull { category ->
                 val styles = catalog.filter { style -> style.category == category }
+                    .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { style -> style.displayName })
                     .map { style -> style.toOption(selectedId) }
                 if (styles.isEmpty()) {
                     null
