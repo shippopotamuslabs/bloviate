@@ -1,11 +1,21 @@
 package com.shippopotamus.bloviate.application.evaluator
 
+import com.shippopotamus.bloviate.application.port.CustomStyleRecord
+import com.shippopotamus.bloviate.application.port.CustomStylesState
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.application.port.SendStage
+import com.shippopotamus.bloviate.domain.model.FewShot
+import com.shippopotamus.bloviate.domain.model.StyleCategory
+import com.shippopotamus.bloviate.domain.model.StyleDefinition
+import com.shippopotamus.bloviate.domain.model.StyleKind
+import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeSendProgressPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.FakeTextPostProcessor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -18,11 +28,13 @@ class StylingTextPostProcessorTest {
     private val fakeLocal = FakeTextPostProcessor()
     private val fakeStyles = FakeStylePreferencePort()
     private val fakeLlm = FakeLlmStylePort()
+    private val fakeCustoms = FakeCustomStyleStorePort()
 
     private val processor = StylingTextPostProcessor(
         local = fakeLocal,
         stylePreference = fakeStyles,
         llm = fakeLlm,
+        resolver = StyleResolver(store = fakeCustoms, scope = CoroutineScope(Dispatchers.Unconfined)),
     )
 
     @Test
@@ -148,4 +160,75 @@ class StylingTextPostProcessorTest {
         assertEquals("seneca", after.styleId)
         assertEquals("Polished.", after.text)
     }
+
+    @Test
+    fun `a custom llm id reaches the model instead of the catalog default`() = runTest {
+        fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+        fakeStyles.setSelected("custom-mine")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished.", llmMs = 10L)
+        val scoped = StylingTextPostProcessor(
+            local = fakeLocal,
+            stylePreference = fakeStyles,
+            llm = fakeLlm,
+            resolver = StyleResolver(store = fakeCustoms, scope = backgroundScope),
+        )
+
+        val result = scoped.process("raw words")
+
+        assertEquals("custom-mine", result.styleId)
+        assertEquals("Polished.", result.text)
+        assertEquals(listOf("custom-mine" to "raw words"), fakeLlm.inputs)
+    }
+
+    @Test
+    fun `a custom id waits for the snapshot on a cold start`() = runTest {
+        fakeCustoms.setState(CustomStylesState(styles = emptyList(), isLoaded = false))
+        fakeStyles.setSelected("custom-mine")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished.", llmMs = 10L)
+        val scoped = StylingTextPostProcessor(
+            local = fakeLocal,
+            stylePreference = fakeStyles,
+            llm = fakeLlm,
+            resolver = StyleResolver(store = fakeCustoms, scope = backgroundScope),
+        )
+        backgroundScope.launch {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+        }
+
+        val result = scoped.process("raw words")
+
+        assertEquals("custom-mine", result.styleId)
+        assertEquals("Polished.", result.text)
+    }
+
+    @Test
+    fun `an unknown id falls back to the default with no llm call`() = runTest {
+        fakeStyles.setSelected("not-a-style")
+
+        val result = processor.process("raw words")
+
+        assertEquals("normal-caps-casual", result.styleId)
+        assertEquals("raw words", result.text)
+        assertFalse(result.fellBack)
+        assertEquals(0, fakeLlm.callCount)
+    }
+
+    private fun customRecord(id: String, name: String): CustomStyleRecord =
+        CustomStyleRecord(
+            definition = StyleDefinition(
+                id = id,
+                displayName = name,
+                description = "A custom style.",
+                sample = "Yeah, tomorrow.",
+                systemInstructions = "My voice. NEVER change facts.",
+                fewShots = listOf(
+                    FewShot(raw = "hear this", styled = "Hear this."),
+                    FewShot(raw = "try again", styled = "Try again."),
+                ),
+                kind = StyleKind.LLM,
+                category = StyleCategory.CUSTOM,
+            ),
+            revision = 1L,
+            updatedAtEpochMillis = 0L,
+        )
 }

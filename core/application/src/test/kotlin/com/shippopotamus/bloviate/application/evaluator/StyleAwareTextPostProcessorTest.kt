@@ -3,9 +3,18 @@ import com.shippopotamus.bloviate.domain.evaluator.LowercaseCasualTransformer
 import com.shippopotamus.bloviate.domain.evaluator.DictionaryCorrector
 import com.shippopotamus.bloviate.domain.evaluator.BaselineTextPostProcessor
 
+import com.shippopotamus.bloviate.application.port.CustomStyleRecord
+import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.domain.model.PersonalDictionary
+import com.shippopotamus.bloviate.domain.model.StyleCategory
+import com.shippopotamus.bloviate.domain.model.StyleDefinition
+import com.shippopotamus.bloviate.domain.model.StyleKind
+import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeDictionaryPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -13,6 +22,7 @@ class StyleAwareTextPostProcessorTest {
 
     private val fakeDictionary = FakeDictionaryPort()
     private val fakeStyle = FakeStylePreferencePort()
+    private val fakeCustoms = FakeCustomStyleStorePort()
     private val processor = StyleAwareTextPostProcessor(
         delegate = DictionaryAwareTextPostProcessor(
             baseline = BaselineTextPostProcessor(),
@@ -21,6 +31,7 @@ class StyleAwareTextPostProcessorTest {
         ),
         stylePreference = fakeStyle,
         lowercaseCasual = LowercaseCasualTransformer(),
+        resolver = StyleResolver(store = fakeCustoms, scope = CoroutineScope(Dispatchers.Unconfined)),
     )
 
     @Test
@@ -69,5 +80,61 @@ class StyleAwareTextPostProcessorTest {
         fakeStyle.setSelected("lowercase-casual")
         fakeDictionary.setDictionary(PersonalDictionary.EMPTY)
         assertEquals("i saw a perikit", processor.process("i saw a perikit"))
+    }
+
+    @Test
+    fun `a cached custom style resolves instead of the catalog default`() = runTest {
+        // Customs shadow the catalog in the resolver: a custom record
+        // carrying a mechanical id takes effect on the sync local path.
+        fakeCustoms.replaceSnapshot(
+            listOf(
+                CustomStyleRecord(
+                    definition = StyleDefinition(
+                        id = "lowercase-casual",
+                        displayName = "Custom lower",
+                        description = "A custom style.",
+                        sample = "Yeah, tomorrow.",
+                        systemInstructions = "My voice.",
+                        fewShots = listOf(
+                            FewShot(raw = "hear this", styled = "Hear this."),
+                            FewShot(raw = "try again", styled = "Try again."),
+                        ),
+                        kind = StyleKind.MECHANICAL,
+                        category = StyleCategory.CUSTOM,
+                    ),
+                    revision = 1L,
+                    updatedAtEpochMillis = 0L,
+                ),
+            ),
+        )
+        fakeStyle.setSelected("lowercase-casual")
+        assertEquals("hello world", processor.process("Hello World"))
+    }
+
+    @Test
+    fun `a custom llm id passes through unchanged on the sync local path`() = runTest {
+        fakeCustoms.replaceSnapshot(
+            listOf(
+                CustomStyleRecord(
+                    definition = StyleDefinition(
+                        id = "custom-mine",
+                        displayName = "Mine",
+                        description = "A custom style.",
+                        sample = "Yeah, tomorrow.",
+                        systemInstructions = "My voice.",
+                        fewShots = listOf(
+                            FewShot(raw = "hear this", styled = "Hear this."),
+                            FewShot(raw = "try again", styled = "Try again."),
+                        ),
+                        kind = StyleKind.LLM,
+                        category = StyleCategory.CUSTOM,
+                    ),
+                    revision = 1L,
+                    updatedAtEpochMillis = 0L,
+                ),
+            ),
+        )
+        fakeStyle.setSelected("custom-mine")
+        assertEquals("Hello world", processor.process("hello world"))
     }
 }

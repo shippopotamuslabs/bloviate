@@ -11,8 +11,10 @@ import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveStyleCatalogUseCase
+import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
+import com.shippopotamus.bloviate.testing.FakeCustomStyleSyncPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.flow.collect
@@ -33,6 +35,7 @@ class StyleViewModelTest {
 
     private val fakeStyle = FakeStylePreferencePort()
     private val fakeCustoms = FakeCustomStyleStorePort()
+    private val fakeSync = FakeCustomStyleSyncPort()
     private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
     private lateinit var viewModel: StyleViewModel
 
@@ -44,6 +47,7 @@ class StyleViewModelTest {
             ),
             observeSelectedStyle = ObserveSelectedStyleUseCase(fakeStyle),
             selectStyle = SelectStyleUseCase(fakeStyle),
+            refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
         )
     }
 
@@ -64,6 +68,17 @@ class StyleViewModelTest {
                 val initial = awaitItem()
                 assertEquals(StyleCatalog.ALL.map { style -> style.id }.toSet(), initial.sections.flatMap { section -> section.styles }.map { it.id }.toSet())
                 assertEquals(listOf(StyleCatalog.DEFAULT.id), initial.sections.flatMap { section -> section.styles }.filter { it.isSelected }.map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `init refreshes the custom-styles cache without blocking the tab`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            advanceUntilIdle()
+
+            assertEquals(1, fakeSync.listCallCount)
+            viewModel.uiState.test {
                 cancelAndIgnoreRemainingEvents()
             }
         }

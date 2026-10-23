@@ -13,8 +13,11 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.data.CustomStyleSyncGateway
 import com.shippopotamus.bloviate.data.DataStoreCustomStyleStore
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
+import com.shippopotamus.bloviate.data.FirebaseCustomStyleSyncClient
+import com.shippopotamus.bloviate.data.FirebaseCustomStyleSyncGateway
 import com.shippopotamus.bloviate.data.FirebaseStyleClient
 import com.shippopotamus.bloviate.data.FirebaseStyleFunctionGateway
 import com.shippopotamus.bloviate.data.StyleFunctionGateway
@@ -23,6 +26,7 @@ import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.application.port.AuthSessionPort
 import com.shippopotamus.bloviate.application.port.AudioCapturePort
 import com.shippopotamus.bloviate.application.port.CustomStyleStorePort
+import com.shippopotamus.bloviate.application.port.CustomStyleSyncPort
 import com.shippopotamus.bloviate.application.port.DictionaryPort
 import com.shippopotamus.bloviate.application.port.EnginePreferencePort
 import com.shippopotamus.bloviate.application.port.LlmStylePort
@@ -97,6 +101,14 @@ abstract class VoiceModule {
 
     @Binds
     abstract fun bindStyleFunctionGateway(gateway: FirebaseStyleFunctionGateway): StyleFunctionGateway
+
+    /** The raw custom-styles callable surface (BLO-25 S4) behind its narrow gateway interface. */
+    @Binds
+    abstract fun bindCustomStyleSyncGateway(gateway: FirebaseCustomStyleSyncGateway): CustomStyleSyncGateway
+
+    /** The server side of the custom-styles cache (BLO-25 S4) behind its application port. */
+    @Binds
+    abstract fun bindCustomStyleSyncPort(client: FirebaseCustomStyleSyncClient): CustomStyleSyncPort
 
     companion object {
 
