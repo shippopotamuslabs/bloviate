@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.data
 
-import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
+import com.shippopotamus.bloviate.application.port.WatcherConnectionPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

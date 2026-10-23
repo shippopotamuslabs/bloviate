@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
-import com.shippopotamus.bloviate.domain.port.BubbleAppearancePort
+import com.shippopotamus.bloviate.application.port.BubbleAppearancePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

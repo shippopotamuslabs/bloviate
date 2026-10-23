@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.data
 
-import com.shippopotamus.bloviate.domain.port.ShadePresencePort
+import com.shippopotamus.bloviate.application.port.ShadePresencePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

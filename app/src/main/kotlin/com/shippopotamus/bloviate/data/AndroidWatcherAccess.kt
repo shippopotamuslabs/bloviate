@@ -3,7 +3,7 @@ package com.shippopotamus.bloviate.data
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
-import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
+import com.shippopotamus.bloviate.application.port.WatcherAccessPort
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton

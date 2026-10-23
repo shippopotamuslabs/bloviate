@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.BubblePosition
-import com.shippopotamus.bloviate.domain.port.BubblePositionPort
+import com.shippopotamus.bloviate.application.port.BubblePositionPort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow

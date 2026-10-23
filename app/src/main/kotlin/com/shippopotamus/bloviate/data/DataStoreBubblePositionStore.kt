@@ -7,7 +7,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import com.shippopotamus.bloviate.domain.model.BubblePosition
-import com.shippopotamus.bloviate.domain.port.BubblePositionPort
+import com.shippopotamus.bloviate.application.port.BubblePositionPort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map

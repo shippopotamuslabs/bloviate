@@ -17,10 +17,10 @@ import com.shippopotamus.bloviate.domain.evaluator.TextSplicer
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
 import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
 import com.shippopotamus.bloviate.domain.model.WatcherWindowSnapshot
-import com.shippopotamus.bloviate.domain.port.FieldFocusPort
-import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
-import com.shippopotamus.bloviate.domain.port.ShadePresencePort
-import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
+import com.shippopotamus.bloviate.application.port.FieldFocusPort
+import com.shippopotamus.bloviate.application.port.KeyboardVisibilityPort
+import com.shippopotamus.bloviate.application.port.ShadePresencePort
+import com.shippopotamus.bloviate.application.port.WatcherConnectionPort
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 

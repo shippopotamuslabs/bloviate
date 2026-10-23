@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.testing
 
-import com.shippopotamus.bloviate.domain.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.AudioCapturePort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.onStart
