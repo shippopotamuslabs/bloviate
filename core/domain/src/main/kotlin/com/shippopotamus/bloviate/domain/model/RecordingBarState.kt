@@ -3,9 +3,8 @@ package com.shippopotamus.bloviate.domain.model
 /**
  * Visual state of the bubble window while dictation is possible, mirroring
  * the bubble states in `contracts/UI_DESIGN_SPEC.md` §3. The mic bubble and
- * the recording bar are one window: [Idle] renders the mic bubble, every
- * other state renders the recording bar that the bubble transforms into
- * (ENC-48's binding interaction design).
+ * the recording row are one window with instant content swaps (ENC-167):
+ * [Idle] renders the mic bubble, the other states render their own elements.
  */
 sealed interface RecordingBarState {
 
