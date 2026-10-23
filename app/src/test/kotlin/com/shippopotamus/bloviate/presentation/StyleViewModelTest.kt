@@ -130,7 +130,7 @@ class StyleViewModelTest {
                     ),
                     initial.sections.map { section -> section.headerRes },
                 )
-                assertEquals(listOf(4, 8, 4, 4, 5, 5), initial.sections.map { section -> section.styles.size })
+                assertEquals(listOf(4, 8, 4, 4, 5, 6), initial.sections.map { section -> section.styles.size })
                 StyleCategory.entries.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }
@@ -144,7 +144,7 @@ class StyleViewModelTest {
                     initial.sections[1].styles.map { style -> style.id },
                 )
                 assertEquals(
-                    listOf("academic-jargon", "corporate-linkedin", "edgelord", "gen-z-brainrot", "legal-contract"),
+                    listOf("academic-jargon", "corporate-linkedin", "edgelord", "gen-z-brainrot", "legal-contract", "ultra-hr"),
                     initial.sections[5].styles.map { style -> style.id },
                 )
                 cancelAndIgnoreRemainingEvents()

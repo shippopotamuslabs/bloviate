@@ -547,6 +547,7 @@ object StyleCatalog {
         TownCrierStyle,
         PirateStyle,
         CorporateLinkedInStyle,
+        UltraHrStyle,
         LegalContractStyle,
         AcademicJargonStyle,
         GenZBrainrotStyle,
