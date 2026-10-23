@@ -18,6 +18,7 @@ class FakeFocusedFieldOperator(
     var pasteOutcome: FocusedFieldOutcome = FocusedFieldOutcome.COMPLETED
     var spliceOutcome: FocusedFieldOutcome = FocusedFieldOutcome.COMPLETED
     var pasteFailure: Exception? = null
+    var spliceFailure: Exception? = null
 
     var pasteCallCount: Int = 0
         private set
@@ -43,6 +44,7 @@ class FakeFocusedFieldOperator(
 
     override fun spliceIntoFocusedField(insertion: String): FocusedFieldOutcome {
         spliceCallCount++
+        spliceFailure?.let { throw it }
         splicedTexts += insertion
         return spliceOutcome
     }
