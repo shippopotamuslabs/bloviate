@@ -1,5 +1,7 @@
 # Vendored libraries
 
+Vendored with the `:core:data` module since ENC-169 (previously `app/libs/`).
+
 ## sherpa-onnx-1.13.8.aar
 
 - **What:** sherpa-onnx Android AAR (Kotlin API + JNI + bundled onnxruntime),
