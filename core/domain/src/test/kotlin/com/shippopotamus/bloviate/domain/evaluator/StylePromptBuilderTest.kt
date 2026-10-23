@@ -109,8 +109,8 @@ class StylePromptBuilderTest {
                 "transatlantic system lacks the register-of-the-language directive",
             )
             assertTrue(
-                prompt.system.content.contains("length follows the source"),
-                "transatlantic system lacks the length-follows-source rule",
+                prompt.system.content.contains("the era lives in the structure"),
+                "transatlantic system lacks the period-structure rule",
             )
             assertTrue(
                 !prompt.system.content.contains("no sentence runs past twelve words"),
@@ -165,11 +165,12 @@ class StylePromptBuilderTest {
     @Test
     fun `the same transcript through both era styles carries diction against period`() {
         // ENC-104: the contrast lives in the assembled prompts, not
-        // just the catalog data. ENC-144: the fork is diction, not
-        // architecture — one transcript through Transatlantic
-        // carries the vernacular diction bank and the
-        // length-follows-source rule; through The Colonel it carries
-        // the periodic mandate and the ban on clipping. Both keep
+        // just the catalog data. Sean's 2026-10-22 tweak: the fork
+        // is register emphasis, not a syntax ban — one transcript
+        // through Transatlantic carries the vernacular diction bank
+        // and the period-structure rule (the written broadsheet
+        // voice braided in); through The Colonel it carries the
+        // periodic mandate and the ban on clipping. Both keep
         // the demarcated shape.
         val colonel = StyleCatalog.byId("the-colonel")
 
@@ -179,8 +180,8 @@ class StylePromptBuilderTest {
             "transatlantic prompt lacks the diction bank",
         )
         assertTrue(
-            transatlanticPrompt.system.content.contains("length follows the source"),
-            "transatlantic prompt lacks the length-follows-source rule",
+            transatlanticPrompt.system.content.contains("the era lives in the structure"),
+            "transatlantic prompt lacks the period-structure rule",
         )
         assertTrue(
             !transatlanticPrompt.system.content.contains("no sentence runs past twelve words"),
