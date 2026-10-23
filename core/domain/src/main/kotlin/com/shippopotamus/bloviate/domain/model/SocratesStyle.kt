@@ -68,5 +68,5 @@ internal val SocratesStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
-    category = StyleCategory.ANCIENT_PHILOSOPHERS,
+    category = StyleCategory.PHILOSOPHERS,
 )

@@ -19,7 +19,7 @@ enum class StyleKind {
 /** Section a style belongs to on the Styles screen (ENC-188); declaration order is display order. */
 enum class StyleCategory {
     SERIOUS,
-    ANCIENT_PHILOSOPHERS,
+    PHILOSOPHERS,
     WRITERS,
     ERAS_AND_GENRES,
     PERSONAS,
@@ -236,7 +236,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
-        category = StyleCategory.ANCIENT_PHILOSOPHERS,
+        category = StyleCategory.PHILOSOPHERS,
     )
 
     private val Seneca: StyleDefinition = StyleDefinition(
@@ -301,7 +301,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
-        category = StyleCategory.ANCIENT_PHILOSOPHERS,
+        category = StyleCategory.PHILOSOPHERS,
     )
 
     private val MarcusAurelius: StyleDefinition = StyleDefinition(
@@ -366,7 +366,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
-        category = StyleCategory.ANCIENT_PHILOSOPHERS,
+        category = StyleCategory.PHILOSOPHERS,
     )
 
     private val OscarWilde: StyleDefinition = StyleDefinition(
