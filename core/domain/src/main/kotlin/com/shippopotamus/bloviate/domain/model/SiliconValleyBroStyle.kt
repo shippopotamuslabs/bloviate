@@ -12,6 +12,19 @@ internal val SiliconValleyBroStyle: StyleDefinition = StyleDefinition(
         "momentum, commas where the pitch breathes, exclamation rare and earned. " +
         "Paragraphing: one shipping block — where things stand, the founder " +
         "framing, the next iteration last. " +
+        "REWRITE, do not copy-edit: recast every sentence — new sentence shapes " +
+        "and verbs, the speaker's facts in this voice's mouth. " +
+        "Returning the input unchanged is a FAILURE — changing only " +
+        "capitalisation or punctuation is a FAILURE too. " +
+        "Even when the input already mentions shipping or the gym, push it " +
+        "further into the voice; already on-topic is not already in-voice. " +
+        "Founder framing is metaphor, not fact: any fact the speaker gave — " +
+        "a lunch, a workout, an errand, a bill — may be framed as fuel, reps, " +
+        "runway discipline, compounding, or a feedback loop. Framing invents " +
+        "nothing; do not confuse it with invented traction. " +
+        "Land the voice in every output: at least two operator-framing recasts " +
+        "where the text carries two or more facts, at least one for a " +
+        "single-fact text. " +
         "Voice: Silicon Valley Bro — the bootstrapped founder-operator. First " +
         "person throughout: the output is the speaker's own message, never a " +
         "pitch deck about someone else. " +
@@ -45,23 +58,36 @@ internal val SiliconValleyBroStyle: StyleDefinition = StyleDefinition(
     fewShots = listOf(
         FewShot(
             raw = "i finally fixed the login bug and the update is ready to send to testers on friday",
-            styled = "Finally shipped the fix for the login bug. The update is ready " +
-                "to send to testers on Friday — no vaporware, just iterate, get it " +
-                "in real hands, and let the feedback loop do its job. Momentum compounds.",
+            styled = "The login bug is crushed and closed — that fix is shipped, not " +
+                "slideware. Friday the update lands with testers: real hands, real " +
+                "reps, the feedback loop doing the teaching. One release out, one " +
+                "iteration tighter, momentum compounding.",
         ),
         FewShot(
             raw = "i went to the gym before work and then spent the afternoon answering emails about the budget",
-            styled = "Hit the gym before work — progressive overload is just product " +
-                "thinking for the body — then spent the afternoon answering emails " +
-                "about the budget. Runway discipline in the inbox, discipline in " +
-                "the gym. Same operating system, two dashboards.",
+            styled = "The gym came first this morning — progressive overload, reps " +
+                "logged before the inbox even opened. Then the afternoon turned " +
+                "into runway discipline: emails triaged, the budget stared down " +
+                "line by line. Same operating system, two dashboards — body " +
+                "compounding, business compounding.",
         ),
         FewShot(
             raw = "our little app got twelve new users this week and i am thinking about charging five dollars a month",
-            styled = "Our little app picked up twelve new users this week. Twelve real " +
-                "humans — that's early traction, not vanity metrics. Thinking about " +
-                "charging five dollars a month: real dollars are the cleanest " +
-                "product-market-fit signal there is. Bootstrapped, shipping, compounding.",
+            styled = "Twelve new humans showed up this week for the little app — " +
+                "twelve, not a vanity spike, just early traction with a pulse. " +
+                "Next lever: charging five dollars a month, because real dollars " +
+                "are the cleanest product-market-fit signal there is. Bootstrapped, " +
+                "one release at a time, compounding.",
+        ),
+        FewShot(
+            raw = "just out here trying to ship some apps and i had my cardboard microwave beef and noodles lunch " +
+                "with some parmesan cheese on it and that was good and i hit the gym this morning and made some gains",
+            styled = "Release by release, the apps keep shipping — no theatre, just " +
+                "reps. Operator fuel today: cardboard microwave beef and noodles " +
+                "under a snowfall of parmesan, and honestly, that lunch landed — " +
+                "good fuel, no friction. Gym this morning before anything else: " +
+                "progressive overload in the gym, gains compounding like retention. " +
+                "Fuel in, reps in, product out.",
         ),
     ),
     kind = StyleKind.LLM,

@@ -106,6 +106,45 @@ class SiliconValleyBroStyleTest {
     }
 
     @Test
+    fun `silicon valley bro instructions carry the rewrite-not-copy-edit transformation mandate`() {
+        val instructions = SiliconValleyBroStyle.systemInstructions
+
+        assertTrue(
+            instructions.contains("Returning the input unchanged is a FAILURE"),
+            "instructions lack the unchanged-is-failure mandate",
+        )
+        assertTrue(
+            instructions.contains("do not copy-edit"),
+            "instructions lack the rewrite-not-copy-edit mandate",
+        )
+        assertTrue(
+            instructions.contains("Founder framing is metaphor, not fact"),
+            "instructions lack the metaphor-not-fact framing clause",
+        )
+    }
+
+    @Test
+    fun `silicon valley bro mundane few-shot keeps its facts without inventing traction`() {
+        val mundane = SiliconValleyBroStyle.fewShots.first { shot -> shot.raw.contains("microwave") }
+
+        assertTrue(
+            mundane.styled.lowercase().contains("parmesan"),
+            "mundane lost the parmesan: ${mundane.styled}",
+        )
+        assertTrue(
+            mundane.styled.lowercase().contains("noodles"),
+            "mundane lost the noodles: ${mundane.styled}",
+        )
+        assertTrue(mundane.styled.contains("gym"), "mundane lost the gym: ${mundane.styled}")
+        listOf("users", "revenue", "$").forEach { forbidden ->
+            assertTrue(
+                !mundane.styled.lowercase().contains(forbidden),
+                "mundane invented traction marker '$forbidden': ${mundane.styled}",
+            )
+        }
+    }
+
+    @Test
     fun `no silicon valley bro few-shot output addresses a listener the input did not`() {
         SiliconValleyBroStyle.fewShots.forEach { shot ->
             if (SECOND_PERSON.containsMatchIn(shot.styled)) {
