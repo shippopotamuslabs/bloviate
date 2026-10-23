@@ -57,7 +57,8 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
                 "lost two hours of logs from server nine",
             styled = "I am humbled to announce our Acme Corp deploy failed at step three on Friday.\n" +
                 "We lost two hours of logs from server nine.\n" +
-                "Here is what it taught me about ownership: a setback is just data wearing a disguise, and the team that debugs together grows together.\n" +
+                "Here is what it taught me about ownership: a setback is just data " +
+                "wearing a disguise, and the team that debugs together grows together.\n" +
                 "We rebuilt, we relogged, we shipped stronger.\n" +
                 "P.S. Failure is just success in progress.\n" +
                 "#Ownership #Engineering #GrowthMindset",
