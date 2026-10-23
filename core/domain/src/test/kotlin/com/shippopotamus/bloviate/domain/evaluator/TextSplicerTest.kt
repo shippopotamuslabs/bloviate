@@ -64,4 +64,94 @@ class TextSplicerTest {
         assertEquals("hello!", result.text)
         assertEquals(6, result.selectionStart)
     }
+
+    @Test
+    fun `a hint-showing field with unreported selection yields exactly the insertion`() {
+        val result = splicer.splice(
+            "Ask Google",
+            selectionStart = -1,
+            selectionEnd = -1,
+            insertion = "hello",
+            hintText = "Ask Google",
+            isShowingHintText = true,
+        )
+
+        assertEquals("hello", result.text)
+        assertEquals(5, result.selectionStart)
+        assertEquals(5, result.selectionEnd)
+    }
+
+    @Test
+    fun `a hint-showing field with selection inside the hint yields exactly the insertion`() {
+        val result = splicer.splice(
+            "Ask Google",
+            selectionStart = 3,
+            selectionEnd = 3,
+            insertion = "hello",
+            hintText = "Ask Google",
+            isShowingHintText = true,
+        )
+
+        assertEquals("hello", result.text)
+        assertEquals(5, result.selectionStart)
+        assertEquals(5, result.selectionEnd)
+    }
+
+    @Test
+    fun `text equal to the hint without the flag yields exactly the insertion`() {
+        val result = splicer.splice(
+            "Ask Google",
+            selectionStart = -1,
+            selectionEnd = -1,
+            insertion = "hello",
+            hintText = "Ask Google",
+        )
+
+        assertEquals("hello", result.text)
+        assertEquals(5, result.selectionStart)
+        assertEquals(5, result.selectionEnd)
+    }
+
+    @Test
+    fun `real text with a hint present splices normally`() {
+        val result = splicer.splice(
+            "hello world",
+            selectionStart = 5,
+            selectionEnd = 5,
+            insertion = " big",
+            hintText = "Ask Google",
+        )
+
+        assertEquals("hello big world", result.text)
+        assertEquals(9, result.selectionStart)
+        assertEquals(9, result.selectionEnd)
+    }
+
+    @Test
+    fun `a null hint changes nothing`() {
+        val result = splicer.splice(
+            "Ask Google",
+            selectionStart = -1,
+            selectionEnd = -1,
+            insertion = "hello",
+            hintText = null,
+        )
+
+        assertEquals("Ask Googlehello", result.text)
+        assertEquals(15, result.selectionStart)
+    }
+
+    @Test
+    fun `an empty hint changes nothing`() {
+        val result = splicer.splice(
+            "Ask Google",
+            selectionStart = -1,
+            selectionEnd = -1,
+            insertion = "hello",
+            hintText = "",
+        )
+
+        assertEquals("Ask Googlehello", result.text)
+        assertEquals(15, result.selectionStart)
+    }
 }
