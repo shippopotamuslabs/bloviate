@@ -4,14 +4,15 @@ import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
+import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
 
 /**
- * Window placement for the bubble overlay (ENC-167): capture-anchor →
- * one-shot place → restore-on-exit for bar-form states, drag-end routing
- * and resting clamps otherwise.
+ * Window placement for the bubble overlay (ENC-167, BLO-152):
+ * capture-anchor → one-shot place → restore-on-exit for bar-form
+ * states, drag-end routing and resting clamps otherwise.
  *
  * Bar form (Recording / Transcribing / Polishing) is placed ONCE per
  * state entry, before its content composes, from the known content
@@ -20,14 +21,16 @@ import com.shippopotamus.bloviate.domain.model.ScreenBounds
  * [BubblePositionMath.barWindowXOneShot]: the anchor edge sitting at
  * the bubble's spot does not move across Recording → Processing →
  * Done. There is no per-frame correction: [onWindowResized] is a no-op
- * for position while a bar form is up, and the recording row carries
- * no drag, so pinning is structural (the ENC-162 pin gates are retired
- * with the morph).
+ * for position while a bar form is up. The recording row drags again
+ * (BLO-152, ENC-162's raw-coordinate mechanism): a drag that ends while
+ * a bar form is up shifts the anchor by the window's own displacement
+ * and persists it, so the dragged spot sticks.
  *
- * Single-writer rule (ENC-154) still holds outside bar form: while the
- * drag controller reports an active drag ([isDragging]) it owns the
- * window's layout exclusively and [onDragEnded] runs exactly one
- * placement pass when the drag ends.
+ * Single-writer rule (ENC-154): while the drag controller reports an
+ * active drag ([isDragging]) it owns the window's layout exclusively —
+ * [onDragEnded] runs exactly one placement pass when the drag ends,
+ * and pushes no layout for a bar-form drag (the drag controller
+ * already moved the window).
  */
 class BubbleWindowPlacement(
     private val pushLayout: (View, WindowManager.LayoutParams) -> Unit,
@@ -49,6 +52,16 @@ class BubbleWindowPlacement(
     private var barFormAnchorYPx: Int = 0
     private var barFormAnchorWidthPx: Int = 0
 
+    /**
+     * The last one-shot-placed bar window position (BLO-152): the
+     * baseline a bar-form drag displaces from. Updated on every
+     * [placeBarForm] pass (pushed or already-correct), so a drag end
+     * measures only the user's own displacement — never a placement
+     * offset — when shifting the anchor.
+     */
+    private var lastPlacedBarXPx: Int = 0
+    private var lastPlacedBarYPx: Int = 0
+
     fun attach(view: View, params: WindowManager.LayoutParams) {
         this.view = view
         this.params = params
@@ -58,21 +71,61 @@ class BubbleWindowPlacement(
         view = null
         params = null
         barFormAnchorXPx = null
+        lastPlacedBarXPx = 0
+        lastPlacedBarYPx = 0
         previousBarState = RecordingBarState.Idle
     }
 
     /**
-     * Drag-end routing: a normal (idle) bubble drag persists its end
-     * position. A drag end reported while a bar form is up cannot be a
-     * recording-row drag (the row has none, ENC-167), so it persists
-     * nothing and moves nothing. Then exactly one placement pass runs
-     * (ENC-154) for the resting bubble.
+     * Drag-end routing (BLO-152): a normal (idle) bubble drag persists
+     * its end position, then exactly one placement pass runs (ENC-154)
+     * for the resting bubble. A drag that ends while a bar form is up
+     * is the recording row's own drag: the window's displacement since
+     * the last one-shot place shifts the anchor (clamped on-screen for
+     * the bubble's size), and that shifted anchor is what gets persisted
+     * — normalized against the BUBBLE size, never the row width the
+     * drag controller captured — so the dragged spot sticks and a later
+     * Recording → Transcribing re-place keeps it. No layout is pushed:
+     * the drag controller already moved the window (ENC-154).
+     *
+     * The drag controller's [position] is ignored in the bar-form branch
+     * on purpose: it normalized the dragged window against the row's own
+     * width, which is not the bubble's position. A zero-displacement end
+     * persists nothing new (a no-op).
      */
     fun onDragEnded(position: BubblePosition, bounds: ScreenBounds) {
-        if (barFormAnchorXPx != null) return
-        restingPosition = position
-        savePosition(position)
-        reclampBubble(bounds)
+        val anchorXPx = barFormAnchorXPx
+        if (anchorXPx == null) {
+            restingPosition = position
+            savePosition(position)
+            reclampBubble(bounds)
+            return
+        }
+        val params = params ?: return
+        val displacementXPx = params.x - lastPlacedBarXPx
+        val displacementYPx = params.y - lastPlacedBarYPx
+        if (displacementXPx == 0 && displacementYPx == 0) return
+        val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
+        val shiftedAnchor = BubblePositionMath.clamp(
+            topLeft = BubblePixelPosition(
+                xPx = anchorXPx + displacementXPx,
+                yPx = barFormAnchorYPx + displacementYPx,
+            ),
+            bubbleWidthPx = bubbleWidthPx,
+            bubbleHeightPx = bubbleHeightPx,
+            bounds = bounds,
+        )
+        barFormAnchorXPx = shiftedAnchor.xPx
+        barFormAnchorYPx = shiftedAnchor.yPx
+        lastPlacedBarXPx = params.x
+        lastPlacedBarYPx = params.y
+        restingPosition = BubblePositionMath.toNormalized(
+            topLeft = shiftedAnchor,
+            bubbleWidthPx = bubbleWidthPx,
+            bubbleHeightPx = bubbleHeightPx,
+            bounds = bounds,
+        )
+        savePosition(restingPosition)
     }
 
     /** Tracks bar-state transitions for one-shot window placement. */
@@ -105,6 +158,7 @@ class BubbleWindowPlacement(
 
     /** Rotation / fold-unfold with the same window: re-place into the new bounds. */
     fun onConfigurationChanged(bounds: ScreenBounds) {
+        if (isDragging()) return
         if (barFormAnchorXPx != null) {
             // Re-derive the anchor in the new bounds, then re-place once.
             val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
@@ -155,9 +209,15 @@ class BubbleWindowPlacement(
             params.y = barFormAnchorYPx
             pushLayout(view, params)
         }
+        lastPlacedBarXPx = params.x
+        lastPlacedBarYPx = params.y
     }
 
-    /** The bar form closes: the window returns to the bubble's own anchor spot. */
+    /**
+     * The bar form closes: the window returns to the bubble's own anchor
+     * spot — or to the dragged spot (BLO-152) when the row was dragged,
+     * since a bar-form drag end shifts the anchor to follow the window.
+     */
     private fun exitBarForm() {
         val anchorXPx = barFormAnchorXPx
         barFormAnchorXPx = null

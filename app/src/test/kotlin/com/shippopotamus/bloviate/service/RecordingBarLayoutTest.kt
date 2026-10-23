@@ -19,17 +19,18 @@ import org.robolectric.annotation.Config
 import tech.apter.junit.jupiter.robolectric.RobolectricExtension
 
 /**
- * ENC-167: the recording row's X and check are independent tap targets
- * and no drag gesture is registered in the recording layout. Driven
- * through real touch dispatch on a hosted [BubbleContent] (no looper
- * idle: the waveform frame clock would spin the shadow looper).
+ * BLO-152: the recording row's X and check are tap targets arbitrated
+ * on one raw-coordinate gesture stream with the row's drag — a tap
+ * fires its slot, a drag fires the drag callbacks and never the slots.
+ * Driven through real touch dispatch on a hosted [BubbleContent] (no
+ * looper idle: the waveform frame clock would spin the shadow looper).
  */
 @ExtendWith(RobolectricExtension::class)
 @Config(sdk = [34])
 class RecordingBarLayoutTest {
 
     @Test
-    fun `X and check are independent taps and a drag fires neither`() {
+    fun `X and check are taps and a drag fires the drag callbacks but neither tap`() {
         var cancels = 0
         var sends = 0
         var drags = 0
@@ -74,7 +75,7 @@ class RecordingBarLayoutTest {
             assertEquals(1, cancels)
             assertEquals(0, drags)
 
-            // A drag across the row: neither tap nor any drag callback.
+            // A drag across the row: the drag callbacks fire, neither tap does.
             val downTime = SystemClock.uptimeMillis()
             view.dispatchTouchEvent(
                 MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, SLOT_CENTER_PX, midY, 0),
@@ -87,7 +88,7 @@ class RecordingBarLayoutTest {
             )
             assertEquals(1, cancels, "a drag must not become a cancel tap")
             assertEquals(1, sends, "a drag must not become a send tap")
-            assertEquals(0, drags, "no drag gesture is registered in the recording layout")
+            assertTrue(drags > 0, "a drag across the row must fire the drag callbacks")
             owner.destroy()
         } finally {
             controller.destroy()
