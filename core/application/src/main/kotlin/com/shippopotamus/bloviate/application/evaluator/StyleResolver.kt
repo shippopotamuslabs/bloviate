@@ -24,8 +24,8 @@ import javax.inject.Singleton
  * A singleton sharing one [catalog] flow, mirroring the DataStore stores:
  * the sharing comes from the singleton store underneath, so every
  * consumer sees the same snapshot. The send-path processors
- * (`StyleAwareTextPostProcessor`, `StylingTextPostProcessor`) switch to
- * this resolver in S4; until then it serves the catalog UI.
+ * (`StyleAwareTextPostProcessor`, `StylingTextPostProcessor`) resolve
+ * through here (S4), and the catalog UI streams [catalog].
  */
 @Singleton
 class StyleResolver @Inject constructor(

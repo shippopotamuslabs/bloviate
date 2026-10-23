@@ -27,6 +27,7 @@ import com.shippopotamus.bloviate.application.usecase.ObserveResidentPresenceUse
 import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStopUseCase
+import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
@@ -35,6 +36,8 @@ import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
 import com.shippopotamus.bloviate.testing.FakeAuthSession
 import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
+import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
+import com.shippopotamus.bloviate.testing.FakeCustomStyleSyncPort
 import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
@@ -75,11 +78,17 @@ class MainViewModelTest {
     private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
     private val fakeResidentPresencePort = FakeResidentPresencePort()
     private val fakeAuthSession = FakeAuthSession()
+    private val fakeCustoms = FakeCustomStyleStorePort()
+    private val fakeSync = FakeCustomStyleSyncPort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
     fun setup() {
-        viewModel = MainViewModel(
+        viewModel = buildViewModel(auth = fakeAuthSession)
+    }
+
+    private fun buildViewModel(auth: FakeAuthSession): MainViewModel =
+        MainViewModel(
             isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
             isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
             observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
@@ -99,11 +108,11 @@ class MainViewModelTest {
             setAutoStartEnabled = SetAutoStartEnabledUseCase(fakeResidentPresencePort),
             recordBubbleUserStart = RecordBubbleUserStartUseCase(fakeResidentPresencePort),
             recordBubbleUserStop = RecordBubbleUserStopUseCase(fakeResidentPresencePort),
-            observeAuthState = ObserveAuthStateUseCase(fakeAuthSession),
-            signInWithGoogle = SignInWithGoogleUseCase(fakeAuthSession),
-            signOut = SignOutUseCase(fakeAuthSession),
+            observeAuthState = ObserveAuthStateUseCase(auth),
+            signInWithGoogle = SignInWithGoogleUseCase(auth),
+            signOut = SignOutUseCase(auth),
+            refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
         )
-    }
 
     @Test
     fun `initial state reflects disabled watcher`() =
@@ -558,6 +567,44 @@ class MainViewModelTest {
                 assertEquals("sean@example.com", signedIn.email)
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `no custom-styles refresh while signed out`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            advanceUntilIdle()
+
+            assertEquals(0, fakeSync.listCallCount)
+        }
+
+    @Test
+    fun `a fresh sign-in refreshes the custom-styles cache`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            advanceUntilIdle()
+            assertEquals(0, fakeSync.listCallCount)
+
+            fakeAuthSession.publish(
+                AuthState.Authenticated(
+                    UserProfile(uid = "uid-1", displayName = null, email = null, photoUrl = null),
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(1, fakeSync.listCallCount)
+        }
+
+    @Test
+    fun `an already-signed-in start refreshes the custom-styles cache`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            val signedInAuth = FakeAuthSession(
+                initialState = AuthState.Authenticated(
+                    UserProfile(uid = "uid-1", displayName = null, email = null, photoUrl = null),
+                ),
+            )
+            buildViewModel(auth = signedInAuth)
+            advanceUntilIdle()
+
+            assertEquals(1, fakeSync.listCallCount)
         }
 
     @Test
