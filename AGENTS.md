@@ -120,13 +120,14 @@ Bloviate is a personal project distributed by sideload. Whether it is ever publi
 
 ### 3.7 Linear Issue Tracking — Chunk-Based Trunk Workflow
 
-Single source of truth for work items is Linear. Bloviate has no team of its own (Linear free-plan limit): it lives in the **Enclave** team (key `ENC`, workspace Browntown Development: https://linear.app/browntown-development/team/ENC/all) as **project P-ENC-7 "Bloviate"**. Issue IDs are therefore `ENC-*`. Do not use GitLab issues.
+Single source of truth for work items is Linear. Bloviate has its own **Bloviate** team (key `BLO`, workspace Browntown Development: https://linear.app/browntown-development/team/BLO/all), created 2026-10-23 after Sean moved Linear to a paid plan. New issue IDs are therefore `BLO-*`. Do not use GitLab issues.
 
-- **Chunk-based development:** one parent issue per phase/feature (ENC-46…ENC-50 are the phase parents); each chunk of work is a **sub-issue**; **one MR per sub-issue** — never batch multiple chunks into one MR.
+- **Legacy tickets:** work filed before the move lives in the **Enclave** team (key `ENC`) as **project P-ENC-7 "Bloviate"** — the free plan's two-team limit forced that arrangement. The `ENC-*` IDs referenced throughout this repo (ENC-46…ENC-50 phase parents, ENC-57, ENC-159, ENC-169, ENC-197, …) are those legacy tickets and stay valid for them. File all new work in `BLO`.
+- **Chunk-based development:** one parent issue per phase/feature (ENC-46…ENC-50 are the original phase parents, in the legacy ENC project); each chunk of work is a **sub-issue**; **one MR per sub-issue** — never batch multiple chunks into one MR.
 - **Ticket first:** ensure you have a Linear ticket to work from via the Linear MCP (`save_issue`, `get_issue`, `list_issues`; see §7). If you do not know the ticket, ask the user. If told it does not exist, create one under the right parent with a `type::` label (`type::feature`, `type::bug`, `type::chore`, `type::polish`). Once you have the ticket, put it **In Progress** (`save_issue` with `state: "In Progress"`), then start working.
-- **Branch naming:** copy the git branch name from the Linear sub-issue (it contains the issue ID, e.g. `browntowndevelopment/enc-57-bloviate-create-bloviate-app-repo-gradle-skeleton`) — this auto-links the branch.
-- **Every MR description MUST contain a closing magic word + the sub-issue ID**, e.g. `Fixes ENC-57`. Linear's MR automations move the issue to **In Review** when the MR opens and to **Merged** when the MR merges. A merge is NOT a deploy. `In Progress` is manual: the agent sets it when work starts. (Exception: a brand-new repo's bootstrap commit goes straight to `main` — there is nothing to MR against — and the agent sets the ticket to `Merged` manually after push.)
-- To link an MR without triggering the automatic status moves, use `Refs ENC-57` or `Contributes to ENC-57` instead of a closing magic word.
+- **Branch naming:** copy the git branch name from the Linear sub-issue (it contains the issue ID, e.g. `browntowndevelopment/blo-57-bloviate-<slug>`) — this auto-links the branch.
+- **Every MR description MUST contain a closing magic word + the sub-issue ID**, e.g. `Fixes BLO-57`. Linear's MR automations move the issue to **In Review** when the MR opens and to **Merged** when the MR merges. A merge is NOT a deploy. `In Progress` is manual: the agent sets it when work starts. (Exception: a brand-new repo's bootstrap commit goes straight to `main` — there is nothing to MR against — and the agent sets the ticket to `Merged` manually after push.)
+- To link an MR without triggering the automatic status moves, use `Refs BLO-57` or `Contributes to BLO-57` instead of a closing magic word.
 - Commit messages and MR comments do **not** link issues — only branch name, MR title, and MR description.
 - **Merge vs deploy vs release:** `Merged` = merged to main (trunk). `Deployed` / `Partially Deployed` / `Released` live on the **parent issue only** and are manual (developer sideloads, then updates Linear or asks the agent to). Sub-issues stop at `Merged`.
 - Never close the parent manually while sub-issues are open.
@@ -177,7 +178,7 @@ Before any Android/Kotlin task, check MCP tools **and** whether Android Studio b
 | `androjack` | All Android/Kotlin validation, API research, dependency checks — **mandatory for all code generation** (§3.2) |
 | `mobile-mcp` | Install APKs, interact with a running emulator/device, take screenshots |
 | `google-developer-knowledge` | Official Android/Google API documentation lookup |
-| `linear` (Linear MCP) | **All work-item tracking for Bloviate (team `ENC`, project P-ENC-7)** — `list_issues`/`get_issue` to find tickets, `save_issue` to create/update (including `In Progress`), `save_comment` for MR notes. Use before starting work, not GitLab issues |
+| `linear` (Linear MCP) | **All work-item tracking for Bloviate (team `BLO`; legacy tickets under team `ENC`, project P-ENC-7)** — `list_issues`/`get_issue` to find tickets, `save_issue` to create/update (including `In Progress`), `save_comment` for MR notes. Use before starting work, not GitLab issues |
 
 ### Android CLI and Studio bridge (shell)
 

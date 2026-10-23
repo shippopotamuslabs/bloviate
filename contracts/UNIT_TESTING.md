@@ -150,4 +150,4 @@ Any agent creating new features **MUST** include a matching unit test file in th
 After writing a test, break the production code under test (wrong return value, skipped persistence). The test **must fail**. If it still passes, the test is invalid — rewrite it before marking work complete.
 
 ### 5.2 Detekt & Linear gates
-`./gradlew detekt` must pass at `maxIssues: 0`. The no-MockK / no-`verify` rules above are agent-enforced in this repo (Enclave machine-enforces its twins with a custom Detekt rule set Bloviate does not have yet). Work follows `AGENTS.md` §3.7: one MR per Linear sub-issue with `Fixes ENC-xx` in the MR description.
+`./gradlew detekt` must pass at `maxIssues: 0`. The no-MockK / no-`verify` rules above are agent-enforced in this repo (Enclave machine-enforces its twins with a custom Detekt rule set Bloviate does not have yet). Work follows `AGENTS.md` §3.7: one MR per Linear sub-issue with `Fixes BLO-xx` in the MR description.

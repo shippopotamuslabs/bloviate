@@ -115,7 +115,7 @@ Kotlin and Compose idioms, naming, formatting, and stability rules.
 - Test names: `fun methodName_condition_expectedResult()` or backtick descriptive names.
 - Fakes for previews live alongside models. Fakes for tests live in the test source set (shared fakes move to a shared testing module in the same MR that creates it).
 - Architecture/style beyond Detekt's built-in rules is agent-enforced (see `ARCHITECTURE_RULES.md` §3.4): ViewModels use-case-only, no domain types in composables/UiState. `./gradlew detekt` must pass at `maxIssues: 0`.
-- All work is ticketed in Linear (team `ENC`, project Bloviate) per `AGENTS.md` §3.7 — one MR per sub-issue, `Fixes ENC-xx` in the MR description.
+- All work is ticketed in Linear (team `BLO`, project Bloviate) per `AGENTS.md` §3.7 — one MR per sub-issue, `Fixes BLO-xx` in the MR description.
 
 ### 8.1 Test Coverage Discipline (Agent Mandate)
 

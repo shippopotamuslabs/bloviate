@@ -141,10 +141,10 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 - **Use cases own multi-source `Flow` composition.** When a screen needs more than one source, add an application use case that combines the streams into one domain read model; the ViewModel observes that single use case.
 - **Only transient/presentation state lives in the ViewModel** (unsaved drafts, reveal-errors flags, one-shot events). Durable facts are read through use cases.
 - **Write paths go through use cases too** — never `repository.save(...)` from a ViewModel.
-- These rules are now **compiler-backed at the module boundary** (ENC-159): `:core:domain`/`:core:application` cannot import `:app` code, so a use case can never reach a `data/` class and domain can never reach application. Inside the single `:app` module, ViewModel → use-case-only remains agent-enforced (Enclave enforces the twin rule there with a custom Detekt rule set; if Bloviate grows one, this section is its spec). Do not add suppressions to hide layering debt — file an ENC sub-issue instead.
+- These rules are now **compiler-backed at the module boundary** (ENC-159): `:core:domain`/`:core:application` cannot import `:app` code, so a use case can never reach a `data/` class and domain can never reach application. Inside the single `:app` module, ViewModel → use-case-only remains agent-enforced (Enclave enforces the twin rule there with a custom Detekt rule set; if Bloviate grows one, this section is its spec). Do not add suppressions to hide layering debt — file a BLO sub-issue instead.
 
 ### 3.5 Linear Ticketing
-All implementation work follows `AGENTS.md` §3.7 (Linear team `ENC`, project Bloviate, chunk-based trunk workflow, one MR per sub-issue, `Fixes ENC-xx` in the MR description). Architecture changes without a ticket are out of contract.
+All implementation work follows `AGENTS.md` §3.7 (Linear team `BLO`, project Bloviate, chunk-based trunk workflow, one MR per sub-issue, `Fixes BLO-xx` in the MR description). Architecture changes without a ticket are out of contract.
 
 ---
 
