@@ -4,11 +4,14 @@ import app.cash.turbine.test
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.application.evaluator.StyleResolver
 import com.shippopotamus.bloviate.application.port.CustomStyleRecord
+import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
+import com.shippopotamus.bloviate.application.port.CustomStyleSyncOutcome
 import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
 import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
+import com.shippopotamus.bloviate.application.usecase.DeleteSyncedCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveStyleCatalogUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
@@ -23,6 +26,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -47,6 +51,11 @@ class StyleViewModelTest {
             ),
             observeSelectedStyle = ObserveSelectedStyleUseCase(fakeStyle),
             selectStyle = SelectStyleUseCase(fakeStyle),
+            deleteCustomStyle = DeleteSyncedCustomStyleUseCase(
+                sync = fakeSync,
+                customs = fakeCustoms,
+                selection = fakeStyle,
+            ),
             refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
         )
     }
@@ -84,11 +93,13 @@ class StyleViewModelTest {
         }
 
     @Test
-    fun `with no customs the custom section is dropped`() =
+    fun `with no customs the my styles section is present but empty so the create entry survives`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
                 val initial = awaitItem()
-                assertTrue(initial.sections.none { section -> section.headerRes == R.string.style_section_custom })
+                val custom = initial.sections.first()
+                assertEquals(R.string.style_section_custom, custom.headerRes)
+                assertTrue(custom.styles.isEmpty())
                 assertEquals(StyleCatalog.ALL.size, initial.sections.sumOf { section -> section.styles.size })
                 cancelAndIgnoreRemainingEvents()
             }
@@ -123,6 +134,110 @@ class StyleViewModelTest {
         }
 
     @Test
+    fun `custom options are flagged custom and built-ins are not`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            keepUiStateHot()
+            advanceUntilIdle()
+
+            val byId = viewModel.uiState.value.sections
+                .flatMap { section -> section.styles }
+                .associateBy { option -> option.id }
+            assertEquals(true, byId.getValue("custom-mine").isCustom)
+            assertEquals(false, byId.getValue("seneca").isCustom)
+            assertEquals(false, byId.getValue("normal-caps-casual").isCustom)
+        }
+
+    @Test
+    fun `delete opens the confirmation naming the style and dismiss closes it`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            keepUiStateHot()
+            advanceUntilIdle()
+
+            viewModel.onDeleteCustomClick("custom-mine")
+            advanceUntilIdle()
+            assertEquals(
+                PendingStyleDelete(styleId = "custom-mine", displayName = "Mine"),
+                viewModel.uiState.value.pendingDelete,
+            )
+
+            viewModel.onDeleteDismiss()
+            advanceUntilIdle()
+            assertNull(viewModel.uiState.value.pendingDelete)
+        }
+
+    @Test
+    fun `confirming the delete removes the style from the cache and closes the dialog`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            keepUiStateHot()
+            advanceUntilIdle()
+
+            viewModel.onDeleteCustomClick("custom-mine")
+            advanceUntilIdle()
+            viewModel.onDeleteConfirm()
+            advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.pendingDelete)
+            assertNull(viewModel.uiState.value.deleteError)
+            assertTrue(fakeCustoms.state.value.styles.none { record -> record.definition.id == "custom-mine" })
+            assertEquals(listOf("custom-mine"), fakeSync.deletedIds)
+        }
+
+    @Test
+    fun `a failed delete closes the dialog and surfaces the mapped error until dismissed`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            fakeSync.deleteResult = CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Unavailable)
+            keepUiStateHot()
+            advanceUntilIdle()
+
+            viewModel.onDeleteCustomClick("custom-mine")
+            advanceUntilIdle()
+            viewModel.onDeleteConfirm()
+            advanceUntilIdle()
+
+            assertNull(viewModel.uiState.value.pendingDelete)
+            assertEquals(CustomStyleDeleteError.UNAVAILABLE, viewModel.uiState.value.deleteError)
+            // The failed delete touches nothing: the cache still holds the style.
+            assertEquals(1, fakeCustoms.state.value.styles.size)
+
+            viewModel.onDeleteErrorDismiss()
+            advanceUntilIdle()
+            assertNull(viewModel.uiState.value.deleteError)
+        }
+
+    @Test
+    fun `every sync failure maps to its delete error`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            keepUiStateHot()
+            advanceUntilIdle()
+
+            val cases = listOf(
+                CustomStyleSyncFailure.SignedOut to CustomStyleDeleteError.SIGNED_OUT,
+                CustomStyleSyncFailure.NotEntitled to CustomStyleDeleteError.NOT_ENTITLED,
+                CustomStyleSyncFailure.Invalid to CustomStyleDeleteError.INVALID,
+                CustomStyleSyncFailure.Conflict to CustomStyleDeleteError.CONFLICT,
+                CustomStyleSyncFailure.LimitReached to CustomStyleDeleteError.LIMIT_REACHED,
+                CustomStyleSyncFailure.Unavailable to CustomStyleDeleteError.UNAVAILABLE,
+            )
+            cases.forEach { (failure, expected) ->
+                fakeSync.deleteResult = CustomStyleSyncOutcome.Failed(failure)
+                viewModel.onDeleteCustomClick("custom-mine")
+                advanceUntilIdle()
+                viewModel.onDeleteConfirm()
+                advanceUntilIdle()
+                assertEquals(expected, viewModel.uiState.value.deleteError)
+                viewModel.onDeleteErrorDismiss()
+                advanceUntilIdle()
+            }
+            // Every failure left the cache untouched.
+            assertEquals(1, fakeCustoms.state.value.styles.size)
+        }
+
+    @Test
     fun `a selected custom style is marked selected and survives`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
@@ -139,7 +254,7 @@ class StyleViewModelTest {
     fun `an external customs change is reflected in state`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
-                assertTrue(awaitItem().sections.none { section -> section.headerRes == R.string.style_section_custom })
+                assertTrue(awaitItem().sections.first().styles.isEmpty())
 
                 fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
 
@@ -207,12 +322,13 @@ class StyleViewModelTest {
         }
 
     @Test
-    fun `sections follow enum order with styles alphabetical inside each`() =
+    fun `sections follow enum order with the my styles section first and styles alphabetical inside each`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
                 val initial = awaitItem()
                 assertEquals(
                     listOf(
+                        R.string.style_section_custom,
                         R.string.style_section_serious,
                         R.string.style_section_philosophers,
                         R.string.style_section_writers,
@@ -222,22 +338,22 @@ class StyleViewModelTest {
                     ),
                     initial.sections.map { section -> section.headerRes },
                 )
-                assertEquals(listOf(4, 8, 4, 4, 5, 7), initial.sections.map { section -> section.styles.size })
+                assertEquals(listOf(0, 4, 8, 4, 4, 5, 7), initial.sections.map { section -> section.styles.size })
                 StyleCategory.entries.filter { category -> category != StyleCategory.CUSTOM }.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }
                         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { style -> style.displayName })
                         .map { style -> style.id }
-                    assertEquals(expectedIds, initial.sections[index].styles.map { style -> style.id })
+                    assertEquals(expectedIds, initial.sections[index + 1].styles.map { style -> style.id })
                 }
                 // Pin the visible order so a comparator change cannot slip through silently.
                 assertEquals(
                     listOf("aquinas", "aristotle", "augustine", "cicero", "marcus-aurelius", "plato", "seneca", "socrates"),
-                    initial.sections[1].styles.map { style -> style.id },
+                    initial.sections[2].styles.map { style -> style.id },
                 )
                 assertEquals(
                     listOf("academic-jargon", "corporate-linkedin", "edgelord", "gen-z-brainrot", "legal-contract", "silicon-valley-bro", "ultra-hr"),
-                    initial.sections[5].styles.map { style -> style.id },
+                    initial.sections[6].styles.map { style -> style.id },
                 )
                 cancelAndIgnoreRemainingEvents()
             }
