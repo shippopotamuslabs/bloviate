@@ -28,13 +28,14 @@ const EXPECTED_IDS = [
   "socrates",
   "plato",
   "aquinas",
+  "augustine",
   "oscar-wilde",
   "talkie",
   "the-colonel",
 ];
 
-test("catalog has exactly 27 styles in expected order", () => {
-  assert.equal(STYLE_CATALOG.length, 27);
+test("catalog has exactly 28 styles in expected order", () => {
+  assert.equal(STYLE_CATALOG.length, 28);
   assert.deepEqual([...LLM_STYLE_IDS], EXPECTED_IDS);
   assert.deepEqual(
     STYLE_CATALOG.map((s) => s.id),
