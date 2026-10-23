@@ -1,10 +1,8 @@
 package com.shippopotamus.bloviate.presentation
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -64,15 +62,10 @@ class MainActivity : ComponentActivity() {
         onboardingViewModel.onMicPermissionResult()
     }
 
-    /**
-     * POST_NOTIFICATIONS ask (ENC-146): fired from the explicit bubble-start
-     * funnel when the grant is missing on Android 13+, so the foreground
-     * notification's status refreshes can actually post. No result handling —
-     * the service re-reads the live grant at each refresh.
-     */
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {}
+    // ENC-163: the foreground notice is minimal and silent, so the
+    // explicit bubble start no longer asks for POST_NOTIFICATIONS.
+    // The manifest permission stays (a foreground service still posts
+    // its notice), but no launcher or pre-start ask remains.
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -171,7 +164,6 @@ class MainActivity : ComponentActivity() {
         }
 
     private fun startBubbleService() {
-        requestNotificationPermissionIfNeeded()
         // An explicit in-app start lifts a previous Stop in the
         // resident-presence record (ENC-129) and tags the start as a
         // user start, the origin always eligible for the microphone type.
@@ -194,13 +186,4 @@ class MainActivity : ComponentActivity() {
         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val granted =
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
 }

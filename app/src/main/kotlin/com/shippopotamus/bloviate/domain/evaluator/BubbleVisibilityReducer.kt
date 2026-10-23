@@ -19,28 +19,32 @@ import javax.inject.Inject
  *   the bubble; the keyboard hiding hides it, even though the field
  *   keeps focus.
  * - Any non-editable focus state (none, or a password field) hides the
- *   bubble immediately and clears dismissal suppression: dismissal is
- *   per field session, so once focus leaves editable fields the next
- *   editable field shows the bubble again.
+ *   bubble and clears dismissal suppression: dismissal is per field
+ *   session, so once focus leaves editable fields the next editable
+ *   field shows the bubble again. A plain focus loss hides immediately
+ *   while the bar is idle, and defers while the bar is active (see
+ *   below); a password-field focus always hides immediately.
  *
- * One exemption: while the recording/processing bar is active (fed via
- * [onBarActivityChanged]), a keyboard hide never hides the window — the
- * send flow completes first, and the deferred hide lands when the bar
- * returns to idle. Focus-driven hides are NOT exempt: a password field
- * taking focus mid-recording still hides (and thereby cancels) exactly
- * as before.
+ * Recording-bar exemption: while the recording/processing bar is active
+ * (fed via [onBarActivityChanged]), a keyboard hide never hides the
+ * window, and neither does a non-password focus loss (e.g. a
+ * notification-shade peek) — the send flow completes first, and the
+ * deferred hide lands when the bar returns to idle. The ONLY
+ * mid-recording instant hide is a password field taking focus (a
+ * security cancel): it hides, and thereby cancels, exactly as before.
  *
  * Duplicate or equivalent inputs produce no command, keeping show/hide
  * idempotent across rapid transitions.
  *
- * Reconciliation (ENC-127): commands are one-shot, so if a command's
- * effect does not materialize — a show swallowed because overlay
- * permission was missing at apply time, say — the belief in
- * [bubbleVisible] would otherwise stick and swallow every later show.
- * The overlay service reports the window's actual presence back through
- * [onWindowPresenceChanged] after applying each command, and the belief
- * resyncs to reality; re-driving a show is left to the next transition
- * so a persistently unshowable window cannot spin a command loop.
+ * Reconciliation (ENC-127, resident window since ENC-163): commands
+ * are one-shot, so if a command's effect does not materialize — a
+ * show swallowed because overlay permission was missing at apply
+ * time, say — the belief in [bubbleVisible] would otherwise stick and
+ * swallow every later show. The overlay service reports the resident
+ * window's actual visibility back through [onWindowVisibilityChanged]
+ * after applying each command, and the belief resyncs to reality;
+ * re-driving a show is left to the next transition so a persistently
+ * unshowable window cannot spin a command loop.
  *
  * Stateful but single-threaded in practice: driven from the bubble
  * service's main-thread collection. Not a singleton — each service
@@ -60,11 +64,16 @@ class BubbleVisibilityReducer @Inject constructor() {
         return when (state) {
             is FieldFocusState.EditableFocus ->
                 if (keyboardVisible) showIfNeeded() else null
-            FieldFocusState.NoEditableFocus,
-            is FieldFocusState.PasswordFocus,
-            -> {
+            is FieldFocusState.PasswordFocus -> {
                 dismissedThisFieldSession = false
                 hideIfVisible()
+            }
+            FieldFocusState.NoEditableFocus -> {
+                dismissedThisFieldSession = false
+                // A shade peek, not a security cancel: defer like a
+                // keyboard hide while the bar is mid-flow; the landing
+                // in onBarActivityChanged covers the settle.
+                if (barActive) null else hideIfVisible()
             }
         }
     }
@@ -85,8 +94,8 @@ class BubbleVisibilityReducer @Inject constructor() {
 
     /**
      * Feed recording/processing bar activity (any non-idle bar state).
-     * When activity ends, a keyboard hide that was deferred while the bar
-     * was up lands here.
+     * When activity ends, a keyboard hide or non-password focus loss
+     * that was deferred while the bar was up lands here.
      */
     fun onBarActivityChanged(active: Boolean): BubbleVisibilityCommand? {
         if (active == barActive) return null
@@ -115,23 +124,23 @@ class BubbleVisibilityReducer @Inject constructor() {
     fun isPasswordFocus(): Boolean = lastFocusState is FieldFocusState.PasswordFocus
 
     /**
-     * The overlay service reports the window's actual presence after
-     * applying a command (ENC-127 reconciliation). A mismatch resyncs
-     * the visibility belief to reality:
+     * The overlay service reports the resident window's actual
+     * visibility after applying a command (ENC-127 reconciliation). A
+     * mismatch resyncs the visibility belief to reality:
      *
-     * - Window absent but believed visible: a show was swallowed. The
+     * - Window hidden but believed visible: a show was swallowed. The
      *   belief silently forgets "visible" so the next show-worthy
      *   transition commands a fresh show; no command is returned here —
      *   re-driving immediately could loop against a window that cannot
      *   be shown at all (e.g. overlay permission still missing).
-     * - Window present but believed hidden and not desired: the one
+     * - Window shown but believed hidden and not desired: the one
      *   divergence worth an active correction — [BubbleVisibilityCommand.HideBubble]
      *   is returned for the service to apply.
      */
-    fun onWindowPresenceChanged(present: Boolean): BubbleVisibilityCommand? {
-        if (present == bubbleVisible) return null
-        bubbleVisible = present
-        return if (present && !shouldBeVisible()) {
+    fun onWindowVisibilityChanged(visible: Boolean): BubbleVisibilityCommand? {
+        if (visible == bubbleVisible) return null
+        bubbleVisible = visible
+        return if (visible && !shouldBeVisible()) {
             bubbleVisible = false
             BubbleVisibilityCommand.HideBubble
         } else {
