@@ -120,7 +120,7 @@ Bloviate is a personal project distributed by sideload. Whether it is ever publi
 
 ### 3.7 Linear Issue Tracking — Chunk-Based Trunk Workflow
 
-Single source of truth for work items is Linear. Bloviate has its own **Bloviate** team (key `BLO`, workspace Browntown Development: https://linear.app/browntown-development/team/BLO/all), created 2026-10-23 after Sean moved Linear to a paid plan. New issue IDs are therefore `BLO-*`. Do not use GitLab issues.
+Single source of truth for work items is Linear. Bloviate has its own **Bloviate** team (key `BLO`, workspace Browntown Development: https://linear.app/browntown-development/team/BLO/all) with **project P-BLO-8 "Bloviate"**, created 2026-10-23 after Sean moved Linear to a paid plan. New issue IDs are therefore `BLO-*`. Do not use GitLab issues.
 
 - **Legacy tickets:** work filed before the move lives in the **Enclave** team (key `ENC`) as **project P-ENC-7 "Bloviate"** — the free plan's two-team limit forced that arrangement. The `ENC-*` IDs referenced throughout this repo (ENC-46…ENC-50 phase parents, ENC-57, ENC-159, ENC-169, ENC-197, …) are those legacy tickets and stay valid for them. File all new work in `BLO`.
 - **Chunk-based development:** one parent issue per phase/feature (ENC-46…ENC-50 are the original phase parents, in the legacy ENC project); each chunk of work is a **sub-issue**; **one MR per sub-issue** — never batch multiple chunks into one MR.
