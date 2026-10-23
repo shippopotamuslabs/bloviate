@@ -557,6 +557,7 @@ object StyleCatalog {
         Seneca,
         MarcusAurelius,
         SocratesStyle,
+        PlatoStyle,
         OscarWilde,
         Transatlantic,
         TheColonel,

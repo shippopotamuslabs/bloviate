@@ -130,7 +130,7 @@ class StyleViewModelTest {
                     ),
                     initial.sections.map { section -> section.headerRes },
                 )
-                assertEquals(listOf(4, 5, 4, 4, 5, 5), initial.sections.map { section -> section.styles.size })
+                assertEquals(listOf(4, 6, 4, 4, 5, 5), initial.sections.map { section -> section.styles.size })
                 StyleCategory.entries.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }
@@ -140,7 +140,7 @@ class StyleViewModelTest {
                 }
                 // Pin the visible order so a comparator change cannot slip through silently.
                 assertEquals(
-                    listOf("aristotle", "cicero", "marcus-aurelius", "seneca", "socrates"),
+                    listOf("aristotle", "cicero", "marcus-aurelius", "plato", "seneca", "socrates"),
                     initial.sections[1].styles.map { style -> style.id },
                 )
                 assertEquals(
