@@ -3,10 +3,10 @@ package com.shippopotamus.bloviate.data
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.ModelState
-import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
-import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
-import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
+import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
+import com.shippopotamus.bloviate.application.port.EnginePreferencePort
+import com.shippopotamus.bloviate.application.port.ModelStorePort
+import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

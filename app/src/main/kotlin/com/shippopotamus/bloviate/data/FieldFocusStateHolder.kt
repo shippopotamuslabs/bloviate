@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.data
 
 import com.shippopotamus.bloviate.domain.model.FieldFocusState
-import com.shippopotamus.bloviate.domain.port.FieldFocusPort
+import com.shippopotamus.bloviate.application.port.FieldFocusPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.OnboardingProgress
-import com.shippopotamus.bloviate.domain.port.OnboardingPort
+import com.shippopotamus.bloviate.application.port.OnboardingPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

@@ -50,34 +50,45 @@ All rules below are non-negotiable implementations of Clean Architecture.
 
 ## 1. Layer Boundaries (single-module form)
 
-Bloviate is one `:app` module today; layers are **packages** under `com.shippopotamus.bloviate`:
+Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split):
 
 ```text
+:core:domain       domain.model, domain.evaluator, domain.port (domain-only
+                   ports only — today just TextPostProcessor), domain.diagnostics
+                   — pure Kotlin/JVM, framework-free, depends on nothing in the app
+:core:application  application.usecase, application.port, application.evaluator
+                   (port-chaining processors) — pure Kotlin/JVM, -> :core:domain
 :app
- ├─ domain/        models, ports (*Port), use cases — framework-free
- ├─ data/          port implementations: persistence, downloads, platform adapters
+ ├─ data/          application-port implementations: persistence, downloads, platform adapters
  ├─ service/       FieldWatcherService, BubbleOverlayService, insertion
  ├─ presentation/  Compose UI, ViewModels, presentation models
  └─ di/            Hilt wiring (the only place ports meet implementations)
 ```
 
+Ports belong to the layer that consumes them: use-case- and service-consumed
+ports live in `:core:application`; a port consumed only by a domain
+service/evaluator stays in `:core:domain`. See
+`docs/architecture/application-layer-inventory.md` for the per-file ruling.
+
 ### 1.1 Dependency Direction (Strict)
 
 ```text
-presentation/  → domain/            (ViewModels call use cases; UI renders UiState)
-service/       → domain/            (services drive use cases / ports)
-data/          → domain/            (implements ports)
-di/            → domain/, data/, service/   (composition root)
+:core:application → :core:domain
+presentation/  → application, domain   (ViewModels call use cases; UI renders UiState)
+service/       → application, domain   (services drive use cases / ports)
+data/          → application, domain   (implements application ports)
+di/            → domain, application, data, service   (composition root)
 domain/        → nothing else in the app; no Android framework types in public APIs
-whisper-android (library) → consumed behind a domain port; its types do not leak
-                            into domain/ or presentation/ APIs
+whisper-android (library) → consumed behind an application port; its types do not leak
+                            into domain/, application/, or presentation/ APIs
 ```
 
-**Growth path:** if a layer outgrows the app module, split it into Gradle modules
-with exactly Enclave's graph — `:core:domain` (no dependencies), `:core:data` →
-`:core:domain`, `:core:ui` → `:core:domain`, `:core:testing` → `:core:domain`,
-`:app` → all. The package rules in this contract are written to survive that split
-unchanged; package names map to modules one-to-one.
+The module graph is enforced by Gradle: `:core:domain` cannot import
+`:core:application` or `:app`, and `:core:application` cannot import `:app`.
+**Growth path:** `:core:data` → `:core:domain` + `:core:application`,
+`:core:ui` → `:core:domain`, `:core:testing` → `:core:domain` may be split out
+of `:app` later with exactly Enclave's graph; package names map to modules
+one-to-one.
 
 No reverse dependencies into `domain/` are allowed.
 
@@ -85,9 +96,10 @@ No reverse dependencies into `domain/` are allowed.
 
 | Package | Must NOT import |
 |--------|-----------------|
-| `domain/` | `data/`, `service/`, `presentation/`, Compose, Hilt annotations on domain types, Android framework types in public APIs, `com.shippopotamus.whisper` implementation classes |
+| `domain/` (`:core:domain`) | `application/`, `data/`, `service/`, `presentation/`, Compose, Hilt annotations on domain types, Android framework types in public APIs, `com.shippopotamus.whisper` implementation classes |
+| `application/` (`:core:application`) | `data/`, `service/`, `presentation/`, Compose, Android framework types, `com.shippopotamus.whisper` implementation classes |
 | `data/` | Compose UI |
-| `presentation/` | `data/` classes, `com.shippopotamus.whisper` types (go through domain ports/use cases) |
+| `presentation/` | `data/` classes, `com.shippopotamus.whisper` types (go through application ports/use cases) |
 
 Reusable UI code lives with the presentation layer; screens are wired by the app shell.
 
@@ -95,8 +107,9 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 
 ## 2. Layer Responsibilities
 
-- **`domain/`** — Domain models, ports, use cases. Keep domain APIs free of Android/UI/storage/native implementation types. Owns the pipeline seams: `TranscriptionEngine`, `TextPostProcessor`, `ProcessingMode` (see `TRANSCRIPTION_RULES.md`).
-- **`data/`** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind domain ports. No Compose UI.
+- **`domain/` (`:core:domain`)** — Domain models, evaluators/policies, diagnostics, and domain-only ports. Keep domain APIs free of Android/UI/storage/native implementation types. Owns the `TextPostProcessor` seam and `ProcessingMode` (see `TRANSCRIPTION_RULES.md`); `TranscriptionEngine` is an application port.
+- **`application/` (`:core:application`)** — Use cases, application ports (ports consumed by use cases or services), and port-chaining processors (`StylingTextPostProcessor`, `StyleAwareTextPostProcessor`, `DictionaryAwareTextPostProcessor`). Depends only on `:core:domain`.
+- **`data/`** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports. No Compose UI.
 - **`service/`** — The two long-lived platform services (accessibility watcher, bubble overlay) and text insertion. Services are thin: they translate platform events into use-case calls and render bubble state.
 - **`presentation/`** — Compose UI and presentation logic (settings, onboarding, model manager). ViewModels map domain → presentation models.
 - **`:app` shell / `di/`** — Application class, navigation wiring, DI composition, app resources, platform entrypoints.
@@ -120,12 +133,12 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 - No repository calls inside composables.
 
 ### 3.4 ViewModel Dependencies & Flow Composition
-- **ViewModels depend on use cases, not repository or port interfaces.** A ViewModel constructor injects `*UseCase` classes from `domain/`; it must not inject a `*Repository`/`*Port` interface or any `data/` type directly. Ports are consumed by use cases.
+- **ViewModels depend on use cases, not repository or port interfaces.** A ViewModel constructor injects `*UseCase` classes from `application/` (`:core:application`); it must not inject a `*Repository`/`*Port` interface or any `data/` type directly. Ports are consumed by use cases.
 - **Mappers must not accept use-case parameters.** Mappers are pure domain → presentation transforms; ViewModels invoke use cases and pass derived values into mappers.
-- **Use cases own multi-source `Flow` composition.** When a screen needs more than one source, add a domain use case that combines the streams into one domain read model; the ViewModel observes that single use case.
+- **Use cases own multi-source `Flow` composition.** When a screen needs more than one source, add an application use case that combines the streams into one domain read model; the ViewModel observes that single use case.
 - **Only transient/presentation state lives in the ViewModel** (unsaved drafts, reveal-errors flags, one-shot events). Durable facts are read through use cases.
 - **Write paths go through use cases too** — never `repository.save(...)` from a ViewModel.
-- These rules are agent-enforced today. Enclave enforces the twin rules with a custom Detekt rule set; if Bloviate grows one, this section is its spec. Do not add suppressions to hide layering debt — file an ENC sub-issue instead.
+- These rules are now **compiler-backed at the module boundary** (ENC-159): `:core:domain`/`:core:application` cannot import `:app` code, so a use case can never reach a `data/` class and domain can never reach application. Inside the single `:app` module, ViewModel → use-case-only remains agent-enforced (Enclave enforces the twin rule there with a custom Detekt rule set; if Bloviate grows one, this section is its spec). Do not add suppressions to hide layering debt — file an ENC sub-issue instead.
 
 ### 3.5 Linear Ticketing
 All implementation work follows `AGENTS.md` §3.7 (Linear team `ENC`, project Bloviate, chunk-based trunk workflow, one MR per sub-issue, `Fixes ENC-xx` in the MR description). Architecture changes without a ticket are out of contract.

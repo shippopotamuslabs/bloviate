@@ -1,6 +1,6 @@
 package com.shippopotamus.bloviate.data
 
-import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
+import com.shippopotamus.bloviate.application.port.KeyboardVisibilityPort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

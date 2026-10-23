@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.InsertionResult
-import com.shippopotamus.bloviate.domain.port.TextInsertionPort
+import com.shippopotamus.bloviate.application.port.TextInsertionPort
 
 /**
  * Hand-written fake of [TextInsertionPort]; collects every text it was

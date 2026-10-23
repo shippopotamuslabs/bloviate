@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * The pipeline's engine selection (ENC-54): the one bound
- * [com.shippopotamus.bloviate.domain.port.TranscriptionEngine] delegates to
+ * [com.shippopotamus.bloviate.application.port.TranscriptionEngine] delegates to
  * the **effective** engine — the preference while its model is Ready, the
  * other engine while only its model is Ready — resolved at call time
  * through `EffectiveEngineResolver`. Both delegates are the real engines,

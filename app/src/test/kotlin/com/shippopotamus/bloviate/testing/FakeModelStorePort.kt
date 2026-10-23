@@ -1,7 +1,7 @@
 package com.shippopotamus.bloviate.testing
 
 import com.shippopotamus.bloviate.domain.model.ModelState
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.application.port.ModelStorePort
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 

@@ -8,10 +8,10 @@ import com.shippopotamus.bloviate.domain.model.AutoFinishReason
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
-import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
-import com.shippopotamus.bloviate.domain.port.AudioCapturePort
-import com.shippopotamus.bloviate.domain.port.MicPermissionPort
-import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
+import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
+import com.shippopotamus.bloviate.application.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.MicPermissionPort
+import com.shippopotamus.bloviate.application.port.RecordingSessionPort
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job

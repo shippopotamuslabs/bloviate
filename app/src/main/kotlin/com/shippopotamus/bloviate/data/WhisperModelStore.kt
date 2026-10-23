@@ -2,7 +2,7 @@ package com.shippopotamus.bloviate.data
 
 import android.util.Log
 import com.shippopotamus.bloviate.domain.model.ModelState
-import com.shippopotamus.bloviate.domain.port.ModelStorePort
+import com.shippopotamus.bloviate.application.port.ModelStorePort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers

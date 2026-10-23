@@ -5,8 +5,8 @@ import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
-import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
-import com.shippopotamus.bloviate.domain.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.application.evaluator.StylingTextPostProcessor
+import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeApiKeyPort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
