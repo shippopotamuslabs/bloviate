@@ -144,12 +144,14 @@ class StyleCatalogTest {
     }
 
     @Test
-    fun `transatlantic speaks the period — diction in the words, length follows the source`() {
-        // ENC-144 retires ENC-104's curtness pins: the 1920s
-        // character lives in diction and idiom, not in chopping
-        // sentences — a clipped sentence WITH period words passes,
-        // a clipped one without them was the failure. Sentence
-        // length and formality follow the source instead.
+    fun `transatlantic speaks the period — diction in the words, structure from the era`() {
+        // ENC-144 retired ENC-104's curtness pins. Sean's
+        // 2026-10-22 tweak goes further: the 1920s character lives
+        // in diction AND in sentence structure — periodic builds,
+        // formal connectives, the broadsheet's written voice — and
+        // vehemence must convert into period idiom rather than
+        // surrendering the register (the flat near-verbatim return
+        // he field-tested that evening is the failure this pins).
         val transatlantic = StyleCatalog.byId("talkie")
 
         assertTrue(
@@ -169,8 +171,16 @@ class StyleCatalogTest {
             "transatlantic lacks the diction bank",
         )
         assertTrue(
-            transatlantic.systemInstructions.contains("length follows the source"),
-            "transatlantic lacks the length-follows-source rule",
+            transatlantic.systemInstructions.contains("the era lives in the structure"),
+            "transatlantic lacks the period-structure rule",
+        )
+        assertTrue(
+            transatlantic.systemInstructions.contains("written voice"),
+            "transatlantic lacks the written-register braid",
+        )
+        assertTrue(
+            transatlantic.systemInstructions.contains("Vehemence converts"),
+            "transatlantic lacks the vehemence-conversion rule",
         )
         assertTrue(
             !transatlantic.systemInstructions.contains("no sentence runs past twelve words"),
@@ -215,8 +225,9 @@ class StyleCatalogTest {
     fun `transatlantic and the colonel are minimal pairs over the same dictations`() {
         // ENC-104: both era styles restyle the SAME source dictations
         // so the fork between the registers is visible in the
-        // examples themselves. ENC-144: the difference is diction,
-        // not chopping — Transatlantic lets sentences run long when
+        // examples themselves. Sean's 2026-10-22 tweak: the pair now
+        // also shares a vehement source, each converting it into its
+        // own register — Transatlantic lets sentences run long when
         // the source does, while every Colonel output still carries
         // at least one full period of twenty words or more.
         val transatlantic = StyleCatalog.byId("talkie")

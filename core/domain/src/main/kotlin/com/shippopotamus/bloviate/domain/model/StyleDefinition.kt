@@ -377,27 +377,38 @@ object StyleCatalog {
     private val Transatlantic: StyleDefinition = StyleDefinition(
         id = "talkie",
         displayName = "Transatlantic",
-        description = "Bright 1920s American vernacular — period words, the speaker's own stride.",
+        description = "Bright 1920s American vernacular — period words, period structure, the broadsheet's written voice.",
         sample = "Say, I am feeling in the pink today, so let us cut a rug tonight — " +
             "everything is copacetic, see?",
         systemInstructions = "Casing: easy 1920s American sentence case — capitals where a " +
             "bright talkie of 1929 would put them, no more. Punctuation: plain and spoken — " +
-            "full stops do the work, commas fall where a talking voice breathes, and fancy " +
-            "stops are left to the other fellow. Sentence architecture: length follows " +
-            "the source — a punchy dictation comes out punchy, a flowing dictation comes " +
-            "out flowing, and long sentences are welcome whenever the speaker runs long; " +
-            "the era lives in the words, never in chopping the thought. Paragraphing: one " +
-            "easy paragraph, no lingering. Register: the 1920s American spoken vernacular " +
-            "first and foremost — bright, joshing, good-natured talk, swell and keen and " +
-            "copacetic, the palookas and the flat tires named as such; the letter's " +
-            "courteous period constructions wait above as an upper register for a long or " +
-            "formal dictation, never the default. Speak it in period idiom woven into the " +
+            "full stops do the work, commas fall where a talking voice breathes, and the " +
+            "semicolon joins clauses the way the papers joined them. Sentence " +
+            "architecture: the era lives in the structure as much as in the words — " +
+            "sentences may be rebuilt the way the period built them, longer and more " +
+            "periodic, subordinate clauses stacked ahead of the main clause, formal " +
+            "connectives (indeed, moreover, it is, rather, that) doing the joinery; a " +
+            "run-on modern sentence may be re-claused into period shape, and a choppy " +
+            "one gathered into a single rolling period, so long as every fact lands " +
+            "exactly once and nothing is padded in or dropped. Paragraphing: one " +
+            "easy paragraph, no lingering. Register: two period voices woven as one — " +
+            "the 1920s American spoken vernacular, bright, joshing, good-natured talk, " +
+            "swell and keen and copacetic, the palookas and the flat tires named as " +
+            "such; and, braided through it, the period's written voice — the " +
+            "broadsheet's formal, long-sentenced prose, its elevated diction, inverted " +
+            "constructions and dateline detachment — which steps forward whenever the " +
+            "dictation runs long, turns formal, or reports rather than chats. Speak " +
+            "it in period idiom woven into the " +
             "grammar, about one touch every sentence or two — bee's knees, jake, in the " +
             "pink, the Real McCoy, cut a rug, flivver, cat's pajamas, Oxford bags, flush " +
             "with jack, giggle water, on the level, keep my nose clean, sheik, " +
             "twenty-three skidoo, the bulls, sheba, the berries, swell, keen, copacetic, " +
             "joshing, flat tire, palooka, the runaround, the dope, on the square — " +
-            "native to the sentence, never pasted on. Render the 1920s register of the " +
+            "native to the sentence, never pasted on. Vehemence converts, it never " +
+            "surrenders: when the speaker swears or rails, the heat survives in period " +
+            "idiom and the modern profanity does not — never hand the transcript back " +
+            "merely cleaned, the register must land on every sentence. Render the " +
+            "1920s register of the " +
             "transcript's own language — restyle the text in its own tongue in that " +
             "language's period voice; never translate it into English. Period flavor " +
             "touches FORM ONLY — diction, rhythm, idiom: a modern thing keeps the " +
@@ -423,6 +434,13 @@ object StyleCatalog {
                     "and the timeline is unrealistic",
                 styled = "I disagree with the plan, old sport: the cost is too high and the " +
                     "timeline is pure applesauce, on the level.",
+            ),
+            FewShot(
+                raw = "this damn meeting ran two hours over and nobody decided " +
+                    "a goddamn thing, what a waste of a morning",
+                styled = "Say, that meeting ran two hours over, and after all the " +
+                    "palaver not one thing got decided — the whole morning was " +
+                    "applesauce, and that is the dope, straight.",
             ),
         ),
         kind = StyleKind.LLM,
@@ -474,6 +492,14 @@ object StyleCatalog {
                 styled = "With respect, I cannot commend the plan: its cost exceeds what " +
                     "prudence allows, and its schedule promises what no honest effort " +
                     "can deliver.",
+            ),
+            FewShot(
+                raw = "this damn meeting ran two hours over and nobody decided " +
+                    "a goddamn thing, what a waste of a morning",
+                styled = "The meeting, having consumed two hours beyond its appointed " +
+                    "mark and produced, for all its deliberation, not a single " +
+                    "decision, must in candour be reckoned a whole morning spent " +
+                    "to no purpose whatsoever.",
             ),
         ),
         kind = StyleKind.LLM,
