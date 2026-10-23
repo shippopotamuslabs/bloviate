@@ -1,8 +1,10 @@
 package com.shippopotamus.bloviate.service
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.PersistableBundle
 import android.util.Log
 import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.port.TextInsertionPort
@@ -19,17 +21,31 @@ import kotlinx.coroutines.withContext
  * 1. Snapshot the user's clipboard (best effort — Android restricts
  *    clipboard reads for apps without input focus, in which case the
  *    snapshot is absent and restoration clears the clip instead).
- * 2. Put the transcript on the clipboard and let the watcher perform
- *    `ACTION_PASTE` on the focused node.
- * 3. After a short delay — the host app reads the clipboard while handling
- *    the paste, so restoring must not race it — put the snapshot back
- *    (or an empty clip when there was no snapshot).
+ * 2. Put the transcript on the clipboard — sensitive-flagged from the
+ *    moment it is set, so system previews and clipboard history redact it —
+ *    and let the watcher perform `ACTION_PASTE` on the focused node.
+ * 3. Restore-on-deliver: after a short delay — the host app reads the
+ *    clipboard while handling the paste, so restoring must not race it —
+ *    put the snapshot back (or an empty clip when there was no snapshot).
+ *
+ * Leave-on-undeliverable: when the text could not land in the field
+ * (paste path `NO_EDITABLE_FIELD` or `FAILED`; splice fallback
+ * `NO_EDITABLE_FIELD`, `FAILED`, or `ACTION_UNSUPPORTED` after a splice
+ * attempt), the sensitive-flagged transcript clip is left in place so the
+ * user can still retrieve it via the clipboard overlay — the clip itself
+ * is the deliverable. The restored snapshot clip is always the user's own
+ * clip back byte-identical; the transcript clip is never restored over it.
+ *
+ * Never-leave-on-password: a `PASSWORD_FIELD` outcome restores immediately
+ * on every path, never leaving the transcript behind (belt-and-braces).
+ * Cancellation and unexpected exceptions also restore. Early returns before
+ * any clip is set (watcher/clipboard unavailable) leave the clipboard
+ * untouched.
  *
  * Only when the node reports paste unsupported does it fall back to the
- * watcher's `ACTION_SET_TEXT` splice; the splice path restores the
- * clipboard immediately, since the host never reads it. Every path —
- * refusal, failure, even cancellation — restores the clipboard, and the
- * field's existing text is never touched by a failed attempt.
+ * watcher's `ACTION_SET_TEXT` splice; a completed splice restores the
+ * clipboard immediately, since the host never reads it. The field's
+ * existing text is never touched by a failed attempt.
  *
  * Transcript text is never logged here.
  */
@@ -47,7 +63,7 @@ class WatcherTextInsertion(
             ?: return@withContext InsertionResult.Failed("ClipboardManager unavailable")
         val snapshot = readSnapshot(clipboard)
         try {
-            clipboard.setPrimaryClip(ClipData.newPlainText(CLIP_LABEL, text))
+            clipboard.setPrimaryClip(sensitiveTranscriptClip(text))
             when (operator.pasteIntoFocusedField()) {
                 FocusedFieldOutcome.COMPLETED -> {
                     delay(restoreDelayMs)
@@ -60,11 +76,11 @@ class WatcherTextInsertion(
                     InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD)
                 }
                 FocusedFieldOutcome.NO_EDITABLE_FIELD -> {
-                    restoreClipboard(clipboard, snapshot)
+                    leaveTranscript("paste found no editable field")
                     InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD)
                 }
                 FocusedFieldOutcome.FAILED -> {
-                    restoreClipboard(clipboard, snapshot)
+                    leaveTranscript("ACTION_PASTE reported failure")
                     InsertionResult.Failed("ACTION_PASTE reported failure")
                 }
             }
@@ -77,7 +93,14 @@ class WatcherTextInsertion(
         }
     }
 
-    /** The paste-unsupported path: `ACTION_SET_TEXT` splice via the watcher, clipboard restored at once. */
+    /**
+     * The paste-unsupported path: `ACTION_SET_TEXT` splice via the watcher.
+     * A completed splice restores the clipboard at once, since the host
+     * never reads it; a password outcome restores too, never leaving the
+     * transcript behind. Any other outcome leaves the sensitive-flagged
+     * transcript clip in place — the field vanished or failed, so the clip
+     * itself is the deliverable.
+     */
     private fun spliceFallback(
         operator: FocusedFieldOperator,
         clipboard: ClipboardManager,
@@ -85,18 +108,40 @@ class WatcherTextInsertion(
         text: String,
     ): InsertionResult {
         val outcome = operator.spliceIntoFocusedField(text)
-        restoreClipboard(clipboard, snapshot)
         return when (outcome) {
-            FocusedFieldOutcome.COMPLETED ->
+            FocusedFieldOutcome.COMPLETED -> {
+                restoreClipboard(clipboard, snapshot)
                 InsertionResult.Inserted(InsertionResult.Inserted.Method.SET_TEXT_SPLICE)
-            FocusedFieldOutcome.PASSWORD_FIELD ->
+            }
+            FocusedFieldOutcome.PASSWORD_FIELD -> {
+                restoreClipboard(clipboard, snapshot)
                 InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD)
-            FocusedFieldOutcome.NO_EDITABLE_FIELD ->
+            }
+            FocusedFieldOutcome.NO_EDITABLE_FIELD -> {
+                leaveTranscript("splice found no editable field")
                 InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD)
+            }
             FocusedFieldOutcome.ACTION_UNSUPPORTED,
             FocusedFieldOutcome.FAILED,
-            -> InsertionResult.Failed("ACTION_SET_TEXT splice reported $outcome")
+            -> {
+                leaveTranscript("ACTION_SET_TEXT splice reported $outcome")
+                InsertionResult.Failed("ACTION_SET_TEXT splice reported $outcome")
+            }
         }
+    }
+
+    /**
+     * Builds the transcript clip with [ClipDescription.EXTRA_IS_SENSITIVE]
+     * set from the moment it is placed, so system previews and clipboard
+     * history redact it. Applies to the transcript clip only — the user's
+     * snapshot clip is always restored byte-identical, never re-flagged.
+     */
+    private fun sensitiveTranscriptClip(text: String): ClipData {
+        val clip = ClipData.newPlainText(CLIP_LABEL, text)
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+        return clip
     }
 
     /**
@@ -111,6 +156,15 @@ class WatcherTextInsertion(
             Log.w(TAG, "Could not read the current clipboard; restore will clear it", exception)
             null
         }
+
+    /**
+     * Undeliverable outcome: the sensitive-flagged transcript clip stays on
+     * the clipboard so the user can retrieve it via the clipboard overlay.
+     * Logs the decision only — never the transcript text.
+     */
+    private fun leaveTranscript(reason: String) {
+        Log.i(TAG, "Transcript undeliverable ($reason); leaving it on the clipboard")
+    }
 
     /** Puts [snapshot] back, or an empty clip when there was nothing to snapshot. Never throws. */
     private fun restoreClipboard(clipboard: ClipboardManager, snapshot: ClipData?) {
