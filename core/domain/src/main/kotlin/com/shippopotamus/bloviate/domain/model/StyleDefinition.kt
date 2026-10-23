@@ -559,6 +559,7 @@ object StyleCatalog {
         SocratesStyle,
         PlatoStyle,
         AquinasStyle,
+        AugustineStyle,
         OscarWilde,
         Transatlantic,
         TheColonel,
