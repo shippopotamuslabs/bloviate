@@ -558,6 +558,7 @@ object StyleCatalog {
         MarcusAurelius,
         SocratesStyle,
         PlatoStyle,
+        AquinasStyle,
         OscarWilde,
         Transatlantic,
         TheColonel,
