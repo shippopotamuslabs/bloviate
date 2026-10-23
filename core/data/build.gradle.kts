@@ -43,6 +43,10 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
 
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.functions)
+
     // whisper-android, consumed via composite build (see settings.gradle.kts);
     // coordinates are substituted with the included-build projects.
     implementation(libs.whisper.android)

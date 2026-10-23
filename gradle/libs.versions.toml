@@ -24,6 +24,8 @@ apterJunit5Robolectric = "0.9.0"
 javaxInject = "1"
 ktlintVersion = "14.2.0"
 detekt = "1.23.8"
+firebaseBom = "34.19.0"
+googleServices = "4.5.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -50,6 +52,9 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectricVersion" }
 apter-junit5-robolectric-extension = { group = "tech.apter.junit5.jupiter", name = "robolectric-extension", version.ref = "apterJunit5Robolectric" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
+firebase-functions = { group = "com.google.firebase", name = "firebase-functions" }
 whisper-android = { group = "com.shippopotamuslabs", name = "whisper-android", version = "0.1.0-SNAPSHOT" }
 whisper-android-hilt = { group = "com.shippopotamuslabs", name = "whisper-android-hilt", version = "0.1.0-SNAPSHOT" }
 
@@ -64,3 +69,4 @@ hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintVersion" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 apter-robolectric-junit5 = { id = "tech.apter.junit5.jupiter.robolectric-extension-gradle-plugin", version.ref = "apterJunit5Robolectric" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
