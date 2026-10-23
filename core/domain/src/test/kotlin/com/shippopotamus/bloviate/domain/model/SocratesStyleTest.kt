@@ -11,7 +11,7 @@ class SocratesStyleTest {
         assertEquals("socrates", SocratesStyle.id)
         assertEquals("Socrates", SocratesStyle.displayName)
         assertEquals(StyleKind.LLM, SocratesStyle.kind)
-        assertEquals(StyleCategory.ANCIENT_PHILOSOPHERS, SocratesStyle.category)
+        assertEquals(StyleCategory.PHILOSOPHERS, SocratesStyle.category)
         assertTrue(SocratesStyle.displayName.isNotBlank(), "socrates display name is blank")
         assertTrue(SocratesStyle.description.isNotBlank(), "socrates description is blank")
         assertTrue(SocratesStyle.sample.isNotBlank(), "socrates sample is blank")
