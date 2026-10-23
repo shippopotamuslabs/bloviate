@@ -2,6 +2,8 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
@@ -30,19 +32,35 @@ class StyleViewModel @Inject constructor(
     private val catalog: List<StyleDefinition> = observeCatalog()
 
     val uiState: StateFlow<StyleUiState> = observeSelectedStyle()
-        .map { selectedId ->
-            StyleUiState(
-                options = catalog.map { style -> style.toOption(selectedId) },
-            )
-        }.stateIn(
+        .map { selectedId -> buildUiState(selectedId) }
+        .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-            initialValue = StyleUiState(
-                options = catalog.map { style ->
-                    style.toOption(observeSelectedStyle().value)
-                },
-            ),
+            initialValue = buildUiState(observeSelectedStyle().value),
         )
+
+    /** Groups the catalog by category in enum order, preserving catalog order within a section. */
+    private fun buildUiState(selectedId: String): StyleUiState =
+        StyleUiState(
+            sections = StyleCategory.entries.mapNotNull { category ->
+                val styles = catalog.filter { style -> style.category == category }
+                    .map { style -> style.toOption(selectedId) }
+                if (styles.isEmpty()) {
+                    null
+                } else {
+                    StyleSectionUi(headerRes = category.toHeaderRes(), styles = styles)
+                }
+            },
+        )
+
+    private fun StyleCategory.toHeaderRes(): Int = when (this) {
+        StyleCategory.SERIOUS -> R.string.style_section_serious
+        StyleCategory.ANCIENT_PHILOSOPHERS -> R.string.style_section_ancient_philosophers
+        StyleCategory.WRITERS -> R.string.style_section_writers
+        StyleCategory.ERAS_AND_GENRES -> R.string.style_section_eras_and_genres
+        StyleCategory.PERSONAS -> R.string.style_section_personas
+        StyleCategory.MODERN_PARODY -> R.string.style_section_modern_parody
+    }
 
     /** Persists the tapped style. */
     fun onStyleSelected(styleId: String) {

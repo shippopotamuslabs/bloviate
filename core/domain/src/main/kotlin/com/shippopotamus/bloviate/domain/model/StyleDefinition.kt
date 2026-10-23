@@ -16,6 +16,16 @@ enum class StyleKind {
     LLM,
 }
 
+/** Section a style belongs to on the Styles screen (ENC-188); declaration order is display order. */
+enum class StyleCategory {
+    SERIOUS,
+    ANCIENT_PHILOSOPHERS,
+    WRITERS,
+    ERAS_AND_GENRES,
+    PERSONAS,
+    MODERN_PARODY,
+}
+
 /**
  * One writing-style preset (ENC-72): the voice Bloviate shapes dictation
  * into. Definitions are typed Kotlin data in `domain/` — not asset files —
@@ -30,6 +40,7 @@ data class StyleDefinition(
     val systemInstructions: String,
     val fewShots: List<FewShot>,
     val kind: StyleKind,
+    val category: StyleCategory,
 )
 
 /**
@@ -62,6 +73,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.MECHANICAL,
+        category = StyleCategory.SERIOUS,
     )
 
     private val NormalCapsCasual: StyleDefinition = StyleDefinition(
@@ -83,6 +95,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.MECHANICAL,
+        category = StyleCategory.SERIOUS,
     )
 
     private val Professional: StyleDefinition = StyleDefinition(
@@ -105,6 +118,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.SERIOUS,
     )
 
     private val Edgelord: StyleDefinition = StyleDefinition(
@@ -127,6 +141,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.MODERN_PARODY,
     )
 
     private val Genius: StyleDefinition = StyleDefinition(
@@ -149,6 +164,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.PERSONAS,
     )
 
     private val Aristotle: StyleDefinition = StyleDefinition(
@@ -220,6 +236,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.ANCIENT_PHILOSOPHERS,
     )
 
     private val Seneca: StyleDefinition = StyleDefinition(
@@ -284,6 +301,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.ANCIENT_PHILOSOPHERS,
     )
 
     private val MarcusAurelius: StyleDefinition = StyleDefinition(
@@ -348,6 +366,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.ANCIENT_PHILOSOPHERS,
     )
 
     private val OscarWilde: StyleDefinition = StyleDefinition(
@@ -372,6 +391,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.WRITERS,
     )
 
     private val Transatlantic: StyleDefinition = StyleDefinition(
@@ -444,6 +464,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.ERAS_AND_GENRES,
     )
 
     /** The style an absent or unrecognized selection reads as: today's baseline behavior. */
@@ -503,6 +524,7 @@ object StyleCatalog {
             ),
         ),
         kind = StyleKind.LLM,
+        category = StyleCategory.ERAS_AND_GENRES,
     )
 
     /** The style an absent or unrecognized selection reads as: today's baseline behavior. */

@@ -54,4 +54,5 @@ internal val PirateStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.ERAS_AND_GENRES,
 )

@@ -77,4 +77,5 @@ internal val DickensStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.WRITERS,
 )
