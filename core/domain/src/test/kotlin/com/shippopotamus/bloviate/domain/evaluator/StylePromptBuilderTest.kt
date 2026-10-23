@@ -39,6 +39,16 @@ class StylePromptBuilderTest {
                 prompt.system.content.contains("speaker's own"),
                 "${style.id} system message lacks the own-words clause",
             )
+            // BLO-153: intent is preserved, wording is not — the rewrite
+            // license rides every style beside the invariant.
+            assertTrue(
+                prompt.system.content.contains("INTENT, NOT WORDING"),
+                "${style.id} system message lacks the rewrite license",
+            )
+            assertTrue(
+                prompt.system.content.contains("toolkit, not a template"),
+                "${style.id} system message lacks the license toolkit clause",
+            )
         }
     }
 

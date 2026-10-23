@@ -80,7 +80,7 @@ class CorporateLinkedInStyleTest {
         assertTrue(instructions.contains("Punctuation:"), "instructions lack the punctuation directive")
         assertTrue(instructions.contains("Paragraphing:"), "instructions lack the paragraphing directive")
         assertTrue(
-            instructions.contains("line break after every sentence"),
+            instructions.contains("one sentence per line is the native rhythm"),
             "instructions lack the line-break architecture",
         )
         assertTrue(
@@ -99,6 +99,29 @@ class CorporateLinkedInStyleTest {
             instructions.contains("No period slurs or bigotry ever"),
             "instructions lack the no-slur boundary",
         )
+    }
+
+    @Test
+    fun `corporate linkedin closers are moves not a ritual stack`() {
+        // BLO-153: the numbered lesson list, hashtag tail and "Agree?" are
+        // signature moves to land where earned — the examples must not
+        // teach the full stack on every post.
+        val instructions = CorporateLinkedInStyle.systemInstructions
+        assertTrue(
+            instructions.contains("moves, not a ritual"),
+            "instructions lack the de-rigidified closers clause",
+        )
+        assertTrue(
+            !instructions.contains("Every post ends with a hashtag tail"),
+            "instructions still mandate the hashtag tail on every post",
+        )
+        assertEquals(
+            0,
+            CorporateLinkedInStyle.fewShots.count { shot -> shot.styled.contains("Lesson 1") },
+            "few-shots still teach numbered lesson lists",
+        )
+        val endings = CorporateLinkedInStyle.fewShots.map { shot -> shot.styled.trim().lines().last() }
+        assertTrue(endings.distinct().size >= 2, "few-shot endings are still one ritual: $endings")
     }
 
     @Test

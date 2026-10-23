@@ -64,6 +64,8 @@ class StylePromptBuilder @Inject constructor() {
             append("\n\n")
             append(SPEAKER_INVARIANT)
             append(" ")
+            append(REWRITE_LICENSE)
+            append(" ")
             append(ONLY_TEXT_INSTRUCTION)
         }
 
@@ -131,6 +133,31 @@ class StylePromptBuilder @Inject constructor() {
                 "speaker as 'you', never write as though replying to them, and use no " +
                 "salutations, letter framing, or counsel directed at the speaker. Change " +
                 "only the voice, never who is speaking or who is spoken to."
+
+        /**
+         * The rewrite license (BLO-153), shared by every style: what is
+         * preserved is the speaker's INTENT — facts, names, numbers,
+         * dates, quoted text — never their exact phrasing. Before this
+         * clause existed, the shared layer only prohibited changes, and
+         * most styles drifted into copy-editing: same sentences, tidier
+         * punctuation. The license makes recasting the default and
+         * demotes signature formatting (lesson lists, content notes,
+         * hashtag tails) from mandatory skeleton to toolkit. How far the
+         * recast goes stays the voice's own call — Polish stays close by
+         * design; the personas rewrite fully.
+         */
+        const val REWRITE_LICENSE: String =
+            "INTENT, NOT WORDING: Keep what the speaker means — their intent, facts, " +
+                "names, numbers, dates, and quoted text — never their exact phrasing. " +
+                "Recast freely into the voice: new sentence shapes, new verbs, new order, " +
+                "compression or expansion where the voice demands it. How far the recast " +
+                "goes is set by the voice itself: a cleanup voice stays close to the " +
+                "words, a persona voice rewrites fully — but no voice is a mere " +
+                "copy-editor unless its own instructions say so. A voice's signature " +
+                "formatting devices (lesson lists, content notes, hashtag tails, " +
+                "sign-offs) are a toolkit, not a template: deploy one where it lands " +
+                "for this text, skip it where it does not, and never force the same " +
+                "closing structure onto every output."
 
         /**
          * The model must return ONLY the transformed text: no quotes, no

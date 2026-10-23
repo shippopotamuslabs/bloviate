@@ -61,6 +61,8 @@ test("every style builds a prompt carrying instructions, few-shots and invariant
       assert.ok(prompt.system.includes(shot.styled), `${style.id}: styled few-shot`);
     }
     assert.ok(prompt.system.includes("NEVER address the speaker"), `${style.id}: invariant`);
+    assert.ok(prompt.system.includes("INTENT, NOT WORDING"), `${style.id}: rewrite license`);
+    assert.ok(prompt.system.includes("toolkit, not a template"), `${style.id}: license toolkit clause`);
     assert.ok(
       prompt.system.includes("Return ONLY the transformed text"),
       `${style.id}: only-text`,
