@@ -140,10 +140,13 @@ export const styleText = onCall(
     secrets: ["OPENROUTER_API_KEY"],
     timeoutSeconds: 120,
     memory: "512MiB",
-    // Mirrors Stratum's LLM callables (inferCustomLifts); ENC-149/151 own the
-    // final auth/AppCheck pinning decision. Anonymous-auth uid arrives via
-    // request.auth either way. Handler tests exercise the factory, not this wrapper.
-    enforceAppCheck: true,
+    // App Check is NOT enforced yet: the client does not mint App Check tokens
+    // (no Play Integrity / debug provider wiring), so enforcing it here rejects
+    // every legitimate call as UNAUTHENTICATED. Auth + entitlement still gate
+    // every call. ENC-151's remainder (with ENC-150 abuse controls) wires App
+    // Check into the client and re-enables enforcement. Handler tests exercise
+    // the factory, not this wrapper.
+    enforceAppCheck: false,
   },
   async (request) => {
     let cachedComplete: CompletionFn | undefined;
