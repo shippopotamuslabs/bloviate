@@ -525,6 +525,7 @@ object StyleCatalog {
         PirateStyle,
         CorporateLinkedInStyle,
         UltraHrStyle,
+        SiliconValleyBroStyle,
         LegalContractStyle,
         AcademicJargonStyle,
         GenZBrainrotStyle,
