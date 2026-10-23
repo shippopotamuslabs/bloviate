@@ -16,8 +16,19 @@ enum class StyleKind {
     LLM,
 }
 
-/** Section a style belongs to on the Styles screen (ENC-188); declaration order is display order. */
+/**
+ * Id prefix marking user-created custom styles (ENC-199): custom ids
+ * resolve from the custom-styles cache first, built-ins never carry it.
+ */
+const val CUSTOM_STYLE_ID_PREFIX: String = "custom-"
+
+/**
+ * Section a style belongs to on the Styles screen (ENC-188); declaration
+ * order is display order. [CUSTOM] leads so the user's own styles render
+ * first; no built-in style may sit in it (pinned by `StyleCatalogTest`).
+ */
 enum class StyleCategory {
+    CUSTOM,
     SERIOUS,
     PHILOSOPHERS,
     WRITERS,
