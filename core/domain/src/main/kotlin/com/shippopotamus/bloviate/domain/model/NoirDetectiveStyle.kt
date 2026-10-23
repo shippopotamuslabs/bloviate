@@ -60,4 +60,5 @@ internal val NoirDetectiveStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.ERAS_AND_GENRES,
 )

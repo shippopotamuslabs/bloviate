@@ -59,4 +59,5 @@ internal val AttenboroughStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.PERSONAS,
 )

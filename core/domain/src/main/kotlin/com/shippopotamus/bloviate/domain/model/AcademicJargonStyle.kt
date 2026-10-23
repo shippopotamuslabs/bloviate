@@ -63,4 +63,5 @@ internal val AcademicJargonStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.MODERN_PARODY,
 )
