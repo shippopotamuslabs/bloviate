@@ -28,6 +28,16 @@ export const MODEL_PRICES_USD_PER_1M: Record<string, { input: number; output: nu
 };
 
 export type ChatMessage = { role: string; content: string };
+
+/**
+ * Structured-output request for models that support it. `json_schema`
+ * carries a strict schema; `json_object` asks for JSON without a schema
+ * (retry path for endpoints that reject schema/parameterized requests).
+ */
+export type StructuredResponseFormat =
+  | { type: "json_schema"; name: string; schema: Record<string, unknown>; strict: boolean }
+  | { type: "json_object" };
+
 export type CompletionRequest = {
   model: string;
   messages: ChatMessage[];
@@ -38,6 +48,8 @@ export type CompletionRequest = {
   degraded: boolean;
   maxTokens: number;
   temperature: number;
+  responseFormat?: StructuredResponseFormat;
+  requireParameters?: boolean;
 };
 export type CompletionUsage = {
   promptTokens?: number;
@@ -60,6 +72,7 @@ export type AttemptRecord = {
   completionTokens?: number;
   reasoningTokens?: number;
   estimatedCostUsd?: number;
+  normalizedTokens?: number;
 };
 
 export class StyleChainError extends Error {
@@ -80,6 +93,20 @@ export function estimateCostUsd(model: string, usage?: CompletionUsage): number 
   const prompt = usage.promptTokens ?? 0;
   const completion = usage.completionTokens ?? 0;
   return (prompt / 1_000_000) * price.input + (completion / 1_000_000) * price.output;
+}
+
+/**
+ * Normalized token accounting: token usage re-based to the primary input
+ * price ($0.15/1M) so usage sums are comparable across models. Reasoning
+ * tokens count as completion (output) tokens.
+ */
+export function normalizedTokens(model: string, usage?: CompletionUsage): number {
+  if (!usage) return 0;
+  const price = MODEL_PRICES_USD_PER_1M[model];
+  if (!price) return 0;
+  const prompt = usage.promptTokens ?? 0;
+  const completion = (usage.completionTokens ?? 0) + (usage.reasoningTokens ?? 0);
+  return Math.round((prompt * price.input) / 0.15 + (completion * price.output) / 0.15);
 }
 
 export function maxTokensForTranscript(transcript: string): number {
@@ -203,6 +230,97 @@ export async function runStyleChain(deps: {
   throw new StyleChainError(lastReason, attempts);
 }
 
+/**
+ * Raw JSON-generation chain (custom-style generation). Unlike
+ * runStyleChain this performs NO response cleaning and NO output-guard
+ * classification: it returns the model's raw content for the caller to
+ * parse and validate. Walks the primary link then the fallback link, one
+ * attempt each (no degraded retry); transport/HTTP errors advance the
+ * chain exactly like runStyleChain. Every attempt records usage plus
+ * normalizedTokens for accounting. Blank content advances the chain with
+ * an empty-response outcome. Throws StyleChainError when every link fails.
+ */
+export async function runGenerationCompletion(deps: {
+  complete: CompletionFn;
+  messages: ChatMessage[];
+  models?: string[];
+  responseFormat?: StructuredResponseFormat;
+  requireParameters?: boolean;
+  temperature: number;
+  maxTokens: number;
+  now?: () => number;
+}): Promise<{
+  content: string;
+  model: string;
+  provider?: string;
+  attempts: AttemptRecord[];
+}> {
+  const now = deps.now ?? Date.now;
+  const attempts: AttemptRecord[] = [];
+  const models = deps.models ?? [PRIMARY_MODEL, FALLBACK_MODEL];
+  let lastReason = "transport-error";
+
+  for (const model of models) {
+    const link = LINKS.find((l) => l.model === model);
+    const started = now();
+    const request: CompletionRequest = {
+      model,
+      messages: deps.messages.map((m) => ({ role: m.role, content: m.content })),
+      providerOrder: link?.providerOrder ? [...link.providerOrder] : undefined,
+      providerOnly: link?.providerOnly ? [...link.providerOnly] : undefined,
+      providerSort: link?.providerSort,
+      reasoningEffort: REASONING_EFFORT,
+      degraded: false,
+      maxTokens: deps.maxTokens,
+      temperature: deps.temperature,
+    };
+    // Structured-output keys stay absent unless set, so plain styling
+    // requests serialize byte-identically to before.
+    if (deps.responseFormat !== undefined) request.responseFormat = deps.responseFormat;
+    if (deps.requireParameters !== undefined) request.requireParameters = deps.requireParameters;
+    let result: CompletionResult;
+    try {
+      result = await deps.complete(request);
+    } catch (err) {
+      const status = errorStatus(err);
+      const outcome = status !== undefined ? `http-${status}` : "transport-error";
+      attempts.push({
+        model,
+        degraded: false,
+        outcome,
+        latencyMs: now() - started,
+        estimatedCostUsd: 0,
+        normalizedTokens: 0,
+      });
+      lastReason = outcome;
+      continue;
+    }
+    const latencyMs = now() - started;
+    const usage = result.usage;
+    const record: AttemptRecord = {
+      model,
+      degraded: false,
+      outcome: "",
+      latencyMs,
+      promptTokens: usage?.promptTokens,
+      completionTokens: usage?.completionTokens,
+      reasoningTokens: usage?.reasoningTokens,
+      estimatedCostUsd: estimateCostUsd(model, usage),
+      normalizedTokens: normalizedTokens(model, usage),
+    };
+    if ((result.content ?? "").trim().length === 0) {
+      record.outcome = "empty-response";
+      attempts.push(record);
+      lastReason = "empty-response";
+      continue;
+    }
+    record.outcome = "ok";
+    attempts.push(record);
+    return { content: result.content, model, provider: result.provider, attempts };
+  }
+  throw new StyleChainError(lastReason, attempts);
+}
+
 export function buildOpenRouterCompletionFn(apiKey: string, sessionId: string): CompletionFn {
   const client = createOpenRouterClient(apiKey, sessionId);
   return async (req: CompletionRequest): Promise<CompletionResult> => {
@@ -218,17 +336,34 @@ export function buildOpenRouterCompletionFn(apiKey: string, sessionId: string): 
     if (req.providerOrder) provider.order = req.providerOrder;
     if (req.providerOnly) provider.only = req.providerOnly;
     if (req.providerSort) provider.sort = req.providerSort;
+    // Structured-output routing only when the caller set it: plain
+    // styling requests must serialize exactly as before.
+    if (req.requireParameters !== undefined) provider.require_parameters = req.requireParameters;
     const extras = buildOpenRouterChatCompletionExtras(sessionId);
+    const body: Record<string, unknown> = {
+      model: req.model,
+      messages: req.messages,
+      temperature: req.temperature,
+      max_tokens: req.maxTokens,
+      reasoning: { effort: req.reasoningEffort },
+      provider,
+      session_id: extras.session_id,
+    };
+    if (req.responseFormat !== undefined) {
+      body.response_format =
+        req.responseFormat.type === "json_schema"
+          ? {
+              type: "json_schema",
+              json_schema: {
+                name: req.responseFormat.name,
+                strict: req.responseFormat.strict,
+                schema: req.responseFormat.schema,
+              },
+            }
+          : { type: "json_object" };
+    }
     const response = (await (client.chat.completions.create as (...args: unknown[]) => Promise<unknown>)(
-      {
-        model: req.model,
-        messages: req.messages,
-        temperature: req.temperature,
-        max_tokens: req.maxTokens,
-        reasoning: { effort: req.reasoningEffort },
-        provider,
-        session_id: extras.session_id,
-      },
+      body,
       { timeout: 20000, maxRetries: 0 },
     )) as {
       choices?: Array<{ message?: { content?: string | null } }>;
