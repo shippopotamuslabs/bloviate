@@ -21,13 +21,14 @@ import org.robolectric.annotation.Config
 import tech.apter.junit.jupiter.robolectric.RobolectricExtension
 
 /**
- * Clipboard choreography of paste-first insertion (ARCHITECTURE_RULES
- * §5.3), against Robolectric's real in-memory clipboard: the transcript
- * must be on the clipboard when the paste fires — sensitive-flagged from
- * the moment it is set. Restore-on-deliver puts the user's previous clip
- * back afterwards; leave-on-undeliverable keeps the sensitive-flagged
- * transcript in place so the user can retrieve it; password outcomes always
- * restore, never leaving the transcript behind.
+ * Clipboard choreography of splice-first insertion (ENC-168): the
+ * watcher's `ACTION_SET_TEXT` splice is tried first without touching the
+ * clipboard at all. Only when the splice cannot deliver does the paste
+ * fallback snapshot the clipboard, set the sensitive-flagged transcript,
+ * and paste. Restore-on-deliver puts the user's previous clip back
+ * afterwards; leave-on-undeliverable keeps the sensitive-flagged
+ * transcript in place so the user can retrieve it; password outcomes
+ * never leave the transcript behind.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @ExtendWith(RobolectricExtension::class)
@@ -56,22 +57,57 @@ class WatcherTextInsertionTest {
     }
 
     @Test
-    fun `paste happy path - transcript is on the clipboard when paste fires, previous clip restored after`() =
+    fun `splice happy path - clipboard never touched, previous clip kept`() = runBlocking {
+        setClipboardText("the user's own words")
+
+        val result = insertion.insert("dictated text")
+
+        assertEquals(
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.SET_TEXT_SPLICE),
+            result,
+        )
+        assertEquals(listOf("dictated text"), operator.splicedTexts)
+        assertEquals(0, operator.pasteCallCount)
+        assertEquals("the user's own words", currentClipboardText())
+    }
+
+    @Test
+    fun `splice happy path - a non-text clipboard item is identical, proving no rewrite`() =
         runBlocking {
-            setClipboardText("the user's own words")
+            val uriClip = ClipData.newUri(
+                context.contentResolver,
+                "label",
+                Uri.parse("content://example/items/1"),
+            )
+            clipboard.setPrimaryClip(uriClip)
 
             val result = insertion.insert("dictated text")
 
             assertEquals(
-                InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE),
+                InsertionResult.Inserted(InsertionResult.Inserted.Method.SET_TEXT_SPLICE),
                 result,
             )
-            assertEquals(1, operator.pasteCallCount)
-            assertEquals(0, operator.spliceCallCount)
-            assertEquals("dictated text", operator.clipTextSeenAtPaste)
-            assertEquals(true, operator.clipSensitiveSeenAtPaste)
-            assertEquals("the user's own words", currentClipboardText())
+            assertEquals(0, operator.pasteCallCount)
+            assertSame(uriClip, clipboard.primaryClip)
         }
+
+    @Test
+    fun `splice happy path with no previous clipboard leaves no transcript behind`() = runBlocking {
+        clipboard.clearPrimaryClip()
+
+        val result = insertion.insert("dictated text")
+
+        assertEquals(
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.SET_TEXT_SPLICE),
+            result,
+        )
+        assertEquals(0, operator.pasteCallCount)
+        val current = currentClipboardText()
+        assertTrue(
+            current == null || current.isEmpty(),
+            "expected no transcript on the clipboard, was <$current>",
+        )
+    }
 
     @Test
     fun `no watcher connected refuses and never touches the clipboard`() = runBlocking {
@@ -85,12 +121,13 @@ class WatcherTextInsertionTest {
             result,
         )
         assertEquals(0, operator.pasteCallCount)
+        assertEquals(0, operator.spliceCallCount)
         assertEquals("keep me", currentClipboardText())
     }
 
     @Test
-    fun `a password field refuses and the clipboard is restored`() = runBlocking {
-        operator.pasteOutcome = FocusedFieldOutcome.PASSWORD_FIELD
+    fun `a password field refuses without paste and the clipboard is untouched`() = runBlocking {
+        operator.spliceOutcome = FocusedFieldOutcome.PASSWORD_FIELD
         setClipboardText("the user's own words")
 
         val result = insertion.insert("dictated text")
@@ -99,11 +136,108 @@ class WatcherTextInsertionTest {
             InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD),
             result,
         )
+        assertEquals(0, operator.pasteCallCount)
+        assertEquals("the user's own words", currentClipboardText())
+        assertTrue(
+            currentClipboardText() != "dictated text",
+            "transcript must never linger after a password refusal",
+        )
+    }
+
+    @Test
+    fun `no editable field refuses without paste and the sensitive transcript is left on the clipboard`() =
+        runBlocking {
+            operator.spliceOutcome = FocusedFieldOutcome.NO_EDITABLE_FIELD
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertEquals(
+                InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD),
+                result,
+            )
+            assertEquals(0, operator.pasteCallCount)
+            assertTranscriptLeftOnClipboard("dictated text")
+        }
+
+    @Test
+    fun `splice unsupported falls back to paste - transcript on clipboard at paste, previous clip restored`() =
+        runBlocking {
+            operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertEquals(
+                InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE),
+                result,
+            )
+            assertEquals(listOf("dictated text"), operator.splicedTexts)
+            assertEquals(1, operator.pasteCallCount)
+            assertEquals("dictated text", operator.clipTextSeenAtPaste)
+            assertEquals(true, operator.clipSensitiveSeenAtPaste)
+            assertEquals("the user's own words", currentClipboardText())
+        }
+
+    @Test
+    fun `splice failed falls back to paste and restores the previous clip`() = runBlocking {
+        operator.spliceOutcome = FocusedFieldOutcome.FAILED
+        setClipboardText("the user's own words")
+
+        val result = insertion.insert("dictated text")
+
+        assertEquals(
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE),
+            result,
+        )
+        assertEquals(1, operator.pasteCallCount)
         assertEquals("the user's own words", currentClipboardText())
     }
 
     @Test
-    fun `no editable field refuses and the sensitive transcript is left on the clipboard`() = runBlocking {
+    fun `a throwing splice falls back to paste and still delivers`() = runBlocking {
+        operator.spliceFailure = RuntimeException("framework exploded")
+        setClipboardText("the user's own words")
+
+        val result = insertion.insert("dictated text")
+
+        assertEquals(
+            InsertionResult.Inserted(InsertionResult.Inserted.Method.PASTE),
+            result,
+        )
+        assertEquals(1, operator.pasteCallCount)
+        assertEquals("the user's own words", currentClipboardText())
+    }
+
+    @Test
+    fun `a failed paste in the fallback reports failure and the sensitive transcript is left`() =
+        runBlocking {
+            operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+            operator.pasteOutcome = FocusedFieldOutcome.FAILED
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
+            assertTranscriptLeftOnClipboard("dictated text")
+        }
+
+    @Test
+    fun `an unsupported paste in the fallback reports failure and the sensitive transcript is left`() =
+        runBlocking {
+            operator.spliceOutcome = FocusedFieldOutcome.FAILED
+            operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
+            assertTranscriptLeftOnClipboard("dictated text")
+        }
+
+    @Test
+    fun `paste losing focus mid-fallback refuses and leaves the sensitive transcript`() = runBlocking {
+        operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
         operator.pasteOutcome = FocusedFieldOutcome.NO_EDITABLE_FIELD
         setClipboardText("the user's own words")
 
@@ -117,87 +251,50 @@ class WatcherTextInsertionTest {
     }
 
     @Test
-    fun `a failed paste reports failure and the sensitive transcript is left on the clipboard`() =
+    fun `paste meeting a password field in the fallback refuses and restores the clipboard`() =
         runBlocking {
-            operator.pasteOutcome = FocusedFieldOutcome.FAILED
+            operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+            operator.pasteOutcome = FocusedFieldOutcome.PASSWORD_FIELD
+            setClipboardText("the user's own words")
+
+            val result = insertion.insert("dictated text")
+
+            assertEquals(
+                InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD),
+                result,
+            )
+            assertEquals("the user's own words", currentClipboardText())
+        }
+
+    @Test
+    fun `a paste that throws in the fallback still restores the clipboard and reports failure`() =
+        runBlocking {
+            operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
+            operator.pasteFailure = RuntimeException("framework exploded")
             setClipboardText("the user's own words")
 
             val result = insertion.insert("dictated text")
 
             assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
-            assertTranscriptLeftOnClipboard("dictated text")
+            assertEquals("the user's own words", currentClipboardText())
         }
 
     @Test
-    fun `paste unsupported falls back to the splice and restores the clipboard`() = runBlocking {
-        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
-        setClipboardText("the user's own words")
+    fun `a throwing splice with a throwing paste restores the clipboard and reports failure`() =
+        runBlocking {
+            operator.spliceFailure = RuntimeException("splice exploded")
+            operator.pasteFailure = RuntimeException("paste exploded")
+            setClipboardText("the user's own words")
 
-        val result = insertion.insert("dictated text")
+            val result = insertion.insert("dictated text")
 
-        assertEquals(
-            InsertionResult.Inserted(InsertionResult.Inserted.Method.SET_TEXT_SPLICE),
-            result,
-        )
-        assertEquals(listOf("dictated text"), operator.splicedTexts)
-        assertEquals("the user's own words", currentClipboardText())
-    }
+            assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
+            assertEquals("the user's own words", currentClipboardText())
+        }
 
     @Test
-    fun `paste unsupported and the splice meets a password field refuses`() = runBlocking {
-        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
-        operator.spliceOutcome = FocusedFieldOutcome.PASSWORD_FIELD
-        setClipboardText("the user's own words")
-
-        val result = insertion.insert("dictated text")
-
-        assertEquals(
-            InsertionResult.Refused(InsertionResult.Refused.Reason.PASSWORD_FIELD),
-            result,
-        )
-        assertEquals("the user's own words", currentClipboardText())
-    }
-
-    @Test
-    fun `splice meeting no editable field refuses and leaves the sensitive transcript`() = runBlocking {
-        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
-        operator.spliceOutcome = FocusedFieldOutcome.NO_EDITABLE_FIELD
-        setClipboardText("the user's own words")
-
-        val result = insertion.insert("dictated text")
-
-        assertEquals(
-            InsertionResult.Refused(InsertionResult.Refused.Reason.NO_EDITABLE_FIELD),
-            result,
-        )
-        assertTranscriptLeftOnClipboard("dictated text")
-    }
-
-    @Test
-    fun `a failed splice reports failure and leaves the sensitive transcript`() = runBlocking {
-        operator.pasteOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
-        operator.spliceOutcome = FocusedFieldOutcome.FAILED
-        setClipboardText("the user's own words")
-
-        val result = insertion.insert("dictated text")
-
-        assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
-        assertTranscriptLeftOnClipboard("dictated text")
-    }
-
-    @Test
-    fun `a paste that throws still restores the clipboard and reports failure`() = runBlocking {
-        operator.pasteFailure = RuntimeException("framework exploded")
-        setClipboardText("the user's own words")
-
-        val result = insertion.insert("dictated text")
-
-        assertTrue(result is InsertionResult.Failed, "expected Failed, was $result")
-        assertEquals("the user's own words", currentClipboardText())
-    }
-
-    @Test
-    fun `an absent previous clipboard is restored to empty, not left holding the transcript`() = runBlocking {
+    fun `an absent previous clipboard in the paste fallback is restored to empty`() = runBlocking {
+        operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
         clipboard.clearPrimaryClip()
 
         val result = insertion.insert("dictated text")
@@ -210,7 +307,8 @@ class WatcherTextInsertionTest {
     }
 
     @Test
-    fun `a non-text clipboard item is restored verbatim`() = runBlocking {
+    fun `a non-text clipboard item is restored verbatim after a fallback paste`() = runBlocking {
+        operator.spliceOutcome = FocusedFieldOutcome.ACTION_UNSUPPORTED
         val uriClip = ClipData.newUri(
             context.contentResolver,
             "label",

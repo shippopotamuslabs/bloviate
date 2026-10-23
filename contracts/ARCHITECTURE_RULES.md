@@ -184,11 +184,13 @@ Android offers exactly one API that can tell whether an editable field in *anoth
 - Gestures (**tap-only — there is deliberately NO hold-to-talk / push-to-talk**): tap bubble = start recording and morph into the recording bar; ✓ on the bar = stop + transcribe + insert; X on the bar = cancel (discard, insert nothing); drag = reposition (position persisted); drag to bottom = dismiss for this field session (during recording: cancel + dismiss).
 - Default anchor: just above the keyboard, screen-bottom offset; user-draggable (keyboard heights vary too much to compute reliably). Must survive rotation and fold/unfold without leaking windows or landing off-screen.
 
-### 5.3 Text Insertion — Paste First
+### 5.3 Text Insertion — Splice First, Clipboard Is the Lost-Focus Fallback (ENC-168)
 
-Via the accessibility service on the focused node:
-1. Set clipboard to the processed text, `performAction(ACTION_PASTE)` — respects the caret/selection and the host app's own input handling.
-2. Fallback only: splice at `textSelectionStart/End` with `ACTION_SET_TEXT`. This replaces the whole field, so it is **never** the default.
+Via the accessibility service on the focused node (`WatcherTextInsertion.insert()`; outcome → result mapping: completed splice → `Inserted SET_TEXT_SPLICE`, completed paste → `Inserted PASTE`, `WATCHER_UNAVAILABLE` refusal never touches the clipboard):
+1. Splice first: `ACTION_SET_TEXT` splice at `textSelectionStart/End` via `TextSplicer`, **without touching the clipboard**. A completed splice is the delivery; the user's existing clipboard stays byte-identical. The splice constructs the full field text around the caret/selection, so existing text is preserved.
+2. Paste fallback only when a focused editable field exists but the splice cannot deliver (`ACTION_UNSUPPORTED`, `FAILED`, or a throwing splice — some editors cannot `ACTION_SET_TEXT`): snapshot the user's clipboard, set the sensitive-flagged (`EXTRA_IS_SENSITIVE`) transcript clip, `performAction(ACTION_PASTE)`, then restore the previous clip after a short delay (the host reads the clipboard while handling the paste); restore to an empty clip when there was no snapshot.
+3. Clipboard copy happens **only** when no editable field holds focus at completion (`NO_EDITABLE_FIELD`): the sensitive-flagged transcript clip is set and left in place as the deliverable, for retrieval via the clipboard overlay (ENC-165). The same leave-on-undeliverable applies when the paste fallback cannot deliver (`FAILED` / `ACTION_UNSUPPORTED` / focus lost mid-fallback).
+4. Password fields: never insert, never leave the transcript on the clipboard, on any path.
 - A failed transcription/insertion leaves the user's existing text untouched and keeps the audio buffer long enough for one retry tap.
 
 ### 5.4 Permissions
