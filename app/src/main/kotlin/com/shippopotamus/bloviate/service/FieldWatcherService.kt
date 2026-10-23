@@ -48,6 +48,15 @@ import javax.inject.Inject
  * the window-type census and whether the reading came from an event or
  * a watchdog poll, so the two paths are distinguishable in logcat.
  *
+ * The watchdog also arms in the mirrored state (ENC-186): keyboard
+ * reading visible while focus reads none. There the *focus* derivation
+ * is the suspect one — it is derived only from accessibility events,
+ * and a reading taken from a mid-transition tree during a
+ * notification entry can sit stale at no-focus while the keyboard is
+ * up. A mirrored arm re-derives focus from the live window tree on
+ * each poll (never while the shade freeze is engaged) until the pair
+ * converges, the keyboard leaves, or the arm expires.
+ *
  * The notification shade is a special case of the same derivation
  * hazard (ENC-132): while it is expanded, SystemUI's shade is the
  * active window, so the active-window tree contains no editable node
@@ -120,6 +129,10 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private val watchdogHandler = Handler(Looper.getMainLooper())
     private var watchdogArmedAtMs: Long? = null
     private var watchdogPolls: Int = 0
+
+    // ENC-186: true while the current arm is a mirrored one (keyboard
+    // visible, focus reads none) that re-derives focus on each poll.
+    private var watchdogMirrored: Boolean = false
     private val watchdogTick = Runnable { onWatchdogTick() }
 
     override fun onServiceConnected() {
@@ -283,47 +296,66 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     /**
      * Arm or disarm the ENC-128 watchdog from the latest signals.
      * Called after every signal publication; arming is idempotent and
-     * disarming removes any pending poll.
+     * disarming removes any pending poll. When a disarm lands, arming
+     * is re-evaluated in the same call: a mirrored arm that converges
+     * to editable focus with the keyboard hidden hands straight over
+     * to a classic arm instead of waiting for the next event (ENC-186).
      */
     private fun refreshKeyboardWatchdog() {
         val armedAt = watchdogArmedAtMs
-        if (armedAt == null) {
-            if (KeyboardWatchdogPolicy.isStarved(lastPublishedState, lastKeyboardVisible)) {
-                watchdogArmedAtMs = SystemClock.elapsedRealtime()
-                watchdogPolls = 0
-                Log.d(
-                    TAG,
-                    "keyboard watchdog armed: editable focus held, keyboard reads hidden " +
-                        "(window types: ${windows.typeCensus()})",
-                )
-                watchdogHandler.postDelayed(watchdogTick, KeyboardWatchdogPolicy.POLL_INTERVAL_MS)
-            }
-        } else {
+        if (armedAt != null) {
             val reason = KeyboardWatchdogPolicy.stopReason(
                 focusState = lastPublishedState,
                 keyboardVisible = lastKeyboardVisible,
                 armedForMs = SystemClock.elapsedRealtime() - armedAt,
+                mirrored = watchdogMirrored,
             )
             if (reason != null) disarmKeyboardWatchdog(reason)
+        }
+        if (watchdogArmedAtMs == null) {
+            val starved = KeyboardWatchdogPolicy.isStarved(lastPublishedState, lastKeyboardVisible)
+            val mirrorStarved = KeyboardWatchdogPolicy.isMirrorStarved(lastPublishedState, lastKeyboardVisible)
+            if (starved || mirrorStarved) {
+                watchdogArmedAtMs = SystemClock.elapsedRealtime()
+                watchdogPolls = 0
+                watchdogMirrored = mirrorStarved
+                val cause = if (mirrorStarved) {
+                    "mirrored: keyboard reads visible, focus reads none"
+                } else {
+                    "editable focus held, keyboard reads hidden"
+                }
+                Log.d(TAG, "keyboard watchdog armed: $cause (window types: ${windows.typeCensus()})")
+                watchdogHandler.postDelayed(watchdogTick, KeyboardWatchdogPolicy.POLL_INTERVAL_MS)
+            }
         }
     }
 
     /**
-     * One watchdog poll: re-derive the keyboard signal from the live
-     * window list (the IME window may have joined silently since the
-     * last event), then keep polling or stop per [KeyboardWatchdogPolicy].
+     * One watchdog poll: re-derive the suspect signal from live state
+     * (the IME window may have joined silently since the last event;
+     * on a mirrored arm the focus reading is the suspect one and is
+     * re-derived from the live window tree instead), then keep polling
+     * or stop per [KeyboardWatchdogPolicy].
      */
     private fun onWatchdogTick() {
         val armedAt = watchdogArmedAtMs ?: return
         watchdogPolls += 1
+        // ENC-186: a mirrored arm heals the focus signal. The shade
+        // freeze gates the re-derivation exactly as it gates the event
+        // path: while the shade is up nothing is read from its tree,
+        // and the held signals still bound the arm via the stop check.
+        if (watchdogMirrored && !updateShadePresence(windows)) {
+            publish(FieldFocusEvaluator.evaluate(focusedNodeSnapshot()))
+        }
         publishKeyboardVisibility(fromWatchdog = true)
-        // The publication above refreshes the watchdog; convergence
+        // The publications above refresh the watchdog; convergence
         // there already disarmed it — nothing left to schedule.
         if (watchdogArmedAtMs == null) return
         val reason = KeyboardWatchdogPolicy.stopReason(
             focusState = lastPublishedState,
             keyboardVisible = lastKeyboardVisible,
             armedForMs = SystemClock.elapsedRealtime() - armedAt,
+            mirrored = watchdogMirrored,
         )
         if (reason == null) {
             watchdogHandler.postDelayed(watchdogTick, KeyboardWatchdogPolicy.POLL_INTERVAL_MS)
@@ -335,6 +367,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private fun disarmKeyboardWatchdog(reason: KeyboardWatchdogPolicy.StopReason) {
         watchdogHandler.removeCallbacks(watchdogTick)
         watchdogArmedAtMs = null
+        watchdogMirrored = false
         // ENC-145: the census rides the stop line — an EXPIRED arm on an
         // unfolded display shows exactly which windows the derivation saw
         // (an IME that never joins, or joins under another type).
@@ -349,6 +382,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
     private fun stopKeyboardWatchdog() {
         watchdogHandler.removeCallbacks(watchdogTick)
         watchdogArmedAtMs = null
+        watchdogMirrored = false
     }
 
     /**
@@ -422,6 +456,25 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
             val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
             try {
                 return focused.toSnapshot(fallbackPackageName = event.packageName?.toString())
+            } finally {
+                focused.recycle()
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * The same snapshot read without an event, for watchdog polls
+     * (ENC-186): the package falls back to the active window's own
+     * package, since there is no event to borrow it from.
+     */
+    private fun focusedNodeSnapshot(): FocusedNodeSnapshot? {
+        val root = rootInActiveWindow ?: return null
+        try {
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+            try {
+                return focused.toSnapshot(fallbackPackageName = root.packageName?.toString())
             } finally {
                 focused.recycle()
             }

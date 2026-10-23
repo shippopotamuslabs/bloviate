@@ -102,6 +102,111 @@ class KeyboardWatchdogPolicyTest {
         )
     }
 
+    // --- The mirrored starved state (ENC-186) --------------------------------
+
+    @Test
+    fun `mirror starved is exactly no editable focus with the keyboard reading visible`() {
+        assertTrue(KeyboardWatchdogPolicy.isMirrorStarved(FieldFocusState.NoEditableFocus, keyboardVisible = true))
+        assertFalse(KeyboardWatchdogPolicy.isMirrorStarved(FieldFocusState.NoEditableFocus, keyboardVisible = false))
+        assertFalse(KeyboardWatchdogPolicy.isMirrorStarved(FieldFocusState.EditableFocus(PACKAGE), keyboardVisible = true))
+    }
+
+    @Test
+    fun `a password field is never mirror starved, so its visible keyboard arms nothing`() {
+        assertFalse(KeyboardWatchdogPolicy.isMirrorStarved(FieldFocusState.PasswordFocus(PACKAGE), keyboardVisible = true))
+    }
+
+    @Test
+    fun `a mirrored arm keeps polling while focus reads none and the keyboard is up`() {
+        assertNull(
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.NoEditableFocus,
+                keyboardVisible = true,
+                armedForMs = KeyboardWatchdogPolicy.MAX_ARM_DURATION_MS - 1,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a mirrored arm stops as focus regained when focus re-derives editable`() {
+        assertEquals(
+            StopReason.FOCUS_REGAINED,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.EditableFocus(PACKAGE),
+                keyboardVisible = true,
+                armedForMs = 0,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `mirrored convergence outranks expiry when both land on the same poll`() {
+        assertEquals(
+            StopReason.FOCUS_REGAINED,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.EditableFocus(PACKAGE),
+                keyboardVisible = true,
+                armedForMs = KeyboardWatchdogPolicy.MAX_ARM_DURATION_MS,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a mirrored arm stops as focus lost when the keyboard leaves`() {
+        assertEquals(
+            StopReason.FOCUS_LOST,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.NoEditableFocus,
+                keyboardVisible = false,
+                armedForMs = 0,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a mirrored arm stops immediately when a password field takes focus`() {
+        assertEquals(
+            StopReason.FOCUS_LOST,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.PasswordFocus(PACKAGE),
+                keyboardVisible = true,
+                armedForMs = 0,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a mirrored arm that never heals expires at the cap instead of polling forever`() {
+        assertEquals(
+            StopReason.EXPIRED,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.NoEditableFocus,
+                keyboardVisible = true,
+                armedForMs = KeyboardWatchdogPolicy.MAX_ARM_DURATION_MS,
+                mirrored = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `the classic reading of the mirrored state is unchanged without the mirrored flag`() {
+        // A classic evaluation of (no focus, keyboard visible) still reads
+        // as converged: the mirror semantics exist only on a mirrored arm.
+        assertEquals(
+            StopReason.KEYBOARD_VISIBLE,
+            KeyboardWatchdogPolicy.stopReason(
+                focusState = FieldFocusState.NoEditableFocus,
+                keyboardVisible = true,
+                armedForMs = 0,
+            ),
+        )
+    }
+
     private companion object {
         const val PACKAGE = "com.example.host"
     }
