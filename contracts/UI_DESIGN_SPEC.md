@@ -1,5 +1,5 @@
 # UI_DESIGN_SPEC.md
-**Bloviate – UI Design Contract v1.6**
+**Bloviate – UI Design Contract v1.7**
 (Adapted from Enclave `UI_DESIGN_SPEC.md` v2.6 — its theme-token, preview, and rigor rules; Enclave's product-specific theme families and chat shapes do not apply here.)
 
 > **v1.1 amendment (2026-10-19, ENC-75, under the user's explicit direction):**
@@ -77,6 +77,15 @@
 > the tokens `Shipopotamus*` (one p); the canonical spelling is
 > `Shippopotamus*`, used throughout §6.9.
 
+> **v1.7 amendment (2026-10-22, ENC-167, under the user's explicit
+> direction — his authorization for this edit):** the bubble overlay no
+> longer morphs. The recording layout is separate elements that swap
+> instantly (no size animation), placement is one-shot from known
+> widths, and the recording row has no drag gesture. §3 below is the
+> amended text; the ENC-89/ENC-93 morph and per-transition springs are
+> retired for the overlay. (The v1.4 note's line that those springs are
+> "untouched" is superseded by this amendment for the bubble overlay.)
+
 UI contract for Bloviate's two surfaces: the in-app screens (onboarding, settings, model manager) and the floating bubble. Always enforce together with `ARCHITECTURE_RULES.md` (which defines the structural Scaffold/navigation patterns and the overlay service rules).
 
 ---
@@ -152,14 +161,17 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | State | Presentation |
 |-------|--------------|
 | Idle | Mic pill, resting elevation |
-| Warming | Spinner in the bubble's content color while the speech engine finishes its initial warm-up; the bubble appears on schedule instead of staying absent — taps during warm-up are clean no-ops || Listening | Recording bar: live waveform (RMS-driven) + elapsed time |
+| Warming | Spinner in the bubble's content color while the speech engine finishes its initial warm-up; the bubble appears on schedule instead of staying absent — taps during warm-up are clean no-ops || Listening | Recording row of separate elements: [X bubble] [waveform + elapsed pill] [check bubble] (RMS-driven waveform) |
 | Transcribing | Shimmering status text: "Transcribing" (gradient sweep over the word; no spinner, no fake percentages) |
 | Polishing | Shimmering status text: "Polishing" — only while an AI style pass runs; local-only sends skip this state |
 | Done | Brief check affordance, then fade to Idle |
 | Error | Danger-token flash/shake (theme semantic color, §1) |
 
 - RMS/waveform updates arrive via deferred lambda reads (`CODE_STYLE_RULES.md` §4.5) — the bubble must not recompose its whole tree per audio frame.
-- The processing pill **hugs its label** (ENC-89): Transcribing/Polishing carry no waveform and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording bar's wide skeleton. Width-change motion is per-transition (ENC-93): the recording-start expansion (bubble → Listening) snaps on a high-stiffness no-bounce spring, complete inside ~0.5 s; every other width change — into the processing pill, to the Done/Error bubbles, back to idle — settles on the calm no-bounce spring. The Listening bar and the Done/Error bubbles keep the geometry above, unchanged.
+- The recording layout is **separate elements, swapped instantly** (ENC-167): a row of separate surfaces wearing the user's appearance (shape/tint/opacity) — [X bubble] [waveform + elapsed pill] [check bubble] — with spacing between them. The check bubble carries `primary`/`onPrimary` directly on its outer surface (the check glyph sits centered on it, exactly like the X glyph — no nested inner circle); in the dismiss zone both X and check swap to the error-container colors. No element morphs: there is no `animateContentSize`, no size spring, and no `AnimatedVisibility` size/expand transition on the overlay root; every state change is an instant content swap (at most a fade on appearing elements). X and check are **independent tap targets**; there is **no drag gesture in the recording layout at all** (idle drag, the bottom dismiss zone, and position persistence are unchanged).
+- **Free placement, side from the anchor.** There is no snap-to-edge or dock. The persisted anchor fractions are unchanged. Expansion side is a pure function of the anchor: an anchor whose center is left of the screen center becomes the X and the row unfolds rightward; any other anchor becomes the check and the row unfolds leftward.
+- **One-shot placement from known sizes.** Every bar-form state's window position is computed once, before its content composes, from the fixed element widths (slot sizes + waveform width + padding constants) — never from a measured live view width, and never corrected per frame. The window-content edge sitting at the anchor's spot does not move across Recording, Processing, and Done (right-side anchors: the content's right edge stays on the anchor's right edge; left-side mirrored). The single exception is one pre-computed fit shift, applied once before the first frame of the new state, when the row would overflow near the screen center. A window resize during recording does not move the window.
+- The processing pill **hugs its label** (ENC-89, placement per ENC-167): Transcribing/Polishing carry no waveform, no side bubbles, and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording row's wide skeleton — showing the stage label with the ENC-76 shimmer. It is placed by the same one-shot anchor-edge rule. Done/Error are a **single bubble at the anchor spot**, unchanged.
 - Touch targets ≥ 48.dp. The bubble must remain fully on-screen after drag, rotation, and fold/unfold.
 - Dismiss (drag to bottom) is a visual state too: the bubble shrinks toward the dismiss zone while dragging.
 - Bubble appearance is user-configurable in Setup's Bubble look card (ENC-68), persisted as a versioned preference and applied to the showing bubble live: **opacity** 40–100% (the floor keeps the bubble findable against host apps; the recording bar and processing pill inherit it), **size** in three steps — S 48dp / M 56dp / L 64dp, the bar scaling with the bubble (its cancel/send slots clamp at the 48dp touch-target floor, never below it, so at S they sit flush in the 48dp bar) — **silhouette** (pill, squircle, and the §6.2 expressive polygons cookie / clover / arch; the bar takes corner language from the choice, not the polygon silhouette), and **tint** from the §1 tokens only (indigo default; neutral; the four semantic tones with their containers). No freeform color picker. State treatments outrank the tint: the dismiss zone stays danger, Done stays success, Error stays danger. Placement math (`BubblePositionMath`) is size-aware: the persisted anchor is normalized, drag reads the live view size, and a size change re-clamps the bubble on-screen.
@@ -269,14 +281,14 @@ Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` toke
 
 - Touch: 48×48dp minimum for EVERY interactive element. Use `Modifier.minimumInteractiveComponentSize()` on custom interactives (e.g. dashboard rows); radio/checkbox hit areas expand to 48×48 even when the visible control is smaller. This is Material behavior parity.
 - Text: mobile default bodyLarge 16sp is the readable floor with the weights above.
-- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: adopted (ENC-90) — the theme provides `MotionScheme.expressive()` via `MaterialExpressiveTheme` (material3 1.5.0-beta01; see the §6.2 adoption note). Stock components that read the theme's motion scheme inherit it; any component the library has not yet migrated to the scheme keeps its built-in springs, and no custom motion language is invented locally. The bubble overlay's per-transition springs remain overlay-owned (ENC-93) and are not replaced by the scheme.*
+- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: adopted (ENC-90) — the theme provides `MotionScheme.expressive()` via `MaterialExpressiveTheme` (material3 1.5.0-beta01; see the §6.2 adoption note). Stock components that read the theme's motion scheme inherit it; any component the library has not yet migrated to the scheme keeps its built-in springs, and no custom motion language is invented locally. The bubble overlay's former per-transition springs (ENC-93) are retired (ENC-167, §3): the overlay root runs no size animation and is not replaced by the scheme.*
 - Haptics: light click on toggle/switch, medium on FAB press, via `HapticFeedback`.
 
 ### 6.7 Theme wiring (how §6 reaches code)
 
 - `BloviateTheme` (a `MaterialExpressiveTheme`) provides: the §1 color scheme, the §6.2 shape scale (`BloviateShapes.Scale`, plus `BloviateShapes.Pill`), the §6.3 type scale (`BloviateTypography`), and the motion scheme — `MotionScheme.expressive()` (ENC-90; see the v1.4 amendment for the version facts). The morphable polygon vocabulary (`BloviateMorphShapes`) sits beside the corner scale for components whose spec calls for a morph. The Expressive swap stayed local to the theme definition by design.
 - Stock M3 components inherit the gospel defaults from the theme (button 40dp pill + labelLarge, field 56dp, card 12dp tonal, chip geometry where M3 chips are used, switch 52×32/24, navigation bar 80dp + pill indicator + labelMedium). Custom components (dashboard rows/cards, status chip/pill) implement their §6.5 specs directly and draw spacing only from `BloviateSpacing`.
-- The bubble overlay (§3) wears the same theme: it consumes the type scale and the shape scale (the recording bar's corner is extraLarge) and the spacing scale where an equivalent exists; its window geometry (bubble/bar sizes, waveform measurements, gesture slots) is overlay-specific and stays defined in the overlay code.
+- The bubble overlay (§3) wears the same theme: it consumes the type scale and the shape scale (the recording pill's corner is extraLarge) and the spacing scale where an equivalent exists; its window geometry (bubble/row sizes, waveform measurements) is overlay-specific and stays defined in the overlay code.
 
 ### 6.8 Button Shape Gospel — Canonical (v1.5, 2026-10-20)
 
