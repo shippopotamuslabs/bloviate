@@ -13,9 +13,12 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.data.CustomStyleGenerationGateway
 import com.shippopotamus.bloviate.data.CustomStyleSyncGateway
 import com.shippopotamus.bloviate.data.DataStoreCustomStyleStore
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
+import com.shippopotamus.bloviate.data.FirebaseCustomStyleGenerationClient
+import com.shippopotamus.bloviate.data.FirebaseCustomStyleGenerationGateway
 import com.shippopotamus.bloviate.data.FirebaseCustomStyleSyncClient
 import com.shippopotamus.bloviate.data.FirebaseCustomStyleSyncGateway
 import com.shippopotamus.bloviate.data.FirebaseStyleClient
@@ -25,6 +28,7 @@ import com.shippopotamus.bloviate.application.evaluator.StyleAwareTextPostProces
 import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.application.port.AuthSessionPort
 import com.shippopotamus.bloviate.application.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.CustomStyleGenerationPort
 import com.shippopotamus.bloviate.application.port.CustomStyleStorePort
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncPort
 import com.shippopotamus.bloviate.application.port.DictionaryPort
@@ -109,6 +113,14 @@ abstract class VoiceModule {
     /** The server side of the custom-styles cache (BLO-25 S4) behind its application port. */
     @Binds
     abstract fun bindCustomStyleSyncPort(client: FirebaseCustomStyleSyncClient): CustomStyleSyncPort
+
+    /** The raw style-draft generation callable surface (BLO-160 S7) behind its narrow gateway interface. */
+    @Binds
+    abstract fun bindCustomStyleGenerationGateway(gateway: FirebaseCustomStyleGenerationGateway): CustomStyleGenerationGateway
+
+    /** The server side of AI style-draft generation (BLO-160 S7) behind its application port. */
+    @Binds
+    abstract fun bindCustomStyleGenerationPort(client: FirebaseCustomStyleGenerationClient): CustomStyleGenerationPort
 
     companion object {
 

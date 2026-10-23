@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +62,7 @@ fun CustomStyleEditorScreen(
     onRemovePair: (Int) -> Unit,
     onSaveClick: () -> Unit,
     onSaveErrorDismiss: () -> Unit,
+    onRegenerateClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -82,6 +85,30 @@ fun CustomStyleEditorScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.style_editor_back),
                         )
+                    }
+                },
+                actions = {
+                    // Generated creates (BLO-160 S7) can redraw the draft
+                    // from the retained description; edit-existing and
+                    // manual creates never show this.
+                    if (uiState.isGenerated) {
+                        if (uiState.isRegenerating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .padding(end = BloviateSpacing.s12)
+                                    .size(BloviateSpacing.s24),
+                            )
+                        } else {
+                            IconButton(
+                                onClick = onRegenerateClick,
+                                enabled = !uiState.isSaving,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Refresh,
+                                    contentDescription = stringResource(R.string.style_generate_regenerate),
+                                )
+                            }
+                        }
                     }
                 },
             )
@@ -219,9 +246,23 @@ fun CustomStyleEditorScreen(
                     }
                 }
             }
+            // A failed regenerate keeps the draft and reports inline, like
+            // a failed save; the next keystroke or retry clears it.
+            uiState.regenerateError?.let { error ->
+                Column(modifier = Modifier.padding(horizontal = BloviateSpacing.s4)) {
+                    Text(
+                        text = stringResource(error.messageRes()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onSaveErrorDismiss) {
+                        Text(text = stringResource(R.string.style_error_dismiss))
+                    }
+                }
+            }
             Button(
                 onClick = onSaveClick,
-                enabled = uiState.isValid && !uiState.isSaving,
+                enabled = uiState.isValid && !uiState.isSaving && !uiState.isRegenerating,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (uiState.isSaving) {
@@ -455,5 +496,35 @@ private fun EditorValidationErrorPreview() {
 private fun EditorSavingPreview() {
     EditorScreenPreview(
         uiState = populatedEditorState().copy(isSaving = true),
+    )
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Editor generated prefilled - Dark", showBackground = true)
+@Composable
+private fun EditorGeneratedPreview() {
+    EditorScreenPreview(
+        uiState = populatedEditorState().copy(isGenerated = true, isDirty = false),
+    )
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Editor regenerating - Dark", showBackground = true)
+@Composable
+private fun EditorRegeneratingPreview() {
+    EditorScreenPreview(
+        uiState = populatedEditorState().copy(isGenerated = true, isDirty = false, isRegenerating = true),
+    )
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Editor regenerate error - Dark", showBackground = true)
+@Composable
+private fun EditorRegenerateErrorPreview() {
+    EditorScreenPreview(
+        uiState = populatedEditorState().copy(
+            isGenerated = true,
+            regenerateError = CustomStyleGenerationError.UNAVAILABLE,
+        ),
     )
 }
