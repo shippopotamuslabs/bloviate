@@ -113,9 +113,9 @@ class CustomStyleValidator @Inject constructor() {
 
     private companion object {
         const val MAX_DISPLAY_NAME_CHARS: Int = 40
-        const val MAX_DESCRIPTION_CHARS: Int = 120
-        const val MAX_SAMPLE_CHARS: Int = 180
-        const val MAX_INSTRUCTIONS_CHARS: Int = 2400
+        const val MAX_DESCRIPTION_CHARS: Int = 240
+        const val MAX_SAMPLE_CHARS: Int = 512
+        const val MAX_INSTRUCTIONS_CHARS: Int = 6000
         const val MIN_FEWSHOTS: Int = 2
         const val MAX_FEWSHOTS: Int = 5
         const val MAX_FEWSHOT_SIDE_CHARS: Int = 1500

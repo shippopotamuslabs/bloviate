@@ -151,12 +151,21 @@ export function buildClassifierPrompt(description: string): { system: string; us
 export const GENERATED_STYLE_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   properties: {
-    displayName: { type: "string", description: "Short style name, at most 40 characters." },
-    description: { type: "string", description: "One-line voice summary, at most 120 characters." },
-    sample: { type: "string", description: "A short sample line in the voice, at most 180 characters." },
+    displayName: {
+      type: "string",
+      description: `Short style name, at most ${MAX_DISPLAY_NAME} characters.`,
+    },
+    description: {
+      type: "string",
+      description: `One-line voice summary, at most ${MAX_DESCRIPTION} characters.`,
+    },
+    sample: {
+      type: "string",
+      description: `A short sample line in the voice, at most ${MAX_SAMPLE} characters.`,
+    },
     systemInstructions: {
       type: "string",
-      description: "Reusable styling instructions, at most 2400 characters.",
+      description: `Reusable styling instructions, at most ${MAX_SYSTEM_INSTRUCTIONS} characters.`,
     },
     fewShotStyledOutputs: {
       type: "array",
@@ -179,6 +188,24 @@ function renderExemplar(style: StyleDefinition): string {
     `sample: ${style.sample}\n` +
     `systemInstructions: ${style.systemInstructions}\n` +
     `${shots}`
+  );
+}
+
+/**
+ * Hard validation limits, interpolated from the S3 caps so the numbers can
+ * never drift from the validator. Shared by the generation and repair
+ * system prompts: the prompts previously stated no numeric caps, so the
+ * model overshot (notably sample > MAX_SAMPLE) and the single repair
+ * could not fix it.
+ */
+function hardLimitsText(): string {
+  return (
+    `Hard validation limits — over-length fields are rejected: displayName at most ` +
+    `${MAX_DISPLAY_NAME} characters, description at most ${MAX_DESCRIPTION} characters, ` +
+    `sample at most ${MAX_SAMPLE} characters as ONE short line ` +
+    `(aim well under the cap, a single sentence), systemInstructions at most ` +
+    `${MAX_SYSTEM_INSTRUCTIONS} characters, ` +
+    `each fewShotStyledOutputs entry at most ${MAX_FEW_SHOT_SIDE} characters.`
   );
 }
 
@@ -206,7 +233,8 @@ function buildGenerationSystem(): string {
     "as the fewShotStyledOutputs array:\n" +
     `${canonical}\n\n` +
     "Return ONLY one JSON object with exactly these keys: displayName, description, sample, " +
-    "systemInstructions, fewShotStyledOutputs (an array of exactly four strings in canonical order)."
+    "systemInstructions, fewShotStyledOutputs (an array of exactly four strings in canonical order).\n\n" +
+    `${hardLimitsText()}`
   );
 }
 
@@ -229,7 +257,9 @@ export function buildRepairPrompt(params: {
       "You repair one invalid custom text style draft so it obeys every rule below. " +
       "Return ONLY the corrected JSON object with exactly the keys displayName, description, " +
       "sample, systemInstructions, fewShotStyledOutputs (an array of exactly four strings, " +
-      "one per canonical dictation, in order).",
+      "one per canonical dictation, in order). " +
+      `${hardLimitsText()} ` +
+      "Shorten any over-length field to within its cap while preserving voice and facts.",
     // ONLY validator reason codes plus the original delimited description plus
     // the failed draft JSON — no other user text.
     user:

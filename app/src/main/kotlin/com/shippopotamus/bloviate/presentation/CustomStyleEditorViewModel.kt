@@ -36,9 +36,9 @@ import javax.inject.Inject
  * the validator, so these can never loosen what saves.
  */
 internal const val MAX_CUSTOM_STYLE_NAME_CHARS: Int = 40
-internal const val MAX_CUSTOM_STYLE_DESCRIPTION_CHARS: Int = 120
-internal const val MAX_CUSTOM_STYLE_SAMPLE_CHARS: Int = 180
-internal const val MAX_CUSTOM_STYLE_INSTRUCTIONS_CHARS: Int = 2400
+internal const val MAX_CUSTOM_STYLE_DESCRIPTION_CHARS: Int = 240
+internal const val MAX_CUSTOM_STYLE_SAMPLE_CHARS: Int = 512
+internal const val MAX_CUSTOM_STYLE_INSTRUCTIONS_CHARS: Int = 6000
 internal const val MAX_CUSTOM_STYLE_FEWSHOT_SIDE_CHARS: Int = 1500
 
 /**

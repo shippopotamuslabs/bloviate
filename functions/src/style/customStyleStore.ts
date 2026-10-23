@@ -26,9 +26,9 @@ export const LANGUAGE_CLAUSE =
 export const GOOGLE_PROVIDER_ID = "google.com";
 
 export const MAX_DISPLAY_NAME = 40;
-export const MAX_DESCRIPTION = 120;
-export const MAX_SAMPLE = 180;
-export const MAX_SYSTEM_INSTRUCTIONS = 2400;
+export const MAX_DESCRIPTION = 240;
+export const MAX_SAMPLE = 512;
+export const MAX_SYSTEM_INSTRUCTIONS = 6000;
 export const MAX_FEW_SHOT_SIDE = 1500;
 export const MIN_FEW_SHOTS = 2;
 export const MAX_FEW_SHOTS = 5;
