@@ -122,7 +122,7 @@ class StyleViewModelTest {
                 assertEquals(
                     listOf(
                         R.string.style_section_serious,
-                        R.string.style_section_ancient_philosophers,
+                        R.string.style_section_philosophers,
                         R.string.style_section_writers,
                         R.string.style_section_eras_and_genres,
                         R.string.style_section_personas,
