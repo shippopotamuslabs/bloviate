@@ -190,7 +190,7 @@ private fun previewUiState(): StyleUiState =
                 ),
             ),
             StyleSectionUi(
-                headerRes = R.string.style_section_ancient_philosophers,
+                headerRes = R.string.style_section_philosophers,
                 styles = listOf(
                     StyleOptionUi(
                         id = "seneca",

@@ -56,7 +56,7 @@ class StyleViewModel @Inject constructor(
 
     private fun StyleCategory.toHeaderRes(): Int = when (this) {
         StyleCategory.SERIOUS -> R.string.style_section_serious
-        StyleCategory.ANCIENT_PHILOSOPHERS -> R.string.style_section_ancient_philosophers
+        StyleCategory.PHILOSOPHERS -> R.string.style_section_philosophers
         StyleCategory.WRITERS -> R.string.style_section_writers
         StyleCategory.ERAS_AND_GENRES -> R.string.style_section_eras_and_genres
         StyleCategory.PERSONAS -> R.string.style_section_personas
