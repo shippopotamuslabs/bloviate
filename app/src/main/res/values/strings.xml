@@ -83,6 +83,7 @@
     <string name="bubble_tint_sky">Sky</string>
     <string name="style_row_select">Use %1$s style</string>
     <string name="style_section_styles">Write my dictation as</string>
+    <string name="style_section_custom">My styles</string>
     <string name="style_section_serious">Serious</string>
     <string name="style_section_philosophers">Philosophers</string>
     <string name="style_section_writers">Writers</string>
