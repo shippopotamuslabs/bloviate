@@ -56,17 +56,28 @@ const UID = "user-canary-1";
 const SOURCE = "yeah so i was thinking we should grab dinner tomorrow with sarah at five";
 const STYLED = "Yeah so I was thinking we should grab dinner tomorrow with Sarah at five.";
 
-function makeHandler(outcomes: Outcome[], opts?: { assertEntitled?: (uid: string) => Promise<void> }) {
+function makeHandler(
+  outcomes: Outcome[],
+  opts?: {
+    assertEntitled?: (uid: string) => Promise<void>;
+    fetchCustomStyle?: (uid: string, styleId: string) => Promise<import("./styleCatalog").StyleDefinition | null>;
+  },
+) {
   const provider = fakeProvider(outcomes);
   const log = fakeLog();
   let t = 0;
+  const fetches: { uid: string; styleId: string }[] = [];
   const handler = createStyleTextHandler({
     assertEntitled: opts?.assertEntitled ?? (async () => {}),
     complete: provider.complete,
     log: log.log,
     now: () => (t += 10),
+    fetchCustomStyle: async (uid, styleId) => {
+      fetches.push({ uid, styleId });
+      return opts?.fetchCustomStyle ? opts.fetchCustomStyle(uid, styleId) : null;
+    },
   });
-  return { handler, requests: provider.requests, records: log.records };
+  return { handler, requests: provider.requests, records: log.records, fetches };
 }
 
 function assertCode(err: unknown, code: string): boolean {
@@ -387,4 +398,104 @@ test("acceptance: technical dictation restyled and returned", async () => {
   const { handler } = makeHandler([{ kind: "return", content: styled }]);
   const res = await handler({ auth: { uid: UID }, data: { styleId: "polish", transcript: source } });
   assert.equal(res.styledText, styled);
+});
+
+const CUSTOM_DEF = {
+  id: "custom-noir",
+  displayName: "My Noir",
+  description: "My own hard-boiled voice.",
+  sample: "The coffee was cold.",
+  systemInstructions: "Write hard-boiled.",
+  fewShots: [
+    { raw: "i saw maria at the store", styled: "I saw Maria at the store, and the case began." },
+    { raw: "the bus was late again", styled: "The bus was late again, like every alibi." },
+  ],
+};
+
+const GOOGLE_AUTH = { uid: UID, signInProvider: "google.com" };
+
+test("13 custom hit: google provider + stored style -> styled, one provider call", async () => {
+  const { handler, requests, fetches } = makeHandler([{ kind: "return", content: STYLED }], {
+    fetchCustomStyle: async () => CUSTOM_DEF,
+  });
+  const res = await handler({ auth: GOOGLE_AUTH, data: { styleId: "custom-noir", transcript: SOURCE } });
+  assert.equal(res.styledText, STYLED);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(fetches, [{ uid: UID, styleId: "custom-noir" }]);
+});
+
+test("14 custom miss: unknown custom id -> invalid-argument, zero provider calls", async () => {
+  const { handler, requests, fetches } = makeHandler([{ kind: "return", content: STYLED }], {
+    fetchCustomStyle: async () => null,
+  });
+  await assert.rejects(
+    () => handler({ auth: GOOGLE_AUTH, data: { styleId: "custom-ghost", transcript: SOURCE } }),
+    (e: unknown) => assertCode(e, "invalid-argument"),
+  );
+  assert.equal(requests.length, 0);
+  assert.deepEqual(fetches, [{ uid: UID, styleId: "custom-ghost" }]);
+});
+
+test("15 custom without google provider -> permission-denied, no fetch, zero calls", async () => {
+  for (const auth of [{ uid: UID }, { uid: UID, signInProvider: "anonymous" }, { uid: UID, signInProvider: "password" }]) {
+    let fetchCalls = 0;
+    const { handler, requests } = makeHandler([{ kind: "return", content: STYLED }], {
+      fetchCustomStyle: async () => {
+        fetchCalls++;
+        return CUSTOM_DEF;
+      },
+    });
+    await assert.rejects(
+      () => handler({ auth, data: { styleId: "custom-noir", transcript: SOURCE } }),
+      (e: unknown) => assertCode(e, "permission-denied"),
+    );
+    assert.equal(requests.length, 0);
+    assert.equal(fetchCalls, 0);
+  }
+});
+
+test("16 custom denied entitlement -> permission-denied before fetch, zero calls", async () => {
+  let fetchCalls = 0;
+  const { handler, requests } = makeHandler([{ kind: "return", content: STYLED }], {
+    assertEntitled: async () => {
+      throw new HttpsError("permission-denied", "Bloviate styles subscription required.");
+    },
+    fetchCustomStyle: async () => {
+      fetchCalls++;
+      return CUSTOM_DEF;
+    },
+  });
+  await assert.rejects(
+    () => handler({ auth: GOOGLE_AUTH, data: { styleId: "custom-noir", transcript: SOURCE } }),
+    (e: unknown) => assertCode(e, "permission-denied"),
+  );
+  assert.equal(fetchCalls, 0);
+  assert.equal(requests.length, 0);
+});
+
+test("17 custom unauthenticated -> unauthenticated, no fetch, zero calls", async () => {
+  let fetchCalls = 0;
+  const { handler, requests } = makeHandler([{ kind: "return", content: STYLED }], {
+    fetchCustomStyle: async () => {
+      fetchCalls++;
+      return CUSTOM_DEF;
+    },
+  });
+  await assert.rejects(
+    () => handler({ auth: null, data: { styleId: "custom-noir", transcript: SOURCE } }),
+    (e: unknown) => assertCode(e, "unauthenticated"),
+  );
+  assert.equal(fetchCalls, 0);
+  assert.equal(requests.length, 0);
+});
+
+test("18 custom style drives the prompt, not the catalog", async () => {
+  const { handler, requests } = makeHandler([{ kind: "return", content: STYLED }], {
+    fetchCustomStyle: async () => CUSTOM_DEF,
+  });
+  await handler({ auth: GOOGLE_AUTH, data: { styleId: "custom-noir", transcript: SOURCE } });
+  assert.equal(requests.length, 1);
+  const systemMsg = requests[0].messages.find((m) => m.role === "system")!;
+  assert.ok(systemMsg.content.includes("Write hard-boiled."));
+  assert.ok(systemMsg.content.includes("I saw Maria at the store, and the case began."));
 });

@@ -3,7 +3,8 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { assertUserEntitled } from "../entitlement/assertEntitled";
 import { createLogger } from "../observability/structuredLog";
 import { styleTextSessionId } from "../openrouterSession";
-import { styleById } from "./styleCatalog";
+import { fetchCustomStyleDoc, GOOGLE_PROVIDER_ID } from "./customStyleStore";
+import { styleById, type StyleDefinition } from "./styleCatalog";
 import { buildStylePrompt } from "./stylePromptBuilder";
 import {
   buildOpenRouterCompletionFn,
@@ -30,7 +31,12 @@ export function parseStyleTextRequest(data: unknown): StyleTextRequestData {
     throw new HttpsError("invalid-argument", "Only styleId and transcript are allowed.");
   }
   const styleId = data.styleId;
-  if (typeof styleId !== "string" || !styleById(styleId)) {
+  // Shape check only: built-in ids resolve against the catalog, while
+  // custom- ids defer to per-user Firestore resolution after entitlement.
+  if (typeof styleId !== "string" || styleId.length === 0) {
+    throw new HttpsError("invalid-argument", "Unknown styleId.");
+  }
+  if (!styleId.startsWith("custom-") && !styleById(styleId)) {
     throw new HttpsError("invalid-argument", "Unknown styleId.");
   }
   const transcript = data.transcript;
@@ -45,16 +51,22 @@ export function hashUid(uid: string): string {
   return createHash("sha256").update(uid).digest("hex");
 }
 
+export type StyleTextAuth = {
+  uid: string;
+  signInProvider?: string;
+};
+
 export type StyleTextDeps = {
   assertEntitled: (uid: string) => Promise<void>;
   complete: CompletionFn;
   log: (record: Record<string, unknown>) => void;
   now?: () => number;
+  fetchCustomStyle: (uid: string, styleId: string) => Promise<StyleDefinition | null>;
 };
 
 export function createStyleTextHandler(
   deps: StyleTextDeps,
-): (request: { auth?: { uid: string } | null; data: unknown }) => Promise<{ styledText: string }> {
+): (request: { auth?: StyleTextAuth | null; data: unknown }) => Promise<{ styledText: string }> {
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) {
@@ -77,7 +89,22 @@ export function createStyleTextHandler(
       });
       throw err;
     }
-    const style = styleById(styleId)!;
+    // Catalog resolution, after entitlement so no provider/model call happens
+    // on any reject path below.
+    let style = styleById(styleId);
+    if (!style && styleId.startsWith("custom-")) {
+      if (request.auth?.signInProvider !== GOOGLE_PROVIDER_ID) {
+        throw new HttpsError("permission-denied", "Google sign-in required for custom styles.");
+      }
+      const custom = await deps.fetchCustomStyle(uid, styleId);
+      if (!custom) {
+        throw new HttpsError("invalid-argument", "Unknown styleId.");
+      }
+      style = custom;
+    }
+    if (!style) {
+      throw new HttpsError("invalid-argument", "Unknown styleId.");
+    }
     const prompt = buildStylePrompt(style, transcript);
     let result: Awaited<ReturnType<typeof runStyleChain>>;
     try {
@@ -181,7 +208,13 @@ export const styleText = onCall(
       assertEntitled: (uid) => assertUserEntitled(uid),
       complete,
       log: (record) => logger.info("styleText", record),
+      fetchCustomStyle: (uid, styleId) => fetchCustomStyleDoc(uid, styleId),
     });
-    return handler({ auth: request.auth ?? null, data: request.data });
+    return handler({
+      auth: request.auth
+        ? { uid: request.auth.uid, signInProvider: request.auth.token?.firebase?.sign_in_provider }
+        : null,
+      data: request.data,
+    });
   },
 );
