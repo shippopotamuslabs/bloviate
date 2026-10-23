@@ -356,8 +356,8 @@ test("acceptance: belligerent profane output returned byte-identical", async () 
   assert.equal(res.styledText, styled);
 });
 
-test("acceptance: edgelord profane/caps output returned byte-identical", async () => {
-  const styled = "went to the store. bought milk. ABSOLUTELY feral behaviour tbh";
+test("acceptance: edgelord deadpan output returned byte-identical", async () => {
+  const styled = "I went to the store and bought milk. A final errand before the execution, apparently.";
   const { handler } = makeHandler([{ kind: "return", content: styled }]);
   const res = await handler({
     auth: { uid: UID },
