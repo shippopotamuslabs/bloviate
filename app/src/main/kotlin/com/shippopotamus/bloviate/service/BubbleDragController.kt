@@ -70,6 +70,13 @@ class BubbleDragController(
     private var dragWidthPx: Int = 0
     private var dragHeightPx: Int = 0
 
+    /**
+     * The screen bounds the active drag clamps against, captured at drag
+     * start alongside the size pin (ENC-162): no per-event
+     * `currentWindowMetrics` calls while dragging.
+     */
+    private var dragBounds: ScreenBounds? = null
+
     fun onTap() {
         onTapGesture()
     }
@@ -82,12 +89,13 @@ class BubbleDragController(
         )
         dragWidthPx = bubbleView.width
         dragHeightPx = bubbleView.height
+        dragBounds = currentBounds()
         isDragging = true
     }
 
     fun onDrag(deltaXPx: Float, deltaYPx: Float, timeMs: Long) {
         val activeSession = session ?: return
-        val bounds = currentBounds()
+        val bounds = dragBounds ?: currentBounds()
         val moved = activeSession.dragBy(
             deltaXPx = deltaXPx,
             deltaYPx = deltaYPx,
@@ -114,19 +122,22 @@ class BubbleDragController(
             longPressTimeoutMs = longPressTimeoutMs,
             endInDismissZone = inDismissZone.value,
         )
+        val endPosition = currentNormalizedPosition()
+        dragBounds = null
         inDismissZone.value = false
         // The session guarantees a drag verdict (see BubbleDragSession.finish):
         // a dismiss ends the field session, any other drag persists its position.
         if (gesture == BubbleGesture.DragDismiss) {
             onDismissRequested()
         } else {
-            onDragEnded(currentNormalizedPosition())
+            onDragEnded(endPosition)
         }
     }
 
     fun onDragCancel() {
         isDragging = false
         session = null
+        dragBounds = null
         inDismissZone.value = false
     }
 
@@ -135,7 +146,7 @@ class BubbleDragController(
             topLeft = BubblePixelPosition(xPx = layoutParams.x, yPx = layoutParams.y),
             bubbleWidthPx = dragWidthPx,
             bubbleHeightPx = dragHeightPx,
-            bounds = currentBounds(),
+            bounds = dragBounds ?: currentBounds(),
         )
 
     private fun currentBounds(): ScreenBounds {
