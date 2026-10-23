@@ -4,10 +4,12 @@ import com.shippopotamus.bloviate.data.AndroidBatteryExemptionAccess
 import com.shippopotamus.bloviate.data.AndroidWatcherAccess
 import com.shippopotamus.bloviate.data.FieldFocusStateHolder
 import com.shippopotamus.bloviate.data.KeyboardVisibilityStateHolder
+import com.shippopotamus.bloviate.data.ShadePresenceStateHolder
 import com.shippopotamus.bloviate.data.WatcherConnectionStateHolder
 import com.shippopotamus.bloviate.domain.port.BatteryExemptionPort
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
 import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
+import com.shippopotamus.bloviate.domain.port.ShadePresencePort
 import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
 import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
 import dagger.Binds
@@ -25,6 +27,9 @@ abstract class FieldWatcherModule {
 
     @Binds
     abstract fun bindKeyboardVisibilityPort(holder: KeyboardVisibilityStateHolder): KeyboardVisibilityPort
+
+    @Binds
+    abstract fun bindShadePresencePort(holder: ShadePresenceStateHolder): ShadePresencePort
 
     @Binds
     abstract fun bindWatcherAccessPort(access: AndroidWatcherAccess): WatcherAccessPort

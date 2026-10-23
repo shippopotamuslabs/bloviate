@@ -1,29 +1,24 @@
 package com.shippopotamus.bloviate.service
 
-import android.Manifest
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentCallbacks2
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
-import android.content.ComponentCallbacks2
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
-import com.shippopotamus.bloviate.presentation.BloviateTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
@@ -33,27 +28,25 @@ import com.shippopotamus.bloviate.domain.evaluator.BubbleAppearanceMath
 import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
 import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.evaluator.EngineWarmingEvaluator
-import com.shippopotamus.bloviate.domain.evaluator.WatcherSupervisionEvaluator
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleForegroundType
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.BubbleServiceStartOrigin
 import com.shippopotamus.bloviate.domain.model.BubbleVisibilityCommand
-import com.shippopotamus.bloviate.domain.model.ScreenBounds
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
-import com.shippopotamus.bloviate.domain.model.WatcherSupervisionState
+import com.shippopotamus.bloviate.domain.model.ScreenBounds
+import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.domain.port.BubbleServiceStatePort
-import com.shippopotamus.bloviate.domain.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.domain.port.EnginePreferencePort
 import com.shippopotamus.bloviate.domain.port.MicPermissionPort
 import com.shippopotamus.bloviate.domain.port.ModelStorePort
 import com.shippopotamus.bloviate.domain.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.domain.port.RecordingSessionPort
 import com.shippopotamus.bloviate.domain.port.ResidentPresencePort
-import com.shippopotamus.bloviate.domain.port.WatcherAccessPort
-import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
+import com.shippopotamus.bloviate.domain.port.ShadePresencePort
+import com.shippopotamus.bloviate.presentation.BloviateTheme
 import com.shippopotamus.bloviate.domain.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.domain.port.TranscriptSinkPort
 import com.shippopotamus.bloviate.domain.port.TranscriptionEngine
@@ -106,11 +99,12 @@ import javax.inject.Inject
  * in-app start. Every start begins as `specialUse` (the only type
  * legal in every context, boot included) and promotes per
  * [BubbleServiceStartPolicy] once the start's origin is known. The
- * notification doubles as the watcher-supervision surface: its text
- * reports the field watcher's supervised state, so an
- * enabled-but-disconnected watcher is visible instead of silent.
- * Without overlay permission every show command is a safe no-op
- * (logged), and the notification's Stop action remains available.
+ * foreground notification is a minimal silent notice (ENC-163). The
+ * bubble window itself is resident (ENC-163): added once while
+ * overlay permission holds and toggled by visibility only, so a
+ * hidden bubble keeps its composition (and any in-flight recording)
+ * alive. Without overlay permission every show command is a safe
+ * no-op (logged).
  */
 @AndroidEntryPoint
 class BubbleOverlayService : Service() {
@@ -164,26 +158,39 @@ class BubbleOverlayService : Service() {
     lateinit var residentPresence: ResidentPresencePort
 
     @Inject
-    lateinit var watcherAccess: WatcherAccessPort
-
-    @Inject
-    lateinit var watcherConnection: WatcherConnectionPort
+    lateinit var shadePresence: ShadePresencePort
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * Whether the notification shade currently covers the bubble
+     * (ENC-164). While true, [applyCommand] swallows every visibility
+     * command so the shade is a deterministic no-op for the bubble —
+     * the window stays exactly as commanded and recording is
+     * untouched. Collected from [ShadePresencePort] below.
+     */
+    private var shadePresent: Boolean = false
 
     /** The foreground type the service currently runs under; every start begins `specialUse` (ENC-129). */
     private var currentForegroundType: BubbleForegroundType = BubbleForegroundType.SPECIAL_USE
 
-    /** The supervision state the notification currently shows; the text refreshes only on change. */
-    private var lastNotificationStatus: WatcherSupervisionState? = null
-
-    /** False once stopping begins: a torn-down service must never re-post its notification. */
-    private var notificationUpdatesEnabled: Boolean = true
-
     private lateinit var windowManager: WindowManager
+
+    // Resident window (ENC-163): added once while overlay permission
+    // holds, toggled by visibility only. The lambdas mirror
+    // BubbleWindowPlacement's pushLayout pattern so the seam is
+    // fakeable without a real WindowManager (see ResidentBubbleWindow).
+    private val residentWindow = ResidentBubbleWindow(
+        canDrawOverlays = { bubbleOverlayAccess.canDrawOverlays() },
+        addView = { view, params -> windowManager.addView(view, params) },
+        removeView = { view -> windowManager.removeViewImmediate(view) },
+        updateView = { view, params -> windowManager.updateViewLayout(view, params) },
+        onHostHidden = { isPasswordFocus ->
+            recordingController?.onHostHidden(isPasswordFocus)
+        },
+        isPasswordFocus = { observeBubbleVisibility.isPasswordFocus() },
+    )
     private var lifecycleOwner: ServiceLifecycleOwner? = null
-    private var bubbleView: ComposeView? = null
-    private var layoutParams: WindowManager.LayoutParams? = null
     private val inDismissZone = mutableStateOf(false)
     private var recordingController: BubbleRecordingController? = null
     private val barStateSnapshot = mutableStateOf<RecordingBarState>(RecordingBarState.Idle)
@@ -232,11 +239,9 @@ class BubbleOverlayService : Service() {
         // refused on Android 15). onStartCommand promotes per
         // BubbleServiceStartPolicy once the origin is known.
         currentForegroundType = BubbleServiceStartPolicy.initialType()
-        val initialStatus = currentSupervision
-        lastNotificationStatus = initialStatus
         startForeground(
             NOTIFICATION_ID,
-            buildNotification(initialStatus),
+            buildNotification(),
             currentForegroundType.toServiceInfoType(),
         )
         Log.d(
@@ -279,10 +284,24 @@ class BubbleOverlayService : Service() {
             observeBubbleVisibility().collect { command -> applyCommand(command) }
         }
         serviceScope.launch {
-            // Watcher supervision (ENC-129): the notification text
-            // follows the watcher's connection state for the service's
-            // whole lifetime, so a silent disconnect surfaces there too.
-            watcherConnection.isConnected.collect { refreshNotificationStatus() }
+            // Shade no-op (ENC-164, second layer): track presence so
+            // visibility commands are swallowed while the shade is up.
+            // On the lift, resync the reducer's belief against the
+            // resident window's actual visibility — a poisoned signal
+            // leaked past the ENC-132/156 freeze may have flipped the
+            // belief while the window itself never moved.
+            shadePresence.shadePresent.collect { present ->
+                val wasPresent = shadePresent
+                shadePresent = present
+                if (wasPresent && !present) {
+                    val corrective =
+                        observeBubbleVisibility.onWindowVisibilityChanged(residentWindow.isVisible)
+                    if (corrective != null) {
+                        Log.d(TAG, "shade lifted: resyncing visibility with $corrective")
+                        applyCommand(corrective)
+                    }
+                }
+            }
         }
         serviceScope.launch {
             observeBubbleAppearance().collect { appearance -> appearanceSnapshot.value = appearance }
@@ -310,6 +329,18 @@ class BubbleOverlayService : Service() {
         serviceScope.launch(Dispatchers.Default) {
             modelStore.ensureModel()
         }
+        // ENC-163: add the resident window eagerly at service start
+        // (hidden: VISIBLE view at alpha 0 + NOT_TOUCHABLE, so nothing
+        // flashes and the system notice survives) instead of
+        // on the focus path — the add at focus time is where overlay
+        // windows fail (ENC-145: stale folded-display bounds). A no-op
+        // without overlay permission; the lazy path in showResident
+        // covers permission granted later.
+        serviceScope.launch {
+            if (ensureResidentAttached()) {
+                Log.d(TAG, "Resident window attached eagerly at service start")
+            }
+        }
     }
 
     override fun onTrimMemory(level: Int) {
@@ -334,26 +365,13 @@ class BubbleOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            Log.d(TAG, "Stop requested from notification")
-            // The user's Stop is final (ENC-129): record it before
-            // tearing down, so neither a sticky restart nor the boot
-            // receiver resurrects the bubble behind the user's back.
-            // The save is fire-and-forget on a fresh scope — stopSelf()
-            // follows immediately and serviceScope dies with the service
-            // (same pattern as the engine release in onDestroy).
-            notificationUpdatesEnabled = false
-            val presence = residentPresence.state.value
-            if (!presence.userStopped) {
-                CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-                    residentPresence.save(presence.copy(userStopped = true))
-                }
-            }
-            hideBubble()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        // In-app stop (MainActivity.stopBubbleService + the user-stop
+        // use case) is the only stop path now that the notification
+        // carries no Stop action (ENC-163): it records userStopped
+        // itself and stops the service, so no ACTION_STOP branch is
+        // needed here. A revoked overlay permission tears the window
+        // down but leaves the service running for its lazy return.
+        handlePermissionRevocation()
         val origin = when (intent?.action) {
             ACTION_USER_START -> BubbleServiceStartOrigin.USER
             ACTION_BOOT_START -> BubbleServiceStartOrigin.BOOT
@@ -363,7 +381,6 @@ class BubbleOverlayService : Service() {
             else -> BubbleServiceStartOrigin.RESTART
         }
         promoteForegroundType(origin)
-        refreshNotificationStatus()
         val sticky = BubbleServiceStartPolicy.restartIsSticky(residentPresence.state.value)
         Log.d(TAG, "Start handled: origin $origin, foreground type $currentForegroundType, sticky $sticky")
         return if (sticky) START_STICKY else START_NOT_STICKY
@@ -384,9 +401,8 @@ class BubbleOverlayService : Service() {
         ) ?: return
         if (target == currentForegroundType) return
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(currentSupervision), target.toServiceInfoType())
+            startForeground(NOTIFICATION_ID, buildNotification(), target.toServiceInfoType())
             currentForegroundType = target
-            lastNotificationStatus = currentSupervision
             Log.d(TAG, "Foreground type promoted to $target for origin $origin")
         } catch (exception: ForegroundServiceStartNotAllowedException) {
             Log.w(TAG, "Promotion to $target refused for origin $origin; staying $currentForegroundType", exception)
@@ -397,15 +413,19 @@ class BubbleOverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // Rotation / fold-unfold: keep the same window and re-clamp the current
-        // position into the new bounds; the persisted normalized position is
-        // left untouched so the user's anchor survives posture changes.
-        windowPlacement.onConfigurationChanged(currentBounds())
+        // Rotation / fold-unfold: the resident window stays added and
+        // re-clamps the current position into the new bounds — even
+        // while hidden, so it returns on-screen; never removed and
+        // re-added. The persisted normalized position is left untouched
+        // so the user's anchor survives posture changes.
+        if (handlePermissionRevocation()) return
+        if (residentWindow.isAttached) {
+            windowPlacement.onConfigurationChanged(currentBounds())
+        }
     }
 
     override fun onDestroy() {
-        notificationUpdatesEnabled = false
-        hideBubble()
+        removeResidentWindow()
         recordingController?.shutdown()
         recordingController = null
         observeBubbleVisibility.reset()
@@ -472,19 +492,40 @@ class BubbleOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private suspend fun applyCommand(command: BubbleVisibilityCommand) {
-        when (command) {
-            BubbleVisibilityCommand.ShowBubble -> showBubble()
-            BubbleVisibilityCommand.HideBubble -> hideBubble()
+        // Overlay permission is poll-only: a revocation noticed at any
+        // command tears the resident window down (the service keeps
+        // running, and the next show-worthy command lazily re-adds it).
+        // The visibility belief resyncs to the hidden reality here, so
+        // the dropped command is re-driven by the next transition.
+        // Revocation teardown is independent of the shade gate below.
+        if (handlePermissionRevocation()) {
+            observeBubbleVisibility.onWindowVisibilityChanged(false)
+            return
         }
-        // ENC-127 reconciliation: report the window's actual presence
-        // back to the state machine after every command. If the command's
-        // effect didn't materialize (a show swallowed by a missing
-        // overlay permission, say), the machine's visibility belief
-        // resyncs instead of swallowing every later show; if a window is
-        // present that should not be, the corrective hide comes back
-        // here and is applied like any other command (it terminates:
-        // applying it removes the window, so the nested report agrees).
-        val windowPresent = bubbleView != null
+        // Shade no-op (ENC-164): while the shade is present every
+        // visibility command is swallowed — no show/hide, no reconcile
+        // report, no host-hidden effects — whatever the watcher leaked
+        // past the freeze. Recording-controller deferred hides flow
+        // through here too, so they are swallowed the same way; after
+        // the lift the watcher's re-derivation drives the real state.
+        if (shadePresent) {
+            Log.d(TAG, "visibility command swallowed while shade present (ENC-164)")
+            return
+        }
+        when (command) {
+            BubbleVisibilityCommand.ShowBubble -> showResident()
+            BubbleVisibilityCommand.HideBubble -> hideResident()
+        }
+        // ENC-127 reconciliation: report the resident window's actual
+        // visibility back to the state machine after every command. If
+        // the command's effect didn't materialize (a show swallowed by
+        // a missing overlay permission, say), the machine's visibility
+        // belief resyncs instead of swallowing every later show; if a
+        // window is shown that should not be, the corrective hide comes
+        // back here and is applied like any other command (it
+        // terminates: applying it hides the window, so the nested
+        // report agrees).
+        val windowVisible = residentWindow.isVisible
         // ENC-145: the machine's inputs ride every command line, so a
         // device repro where the bubble never appears (or never hides)
         // resolves to the exact stuck signal — focus, keyboard, bar
@@ -492,17 +533,25 @@ class BubbleOverlayService : Service() {
         Log.d(
             TAG,
             "visibility command $command applied; " +
-                "${observeBubbleVisibility.describeStateForLog()}; window present: $windowPresent",
+                "${observeBubbleVisibility.describeStateForLog()}; window visible: $windowVisible",
         )
-        val corrective = observeBubbleVisibility.onWindowPresenceChanged(windowPresent)
+        val corrective = observeBubbleVisibility.onWindowVisibilityChanged(windowVisible)
         if (corrective != null) {
-            Log.d(TAG, "visibility reconcile: window present but not desired; applying $corrective")
+            Log.d(TAG, "visibility reconcile: window shown but not desired; applying $corrective")
             applyCommand(corrective)
         }
     }
 
-    private suspend fun showBubble() {
-        if (bubbleView != null) return
+    /**
+     * Shows the resident window. The window is added ONCE (ENC-163) —
+     * eagerly at service start, or lazily here when permission was
+     * missing at start and granted later: every show only flips
+     * visibility, so show/hide cycles never touch add/remove. A show
+     * while permission is missing is a safe no-op — the reconcile
+     * report above resyncs the belief so the next transition
+     * re-drives it.
+     */
+    private suspend fun showResident() {
         if (!bubbleOverlayAccess.canDrawOverlays()) {
             Log.w(TAG, "Show requested but overlay permission is not granted; no-op")
             return
@@ -510,11 +559,32 @@ class BubbleOverlayService : Service() {
         // A warm-up deferred (thermal) or not yet triggered retries here:
         // the bubble is about to be on screen, warming indication and all.
         maybeWarmUp()
-        val controller = recordingController
-        if (controller == null) {
+        if (recordingController == null) {
             Log.w(TAG, "Show requested before the recording controller exists; no-op")
             return
         }
+        if (!ensureResidentAttached()) {
+            Log.w(TAG, "Show lost overlay permission mid-build; no-op")
+            return
+        }
+        residentWindow.setVisible(true)
+        Log.d(TAG, "Bubble shown")
+    }
+
+    /**
+     * Builds and attaches the resident window if it is not attached
+     * yet (ENC-163: the add lives here and at service start, never on
+     * the per-show visibility path). The composition, lifecycle owner,
+     * drag controller, and layout are created ONCE and live until the
+     * window is removed. The composition stays alive across hides (a
+     * shade-hidden recording must keep finishing, ENC-156).
+     * [restorePosition] runs at attach time so the first show lands
+     * correctly. Returns whether the window is attached afterwards.
+     */
+    private suspend fun ensureResidentAttached(): Boolean {
+        if (residentWindow.isAttached) return true
+        if (!bubbleOverlayAccess.canDrawOverlays()) return false
+        val controller = recordingController ?: return false
         val owner = ServiceLifecycleOwner()
         val params = createLayoutParams()
         val view = ComposeView(this).apply {
@@ -535,7 +605,6 @@ class BubbleOverlayService : Service() {
             onDragEnded = { position -> windowPlacement.onDragEnded(position, currentBounds()) },
             inDismissZone = inDismissZone,
         )
-        dragController = drag
         view.setContent {
             // The overlay wears the same canonical palette as the app
             // (ENC-85): one fixed dark scheme, no system-theme branch.
@@ -570,36 +639,65 @@ class BubbleOverlayService : Service() {
             val heightChanged = bottom - top != oldBottom - oldTop
             windowPlacement.onWindowResized(widthChanged, heightChanged, currentBounds())
         }
-        windowManager.addView(view, params)
+        if (!residentWindow.ensureAttached(view, params)) return false
         lifecycleOwner = owner
-        bubbleView = view
-        layoutParams = params
+        dragController = drag
         windowPlacement.attach(view, params)
         owner.create()
         restorePosition(view, params)
-        Log.d(TAG, "Bubble shown")
+        return true
     }
 
-    private fun hideBubble() {
-        // The window going away cancels an active recording and discards
-        // an in-flight send only when a password field takes focus —
-        // nothing may ever be transcribed for it. Any other hide lets a
-        // live recording finish through the stop path and lets a running
-        // send deliver or retain (ENC-156); a shade peek is not a
-        // password field.
-        recordingController?.onHostHidden(observeBubbleVisibility.isPasswordFocus())
-        // The window is gone; any bar-form placement bookkeeping dies with
-        // it. The next show starts from the persisted bubble position.
+    /**
+     * Hides the resident window without removing it. The host-hidden
+     * side effect (via [ResidentBubbleWindow]) fires only on an actual
+     * visible-to-hidden transition: it cancels an active recording and
+     * discards an in-flight send only when a password field takes
+     * focus — nothing may ever be transcribed for it. Any other hide
+     * lets a live recording finish through the stop path and lets a
+     * running send deliver or retain (ENC-156); a shade peek is not a
+     * password field.
+     */
+    private fun hideResident() {
+        if (residentWindow.setVisible(false)) {
+            inDismissZone.value = false
+            Log.d(TAG, "Bubble hidden")
+        }
+    }
+
+    /**
+     * Removes the resident window: service teardown or overlay
+     * permission revocation only. Fires no host-hidden side effect —
+     * removal is not a hide. After a revocation the next show-worthy
+     * command lazily re-adds the window. Returns true when a window
+     * was removed.
+     */
+    private fun handlePermissionRevocation(): Boolean {
+        if (!residentWindow.removeIfPermissionLost()) return false
+        tearDownResidentComposition()
+        Log.w(TAG, "Overlay permission revoked; resident window removed")
+        return true
+    }
+
+    /** Full teardown of the resident window and its composition state. */
+    private fun removeResidentWindow() {
+        if (!residentWindow.isAttached) return
+        residentWindow.detach()
+        tearDownResidentComposition()
+        Log.d(TAG, "Resident window removed")
+    }
+
+    /**
+     * Drops everything built around the resident window: placement
+     * bookkeeping, the single-writer drag controller, and the
+     * composition's lifecycle owner. The next add rebuilds them once.
+     */
+    private fun tearDownResidentComposition() {
         windowPlacement.detach()
         dragController = null
-        val view = bubbleView ?: return
-        windowManager.removeViewImmediate(view)
-        bubbleView = null
-        layoutParams = null
         lifecycleOwner?.destroy()
         lifecycleOwner = null
         inDismissZone.value = false
-        Log.d(TAG, "Bubble hidden")
     }
 
     private fun onBubbleDismissRequested() {
@@ -620,7 +718,7 @@ class BubbleOverlayService : Service() {
         val saved = observeBubblePosition().first() ?: BubblePosition.DEFAULT
         windowPlacement.restingPosition = saved
         view.post {
-            if (bubbleView !== view) return@post
+            if (residentWindow.attachedView !== view) return@post
             val bounds = currentBounds()
             val (bubbleWidthPx, bubbleHeightPx) = bubbleSizePx()
             val pixels = BubblePositionMath.restingTopLeft(
@@ -670,72 +768,42 @@ class BubbleOverlayService : Service() {
     }
 
     private fun createNotificationChannel() {
+        // ENC-163: the notice is silent, so the channel is
+        // IMPORTANCE_MIN. Importance is create-only, so an existing
+        // channel above MIN is deleted first to apply the downgrade on
+        // existing installs (same id, so no orphaned channel lingers);
+        // otherwise create is a no-op update and user customization is
+        // left untouched.
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val existing = manager.getNotificationChannel(CHANNEL_ID)
+        if (existing != null && existing.importance != NotificationManager.IMPORTANCE_MIN) {
+            manager.deleteNotificationChannel(CHANNEL_ID)
+        }
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.bubble_channel_name),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_MIN,
         )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        manager.createNotificationChannel(channel)
     }
-
-    /** The watcher's supervised state right now (ENC-129), from its two live signals. */
-    private val currentSupervision: WatcherSupervisionState
-        get() = WatcherSupervisionEvaluator.resolve(
-            watcherEnabled = watcherAccess.isFieldWatcherEnabled(),
-            watcherConnected = watcherConnection.isConnected.value,
-        )
 
     /**
-     * Re-posts the foreground notification when the watcher's supervised
-     * state has changed, so the persistent notification reads as an
-     * honest status surface (ENC-129): watching, watcher off, or watcher
-     * disconnected. No-op once stopping has begun.
+     * The minimal foreground notice (ENC-163): icon plus app name,
+     * ongoing, no text and no actions. The bubble's own visibility
+     * carries state now; the notification only satisfies the
+     * foreground-service requirement.
      */
-    private fun refreshNotificationStatus() {
-        if (!notificationUpdatesEnabled) return
-        val status = currentSupervision
-        if (status == lastNotificationStatus) return
-        // Android 13+ requires the POST_NOTIFICATIONS runtime grant to re-post
-        // via notify(); without it the call silently no-ops (and lint errors).
-        // Skip WITHOUT marking the status posted, so the next supervision
-        // change after a grant posts the then-current status (ENC-146).
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.d(TAG, "Notification status refresh skipped: POST_NOTIFICATIONS not granted")
-            return
-        }
-        lastNotificationStatus = status
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
-        Log.d(TAG, "Notification status refreshed: $status")
-    }
-
-    private fun buildNotification(status: WatcherSupervisionState): Notification {
+    private fun buildNotification(): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this,
             REQUEST_CODE_OPEN_APP,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val stopIntent = PendingIntent.getService(
-            this,
-            REQUEST_CODE_STOP,
-            Intent(this, BubbleOverlayService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val statusText = when (status) {
-            WatcherSupervisionState.CONNECTED -> R.string.bubble_notification_text
-            WatcherSupervisionState.DISABLED -> R.string.bubble_notification_text_watcher_off
-            WatcherSupervisionState.DISCONNECTED -> R.string.bubble_notification_text_watcher_disconnected
-        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle(getString(R.string.bubble_notification_title))
-            .setContentText(getString(statusText))
+            .setContentTitle(getString(R.string.app_name))
             .setContentIntent(openAppIntent)
-            .addAction(0, getString(R.string.bubble_notification_stop), stopIntent)
             .setOngoing(true)
             .build()
     }
@@ -748,8 +816,6 @@ class BubbleOverlayService : Service() {
         const val CHANNEL_ID: String = "bubble_overlay"
         const val NOTIFICATION_ID: Int = 1001
         const val REQUEST_CODE_OPEN_APP: Int = 0
-        const val REQUEST_CODE_STOP: Int = 1
-        const val ACTION_STOP: String = "com.shippopotamus.bloviate.action.STOP_BUBBLE"
 
         /** Explicit in-app start (ENC-129): always eligible for the microphone type. */
         const val ACTION_USER_START: String = "com.shippopotamus.bloviate.action.START_BUBBLE_USER"

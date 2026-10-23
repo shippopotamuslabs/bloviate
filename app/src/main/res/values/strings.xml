@@ -34,11 +34,6 @@
     <string name="autostart_row_label">Start on its own</string>
     <string name="autostart_row_sub">Comes back after a reboot or a system stop</string>
     <string name="bubble_channel_name">Bubble overlay</string>
-    <string name="bubble_notification_title">Bloviate bubble active</string>
-    <string name="bubble_notification_text">Watching for text fields · tap into one and the bubble appears</string>
-    <string name="bubble_notification_text_watcher_off">Field detection is off · open Bloviate setup to turn it on</string>
-    <string name="bubble_notification_text_watcher_disconnected">Field detection isn’t connected · open Bloviate setup to fix it</string>
-    <string name="bubble_notification_stop">Stop</string>
     <string name="bubble_content_description">Bloviate dictation bubble</string>
     <string name="bubble_warming_description">Warming up the speech engine</string>
     <string name="bubble_recording_description">Recording dictation</string>

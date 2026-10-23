@@ -25,9 +25,11 @@ import javax.inject.Inject
  * the field reports without it, and the watcher's watchdog
  * re-derivation owns convergence in both directions now — a genuine
  * transient mis-reading self-corrects on the next re-derivation instead
- * of being papered over with latency on every real dismissal. Focus-
- * driven hides (password field, focus loss) were never filtered and
- * stay instantaneous, as does every keyboard hide now.
+ * of being papered over with latency on every real dismissal. Every
+ * keyboard hide lands immediately now; focus-driven hides land
+ * immediately too, except a non-password focus loss while the bar is
+ * active, which defers like a keyboard hide (a password-field hide is
+ * never deferred).
  */
 class ObserveBubbleVisibilityUseCase @Inject constructor(
     private val fieldFocusPort: FieldFocusPort,
@@ -46,21 +48,22 @@ class ObserveBubbleVisibilityUseCase @Inject constructor(
 
     /**
      * Recording/processing bar activity (any non-idle bar state). While
-     * the bar is active a keyboard hide cannot hide the window; when
-     * activity ends, the deferred hide — if one is owed — is returned
-     * here for the service to apply.
+     * the bar is active neither a keyboard hide nor a non-password
+     * focus loss can hide the window; when activity ends, the deferred
+     * hide — if one is owed — is returned here for the service to apply.
      */
     fun onBarActivityChanged(active: Boolean): BubbleVisibilityCommand? =
         reducer.onBarActivityChanged(active)
 
     /**
-     * The overlay service reports the window's actual presence after
-     * applying a command (ENC-127 reconciliation): resyncs the state
-     * machine's visibility belief to reality and returns a corrective
-     * command if one is owed. See [BubbleVisibilityReducer.onWindowPresenceChanged].
+     * The overlay service reports the resident window's actual
+     * visibility after applying a command (ENC-127 reconciliation):
+     * resyncs the state machine's visibility belief to reality and
+     * returns a corrective command if one is owed. See
+     * [BubbleVisibilityReducer.onWindowVisibilityChanged].
      */
-    fun onWindowPresenceChanged(present: Boolean): BubbleVisibilityCommand? =
-        reducer.onWindowPresenceChanged(present)
+    fun onWindowVisibilityChanged(visible: Boolean): BubbleVisibilityCommand? =
+        reducer.onWindowVisibilityChanged(visible)
 
     /**
      * Whether the hide the overlay is about to apply comes from a

@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.testing
 
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import com.shippopotamus.bloviate.service.FocusedFieldOperator
 import com.shippopotamus.bloviate.service.FocusedFieldOutcome
@@ -24,6 +25,8 @@ class FakeFocusedFieldOperator(
         private set
     var clipTextSeenAtPaste: String? = null
         private set
+    var clipSensitiveSeenAtPaste: Boolean? = null
+        private set
     val splicedTexts: MutableList<String> = mutableListOf()
 
     override fun pasteIntoFocusedField(): FocusedFieldOutcome {
@@ -31,6 +34,10 @@ class FakeFocusedFieldOperator(
         pasteFailure?.let { throw it }
         clipTextSeenAtPaste =
             clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
+        clipSensitiveSeenAtPaste =
+            clipboard.primaryClip?.description?.extras?.getBoolean(
+                ClipDescription.EXTRA_IS_SENSITIVE,
+            )
         return pasteOutcome
     }
 

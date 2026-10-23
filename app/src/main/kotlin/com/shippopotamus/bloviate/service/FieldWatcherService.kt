@@ -19,6 +19,7 @@ import com.shippopotamus.bloviate.domain.model.FocusedNodeSnapshot
 import com.shippopotamus.bloviate.domain.model.WatcherWindowSnapshot
 import com.shippopotamus.bloviate.domain.port.FieldFocusPort
 import com.shippopotamus.bloviate.domain.port.KeyboardVisibilityPort
+import com.shippopotamus.bloviate.domain.port.ShadePresencePort
 import com.shippopotamus.bloviate.domain.port.WatcherConnectionPort
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -58,8 +59,16 @@ import javax.inject.Inject
  * the shade leaves re-derives from live state (so a password field
  * focused meanwhile still hides instantly on that re-derivation).
  * Shade transitions are logged with the window-type census (types
- * only), so a shade repro is visible in logcat.
+ * only), so a shade repro is visible in logcat. The freeze protects
+ * signal integrity only: the bubble itself persists through the shade
+ * untouched (ENC-164) — a live recording keeps recording invisibly
+ * while the shade is up. Shade presence is also published through
+ * [ShadePresencePort] on every transition so the overlay can make the
+ * shade a no-op at the point of effect: visibility commands arriving
+ * while the shade is present are swallowed, and the lift resyncs the
+ * visibility belief against the window's actual visibility.
  *
+
  * Privacy contract: the watcher path reads only the host package name and
  * structural flags. Field text and content descriptions are never read,
  * logged, or stored for classification, and password fields classify as
@@ -81,6 +90,9 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
 
     @Inject
     lateinit var keyboardVisibilityPort: KeyboardVisibilityPort
+
+    @Inject
+    lateinit var shadePresencePort: ShadePresencePort
 
     @Inject
     lateinit var watcherConnectionPort: WatcherConnectionPort
@@ -147,6 +159,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
         stopKeyboardWatchdog()
         publish(FieldFocusState.NoEditableFocus)
         keyboardVisibilityPort.publish(false)
+        shadePresencePort.publish(false)
         super.onDestroy()
     }
 
@@ -341,6 +354,10 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
      * runs for an accessibility event — also engages the freeze via
      * the event's own SystemUI origin (ENC-156): the shade's
      * window-state transition posts before the census reports it.
+     * Every transition is also published through [shadePresencePort]
+     * (ENC-164, second layer) so the overlay can swallow visibility
+     * commands while the shade is present and resync on the lift —
+     * even if the freeze above ever leaks a poisoned signal.
      * Returns the current presence.
      */
     private fun updateShadePresence(
@@ -356,6 +373,7 @@ class FieldWatcherService : AccessibilityService(), FocusedFieldOperator {
         )
         if (present != shadePresent) {
             shadePresent = present
+            shadePresencePort.publish(present)
             val origin = if (byEvent) "via SystemUI window-state event" else "via window census"
             Log.d(TAG, "notification shade present -> $present ($origin; window types: ${currentWindows.typeCensus()})")
         }
