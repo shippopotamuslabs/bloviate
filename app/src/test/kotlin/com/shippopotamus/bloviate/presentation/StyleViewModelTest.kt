@@ -115,7 +115,7 @@ class StyleViewModelTest {
         }
 
     @Test
-    fun `sections follow enum order with catalog order preserved inside each`() =
+    fun `sections follow enum order with styles alphabetical inside each`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.uiState.test {
                 val initial = awaitItem()
@@ -134,9 +134,19 @@ class StyleViewModelTest {
                 StyleCategory.entries.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }
+                        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { style -> style.displayName })
                         .map { style -> style.id }
                     assertEquals(expectedIds, initial.sections[index].styles.map { style -> style.id })
                 }
+                // Pin the visible order so a comparator change cannot slip through silently.
+                assertEquals(
+                    listOf("aristotle", "cicero", "marcus-aurelius", "seneca"),
+                    initial.sections[1].styles.map { style -> style.id },
+                )
+                assertEquals(
+                    listOf("academic-jargon", "corporate-linkedin", "edgelord", "gen-z-brainrot", "legal-contract"),
+                    initial.sections[5].styles.map { style -> style.id },
+                )
                 cancelAndIgnoreRemainingEvents()
             }
         }
