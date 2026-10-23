@@ -131,7 +131,7 @@ class StyleViewModelTest {
                     initial.sections.map { section -> section.headerRes },
                 )
                 assertEquals(listOf(4, 8, 4, 4, 5, 7), initial.sections.map { section -> section.styles.size })
-                StyleCategory.entries.forEachIndexed { index, category ->
+                StyleCategory.entries.filter { category -> category != StyleCategory.CUSTOM }.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }
                         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { style -> style.displayName })
