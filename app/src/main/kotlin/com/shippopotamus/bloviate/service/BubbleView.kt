@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.service
 
+import android.view.MotionEvent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearEasing
@@ -12,8 +13,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -30,11 +29,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -44,11 +48,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -114,6 +122,15 @@ private const val SILENCE_THRESHOLD: Float = 0.05f
  */
 private const val DONE_DISPLAY_MS: Long = 1_200L
 private const val ERROR_DISPLAY_MS: Long = 1_500L
+
+/**
+ * Widest elapsed readout the recording bar can show (ENC-162): the
+ * recording's absolute backstop is ten minutes, which
+ * [ElapsedTimeFormatter] renders as `10:00`. Every live value is four
+ * glyphs (`m:ss`) until the final minute, so measuring this reference
+ * pins the elapsed slot's width for the whole recording.
+ */
+private const val ELAPSED_SLOT_REFERENCE: String = "10:00"
 
 /** Waveform width for [WaveformHistory.DEFAULT_BAR_COUNT] bars. */
 private val WAVEFORM_WIDTH: Dp =
@@ -442,11 +459,20 @@ private fun RecordingBar(
         tint.content
     }
     val scale = if (inDismissZone) DISMISS_ZONE_SCALE else FULL_SCALE
+    // Slop and slot width in px come from composition locals (the interop
+    // filter below has no Density scope), and the laid-out bar width via
+    // onSizeChanged for the UP hit test.
+    val touchSlopPx = LocalViewConfiguration.current.touchSlop
+    val slotWidthPx = with(LocalDensity.current) { renderParams.barSlotDp.dp.toPx() }
+    var barWidthPx by remember { mutableIntStateOf(0) }
     Surface(
         modifier = modifier
             .height(renderParams.barHeightDp.dp)
+            .onSizeChanged { barWidthPx = it.width }
             .recordingBarGestures(
-                slotSize = renderParams.barSlotDp.dp,
+                touchSlopPx = touchSlopPx,
+                barWidthPx = barWidthPx,
+                slotWidthPx = slotWidthPx,
                 onCancelTap = onCancelRecording,
                 onSendTap = onSendRecording,
                 onDragStart = onDragStart,
@@ -495,11 +521,28 @@ private fun RecordingBar(
                     .width(WAVEFORM_WIDTH)
                     .height(renderParams.waveformHeightDp.dp),
             )
-            Text(
-                text = ElapsedTimeFormatter.format(elapsedMs),
-                style = MaterialTheme.typography.labelMedium,
+            // Fixed-width elapsed slot (ENC-162): the readout ticks `0:00`
+            // → `0:01` → … at ~1 Hz, and every width change relaid out the
+            // bar mid-drag. The slot measures the widest readout the bar
+            // can show — the 10-minute safety backstop formats as `10:00`,
+            // five glyphs where every live value has four or five — via an
+            // invisible reference, so the window width stays constant while
+            // recording and `animateContentSize` only runs on state changes.
+            // Centered, so the live value sits where the reference does.
+            Box(
                 modifier = Modifier.padding(horizontal = BAR_HORIZONTAL_PADDING),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = ELAPSED_SLOT_REFERENCE,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+                )
+                Text(
+                    text = ElapsedTimeFormatter.format(elapsedMs),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
             Box(
                 modifier = Modifier
                     .size(renderParams.barSlotDp.dp)
@@ -785,64 +828,119 @@ private fun Modifier.bubbleGestures(
         )
     }
 
+/** Per-gesture accumulators for the raw-coordinate bar drag below. */
+private class RawBarGestureState {
+    var dragging: Boolean = false
+    var downLocalX: Float = 0f
+    var lastRawX: Float = 0f
+    var lastRawY: Float = 0f
+    var totalX: Float = 0f
+    var totalY: Float = 0f
+}
+
 /**
  * Gesture arbitration for the recording bar. One pointer stream decides:
  * released within the touch slop → a tap, hit-tested against the cancel
- * slot (left [slotSize]) and the send slot (right [slotSize]); moved past
- * the slop → a drag ([BubbleDragSession] semantics, the same drag the
- * bubble uses) and never a button tap. Doing the arbitration in one
- * handler is what keeps the bar's buttons and its drag from fighting
+ * slot (left [slotWidthPx]) and the send slot (right [slotWidthPx]);
+ * moved past the slop → a drag ([BubbleDragSession] semantics, the same
+ * drag the bubble uses) and never a button tap. Doing the arbitration in
+ * one handler is what keeps the bar's buttons and its drag from fighting
  * over the stream the way sibling detectors on parent/child would. The
  * slot width is a parameter (ENC-68) because the user's size step scales
  * the bar — the hit test must measure the slots that are actually drawn.
+ *
+ * Drag deltas come from [MotionEvent] raw screen coordinates, not from
+ * differencing window-local `change.position` values (ENC-162): the bar
+ * lives in an overlay window that moves under the finger while dragging,
+ * so window-local positions shift with the window and corrupt the deltas
+ * (device-confirmed jitter). Raw screen coordinates are immune — the
+ * window's own motion never enters them. The delta contract matches the
+ * bubble's drag: slop crossing emits the accumulated total, later moves
+ * emit per-event deltas, all in px, which is exactly what
+ * [BubbleDragController] already consumes. The tap hit test still uses
+ * the LOCAL x, and the touch semantics blocks on the slots are untouched
+ * (TalkBack-driven, unaffected by touch consumption).
  */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
 private fun Modifier.recordingBarGestures(
-    slotSize: Dp,
+    touchSlopPx: Float,
+    barWidthPx: Int,
+    slotWidthPx: Float,
     onCancelTap: () -> Unit,
     onSendTap: () -> Unit,
     onDragStart: () -> Unit,
     onDrag: (Float, Float, Long) -> Unit,
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit,
-): Modifier = pointerInput(slotSize) {
-    val slotWidthPx = slotSize.toPx()
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
-        var dragging = false
-        var finished = false
-        var totalDeltaX = 0f
-        var totalDeltaY = 0f
-        var lastPosition = down.position
-        while (!finished) {
-            val event = awaitPointerEvent()
-            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-            if (change.previousPressed && !change.pressed) {
-                finished = true
-                finishBarGesture(
-                    wasCancelled = event.type != PointerEventType.Release,
-                    wasDragging = dragging,
-                    downX = down.position.x,
-                    widthPx = size.width.toFloat(),
-                    slotWidthPx = slotWidthPx,
-                    onCancelTap = onCancelTap,
-                    onSendTap = onSendTap,
-                    onDragEnd = onDragEnd,
-                    onDragCancel = onDragCancel,
-                )
-            } else {
-                val delta = change.position - lastPosition
-                lastPosition = change.position
-                totalDeltaX += delta.x
-                totalDeltaY += delta.y
-                if (!dragging && hypot(totalDeltaX, totalDeltaY) > viewConfiguration.touchSlop) {
-                    dragging = true
-                    onDragStart()
-                    onDrag(totalDeltaX, totalDeltaY, change.uptimeMillis)
-                } else if (dragging && delta != Offset.Zero) {
-                    change.consume()
-                    onDrag(delta.x, delta.y, change.uptimeMillis)
-                }
+): Modifier {
+    val latestCancelTap by rememberUpdatedState(onCancelTap)
+    val latestSendTap by rememberUpdatedState(onSendTap)
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDrag by rememberUpdatedState(onDrag)
+    val latestDragEnd by rememberUpdatedState(onDragEnd)
+    val latestDragCancel by rememberUpdatedState(onDragCancel)
+    // Remembered so an elapsed-tick recomposition mid-gesture does not
+    // reset the accumulators; reset per gesture on ACTION_DOWN.
+    val gesture = remember { RawBarGestureState() }
+    return pointerInteropFilter { event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gesture.dragging = false
+                gesture.downLocalX = event.x
+                gesture.lastRawX = event.rawX
+                gesture.lastRawY = event.rawY
+                gesture.totalX = 0f
+                gesture.totalY = 0f
+                true
             }
+            MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.rawX - gesture.lastRawX
+                val deltaY = event.rawY - gesture.lastRawY
+                gesture.lastRawX = event.rawX
+                gesture.lastRawY = event.rawY
+                gesture.totalX += deltaX
+                gesture.totalY += deltaY
+                if (!gesture.dragging && hypot(gesture.totalX, gesture.totalY) > touchSlopPx) {
+                    gesture.dragging = true
+                    latestDragStart()
+                    latestDrag(gesture.totalX, gesture.totalY, event.eventTime)
+                } else if (gesture.dragging && (deltaX != 0f || deltaY != 0f)) {
+                    latestDrag(deltaX, deltaY, event.eventTime)
+                }
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                finishBarGesture(
+                    wasCancelled = false,
+                    wasDragging = gesture.dragging,
+                    downX = gesture.downLocalX,
+                    widthPx = barWidthPx.toFloat(),
+                    slotWidthPx = slotWidthPx,
+                    onCancelTap = latestCancelTap,
+                    onSendTap = latestSendTap,
+                    onDragEnd = latestDragEnd,
+                    onDragCancel = latestDragCancel,
+                )
+                gesture.dragging = false
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                finishBarGesture(
+                    wasCancelled = true,
+                    wasDragging = gesture.dragging,
+                    downX = gesture.downLocalX,
+                    widthPx = barWidthPx.toFloat(),
+                    slotWidthPx = slotWidthPx,
+                    onCancelTap = latestCancelTap,
+                    onSendTap = latestSendTap,
+                    onDragEnd = latestDragEnd,
+                    onDragCancel = latestDragCancel,
+                )
+                gesture.dragging = false
+                true
+            }
+            else -> false
         }
     }
 }

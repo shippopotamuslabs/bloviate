@@ -110,13 +110,11 @@ class BubbleRecordingController(
     private var cadenceJob: Job? = null
 
     /**
-     * Redraw tick for the current recording, published as
-     * [RecordingBarState.Recording.frame]. Bumped when the elapsed time
-     * advances or the waveform window materially changes, so the published
-     * bar state actually differs at the waveform's cadence — an
-     * elapsed-only state stays equal between recorder chunks (~1 s) and
-     * StateFlow conflation starves the overlay's redraw (ENC-69). Reset
-     * whenever a recording is (re)entered from Idle.
+     * Monotonic tick for the current recording, published as
+     * [RecordingBarState.Recording.frame]. Bumped on each publish (a new
+     * elapsed tick), so successive bar states are always distinct even if
+     * two publishes ever carried the same elapsed value. Reset whenever a
+     * recording is (re)entered from Idle.
      */
     private var recordingFrame: Long = 0L
 
@@ -351,7 +349,11 @@ class BubbleRecordingController(
                         startCadenceSummary()
                     }
                     recordingSeen = true
-                    val windowChanged = waveform.record(state.amplitude)
+                    // The levels must keep updating on every session update:
+                    // the waveform Canvas reads them through its deferred
+                    // lambda at draw time. The return value is deliberately
+                    // ignored — see the publish gate below.
+                    waveform.record(state.amplitude)
                     val bar = mutableBarState.value
                     if (bar == RecordingBarState.Idle) {
                         // (Re)entering the bar: start the redraw tick.
@@ -361,13 +363,20 @@ class BubbleRecordingController(
                         }
                         CadenceCounters.barPublish() // ENC-69 cadence counters (L2p)
                     } else if (bar is RecordingBarState.Recording &&
-                        (state.elapsedMs != bar.elapsedMs || windowChanged)
+                        state.elapsedMs / 1_000 != bar.elapsedMs / 1_000
                     ) {
-                        // Publish only on a real change: a new elapsed tick,
-                        // or a waveform frame the Canvas has not drawn yet.
-                        // Republishing an equal state would be conflated by
-                        // the StateFlow anyway — and in settled silence
-                        // neither input changes, so the bar rests (ENC-69).
+                        // Publish only when the DISPLAYED second changes.
+                        // Session elapsed advances per ~33ms amplitude
+                        // window, so gating on any elapsed change still
+                        // republishes at ~30 Hz (ENC-162): each republish
+                        // recomposes the overlay mid-drag and corrupts
+                        // pointer deltas (drag jitter), while the m:ss
+                        // readout cannot show a finer change anyway.
+                        // Waveform changes must NOT republish — the Canvas
+                        // self-paces its redraw at display rate via its own
+                        // frame clock, re-reading the levels above without
+                        // any republish. In settled silence the elapsed
+                        // stops advancing, so the bar rests (ENC-69).
                         recordingFrame += 1
                         mutableBarState.update {
                             RecordingBarState.Recording(state.elapsedMs, recordingFrame)
