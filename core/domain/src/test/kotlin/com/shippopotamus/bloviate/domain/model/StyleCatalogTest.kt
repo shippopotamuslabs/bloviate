@@ -12,6 +12,48 @@ class StyleCatalogTest {
     }
 
     @Test
+    fun `every style sits in its ratified category`() {
+        val expected: Map<String, StyleCategory> = mapOf(
+            "lowercase-casual" to StyleCategory.SERIOUS,
+            "normal-caps-casual" to StyleCategory.SERIOUS,
+            "polish" to StyleCategory.SERIOUS,
+            "professional" to StyleCategory.SERIOUS,
+            "cicero" to StyleCategory.ANCIENT_PHILOSOPHERS,
+            "aristotle" to StyleCategory.ANCIENT_PHILOSOPHERS,
+            "seneca" to StyleCategory.ANCIENT_PHILOSOPHERS,
+            "marcus-aurelius" to StyleCategory.ANCIENT_PHILOSOPHERS,
+            "shakespeare" to StyleCategory.WRITERS,
+            "hemingway" to StyleCategory.WRITERS,
+            "dickens" to StyleCategory.WRITERS,
+            "oscar-wilde" to StyleCategory.WRITERS,
+            "talkie" to StyleCategory.ERAS_AND_GENRES,
+            "the-colonel" to StyleCategory.ERAS_AND_GENRES,
+            "noir-detective" to StyleCategory.ERAS_AND_GENRES,
+            "pirate" to StyleCategory.ERAS_AND_GENRES,
+            "attenborough" to StyleCategory.PERSONAS,
+            "drill-sergeant" to StyleCategory.PERSONAS,
+            "town-crier" to StyleCategory.PERSONAS,
+            "belligerent" to StyleCategory.PERSONAS,
+            "genius" to StyleCategory.PERSONAS,
+            "corporate-linkedin" to StyleCategory.MODERN_PARODY,
+            "legal-contract" to StyleCategory.MODERN_PARODY,
+            "academic-jargon" to StyleCategory.MODERN_PARODY,
+            "gen-z-brainrot" to StyleCategory.MODERN_PARODY,
+            "edgelord" to StyleCategory.MODERN_PARODY,
+        )
+        assertEquals(StyleCatalog.ALL.map { style -> style.id }.toSet(), expected.keys)
+        StyleCatalog.ALL.forEach { style ->
+            assertEquals(expected.getValue(style.id), style.category, "style ${style.id} is miscategorized")
+        }
+        assertEquals(
+            listOf(4, 4, 4, 4, 5, 5),
+            StyleCategory.entries.map { category ->
+                StyleCatalog.ALL.count { style -> style.category == category }
+            },
+        )
+    }
+
+    @Test
     fun `every godflow persona resolves by id`() {
         listOf(
             "polish", "cicero", "shakespeare", "hemingway", "dickens",

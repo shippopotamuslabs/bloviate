@@ -83,6 +83,12 @@
     <string name="bubble_tint_sky">Sky</string>
     <string name="style_row_select">Use %1$s style</string>
     <string name="style_section_styles">Write my dictation as</string>
+    <string name="style_section_serious">Serious</string>
+    <string name="style_section_ancient_philosophers">Ancient Philosophers</string>
+    <string name="style_section_writers">Writers</string>
+    <string name="style_section_eras_and_genres">Eras &amp; Genres</string>
+    <string name="style_section_personas">Personas</string>
+    <string name="style_section_modern_parody">Modern Parody</string>
     <string name="style_tag_ai">AI</string>
     <string name="style_tag_on_device">on-device</string>
     <string name="style_footer">AI styles change the voice of your words.</string>

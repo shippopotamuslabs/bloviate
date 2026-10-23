@@ -61,4 +61,5 @@ internal val DrillSergeantStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.PERSONAS,
 )

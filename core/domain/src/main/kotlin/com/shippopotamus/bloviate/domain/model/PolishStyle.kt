@@ -49,4 +49,5 @@ internal val PolishStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.SERIOUS,
 )

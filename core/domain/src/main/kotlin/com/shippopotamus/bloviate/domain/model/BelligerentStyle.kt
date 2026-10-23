@@ -57,4 +57,5 @@ internal val BelligerentStyle: StyleDefinition = StyleDefinition(
         ),
     ),
     kind = StyleKind.LLM,
+    category = StyleCategory.PERSONAS,
 )

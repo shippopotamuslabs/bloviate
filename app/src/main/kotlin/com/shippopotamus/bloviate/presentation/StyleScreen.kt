@@ -76,16 +76,18 @@ fun StyleScreen(
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
-            DashboardSectionHeader(
-                text = stringResource(R.string.style_section_styles),
-            )
-            DashboardCard {
-                uiState.options.forEachIndexed { index, option ->
-                    StyleListRow(
-                        option = option,
-                        dividerAbove = index > 0,
-                        onSelect = { onStyleSelected(option.id) },
-                    )
+            uiState.sections.forEach { section ->
+                DashboardSectionHeader(
+                    text = stringResource(section.headerRes),
+                )
+                DashboardCard {
+                    section.styles.forEachIndexed { index, option ->
+                        StyleListRow(
+                            option = option,
+                            dividerAbove = index > 0,
+                            onSelect = { onStyleSelected(option.id) },
+                        )
+                    }
                 }
             }
             Text(
@@ -165,30 +167,40 @@ private fun StyleSample(
 
 private fun previewUiState(): StyleUiState =
     StyleUiState(
-        options = listOf(
-            StyleOptionUi(
-                id = "lowercase-casual",
-                displayName = "lowercase casual",
-                description = "all lowercase, relaxed and off-the-cuff.",
-                sample = "yeah so i was thinking we could just go tomorrow",
-                requiresAi = false,
-                isSelected = false,
+        sections = listOf(
+            StyleSectionUi(
+                headerRes = R.string.style_section_serious,
+                styles = listOf(
+                    StyleOptionUi(
+                        id = "lowercase-casual",
+                        displayName = "lowercase casual",
+                        description = "all lowercase, relaxed and off-the-cuff.",
+                        sample = "yeah so i was thinking we could just go tomorrow",
+                        requiresAi = false,
+                        isSelected = false,
+                    ),
+                    StyleOptionUi(
+                        id = "normal-caps-casual",
+                        displayName = "Normal Caps Casual",
+                        description = "Just how you said it, cleaned up.",
+                        sample = "Yeah, so I was thinking we could just go tomorrow.",
+                        requiresAi = false,
+                        isSelected = true,
+                    ),
+                ),
             ),
-            StyleOptionUi(
-                id = "normal-caps-casual",
-                displayName = "Normal Caps Casual",
-                description = "Just how you said it, cleaned up.",
-                sample = "Yeah, so I was thinking we could just go tomorrow.",
-                requiresAi = false,
-                isSelected = true,
-            ),
-            StyleOptionUi(
-                id = "seneca",
-                displayName = "Seneca",
-                description = "Stoic letters on time, anger, and fortune.",
-                sample = "You act as if you will live forever; you never read the terms.",
-                requiresAi = true,
-                isSelected = false,
+            StyleSectionUi(
+                headerRes = R.string.style_section_ancient_philosophers,
+                styles = listOf(
+                    StyleOptionUi(
+                        id = "seneca",
+                        displayName = "Seneca",
+                        description = "Stoic letters on time, anger, and fortune.",
+                        sample = "You act as if you will live forever; you never read the terms.",
+                        requiresAi = true,
+                        isSelected = false,
+                    ),
+                ),
             ),
         ),
     )
