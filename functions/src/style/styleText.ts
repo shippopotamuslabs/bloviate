@@ -61,11 +61,24 @@ export function createStyleTextHandler(
       throw new HttpsError("unauthenticated", "Sign-in required.");
     }
     const { styleId, transcript } = parseStyleTextRequest(request.data);
+    const uidHash = hashUid(uid);
     // Entitlement MUST precede any model call; its permission-denied propagates.
-    await deps.assertEntitled(uid);
+    // A rejection is logged with the uid hash before propagating (ENC-187):
+    // without this record a rejected call leaves zero structured function
+    // logs, and a rotated anonymous uid becomes undiagnosable — the hash is
+    // what an operator matches against candidate uids to re-grant access.
+    try {
+      await deps.assertEntitled(uid);
+    } catch (err) {
+      deps.log({
+        uidHash,
+        styleId,
+        outcome: err instanceof HttpsError ? err.code : "entitlement-error",
+      });
+      throw err;
+    }
     const style = styleById(styleId)!;
     const prompt = buildStylePrompt(style, transcript);
-    const uidHash = hashUid(uid);
     let result: Awaited<ReturnType<typeof runStyleChain>>;
     try {
       result = await runStyleChain({
