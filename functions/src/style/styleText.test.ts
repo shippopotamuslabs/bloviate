@@ -135,7 +135,7 @@ test("5 unauthenticated rejected", async () => {
 });
 
 test("6a not-entitled stub propagates permission-denied, zero calls", async () => {
-  const { handler, requests } = makeHandler([{ kind: "return", content: STYLED }], {
+  const { handler, requests, records } = makeHandler([{ kind: "return", content: STYLED }], {
     assertEntitled: async () => {
       throw new HttpsError("permission-denied", "Bloviate styles subscription required.");
     },
@@ -145,6 +145,12 @@ test("6a not-entitled stub propagates permission-denied, zero calls", async () =
     (e: unknown) => assertCode(e, "permission-denied"),
   );
   assert.equal(requests.length, 0);
+  // ENC-187: the rejection itself is logged with the uid hash, so a rotated
+  // anonymous uid is diagnosable from function logs alone.
+  const rejection = records.find((r) => r.outcome === "permission-denied");
+  assert.ok(rejection, "expected a permission-denied log record");
+  assert.equal(rejection.uidHash, hashUid(UID));
+  assert.equal(rejection.styleId, "polish");
 });
 
 function installFakeFirestore(docs: Record<string, Record<string, unknown> | undefined>) {
