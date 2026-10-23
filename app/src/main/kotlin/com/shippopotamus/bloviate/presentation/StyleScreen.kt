@@ -29,7 +29,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -46,21 +48,66 @@ import com.shippopotamus.bloviate.R
 fun StyleRoute(
     viewModel: StyleViewModel = hiltViewModel(),
     editorViewModel: CustomStyleEditorViewModel = hiltViewModel(),
+    generationViewModel: CustomStyleGenerationViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // In-tab destination: the list or the manual editor (null id is a
-    // create). No NavController — the app shell has no nested graphs
-    // (AppShell), so a remembered destination is the whole navigation
-    // model. Leaving the tab drops this composition, which resets the
-    // destination to the list.
+    // In-tab destinations: the list, the generation Start screen, or the
+    // editor (null id is a create). No NavController — the app shell has
+    // no nested graphs (AppShell), so remembered destinations are the
+    // whole navigation model. Leaving the tab drops this composition,
+    // which resets the destination to the list.
     var editorOpen by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
-    if (editorOpen) {
+    var generateOpen by rememberSaveable { mutableStateOf(false) }
+    // The transient handoff from a successful generation: the draft plus
+    // its source description, consumed once by the editor effect below.
+    // Plain remember — a generated draft is transient UI state, never
+    // persisted (see the schema lock).
+    var pendingHandoff by remember { mutableStateOf<GeneratedHandoff?>(null) }
+    var handoffEpoch by remember { mutableIntStateOf(0) }
+    if (generateOpen) {
+        val generationState by generationViewModel.uiState.collectAsStateWithLifecycle()
+        LaunchedEffect(Unit) {
+            generationViewModel.generateSucceeded.collect { handoff ->
+                pendingHandoff = handoff
+                handoffEpoch++
+                editingId = null
+                generateOpen = false
+                editorOpen = true
+            }
+        }
+        // Backing out mid-generation cancels the call, so no late draft
+        // can open an editor the user already left.
+        val cancelGenerationAndClose = {
+            generationViewModel.onCancelInFlight()
+            generateOpen = false
+        }
+        BackHandler(onBack = cancelGenerationAndClose)
+        CustomStyleGenerationScreen(
+            uiState = generationState,
+            onBack = cancelGenerationAndClose,
+            onDescriptionChange = generationViewModel::onDescriptionChange,
+            onGenerateClick = generationViewModel::onGenerateClick,
+            onStartBlankClick = {
+                editingId = null
+                generateOpen = false
+                editorOpen = true
+            },
+            onErrorDismiss = generationViewModel::onErrorDismiss,
+            modifier = modifier,
+        )
+    } else if (editorOpen) {
         val editorState by editorViewModel.uiState.collectAsStateWithLifecycle()
         var discardConfirm by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(editingId) {
-            editorViewModel.load(editingId)
+        LaunchedEffect(editingId, handoffEpoch) {
+            val handoff = pendingHandoff
+            if (handoff != null && editingId == null) {
+                pendingHandoff = null
+                editorViewModel.loadGenerated(handoff.draft, handoff.sourceDescription)
+            } else {
+                editorViewModel.load(editingId)
+            }
         }
         LaunchedEffect(Unit) {
             editorViewModel.saveSucceeded.collect { editorOpen = false }
@@ -87,6 +134,7 @@ fun StyleRoute(
             onRemovePair = editorViewModel::onRemovePair,
             onSaveClick = editorViewModel::onSaveClick,
             onSaveErrorDismiss = editorViewModel::onSaveErrorDismiss,
+            onRegenerateClick = editorViewModel::onRegenerateClick,
             modifier = modifier,
         )
         if (discardConfirm) {
@@ -111,13 +159,32 @@ fun StyleRoute(
                 },
             )
         }
+        // Regenerating over a dirty draft discards its edits first, like
+        // the back-navigation discard above; a clean draft regenerates
+        // without asking.
+        if (editorState.regenerateConfirmPending) {
+            AlertDialog(
+                onDismissRequest = editorViewModel::onRegenerateDismissConfirm,
+                title = { Text(text = stringResource(R.string.style_generate_confirm_regenerate_title)) },
+                text = { Text(text = stringResource(R.string.style_generate_confirm_regenerate_message)) },
+                confirmButton = {
+                    TextButton(onClick = editorViewModel::onRegenerateConfirm) {
+                        Text(text = stringResource(R.string.style_generate_confirm_regenerate_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = editorViewModel::onRegenerateDismissConfirm) {
+                        Text(text = stringResource(R.string.style_editor_discard_keep))
+                    }
+                },
+            )
+        }
     } else {
         StyleScreen(
             uiState = uiState,
             onStyleSelected = viewModel::onStyleSelected,
             onCreateCustomClick = {
-                editingId = null
-                editorOpen = true
+                generateOpen = true
             },
             onEditCustomClick = { styleId ->
                 editingId = styleId
@@ -139,7 +206,8 @@ fun StyleRoute(
  * selected style. Every style in the list is selectable.
  *
  * The My-styles section always renders: the create entry opens the
- * manual editor, and custom rows carry Edit and Delete next to the radio.
+ * generation Start screen (BLO-160 S7), and custom rows carry Edit and
+ * Delete next to the radio.
  * Deletes confirm first; a failed delete surfaces as an inline error
  * with a dismiss, like the Dictionary tab's rejections.
  *
