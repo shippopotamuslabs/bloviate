@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test
 class StyleCatalogTest {
 
     @Test
-    fun `the catalog holds exactly twenty-six styles`() {
-        assertEquals(26, StyleCatalog.ALL.size)
+    fun `the catalog holds exactly twenty-seven styles`() {
+        assertEquals(27, StyleCatalog.ALL.size)
     }
 
     @Test
@@ -22,6 +22,7 @@ class StyleCatalogTest {
             "aristotle" to StyleCategory.ANCIENT_PHILOSOPHERS,
             "seneca" to StyleCategory.ANCIENT_PHILOSOPHERS,
             "marcus-aurelius" to StyleCategory.ANCIENT_PHILOSOPHERS,
+            "socrates" to StyleCategory.ANCIENT_PHILOSOPHERS,
             "shakespeare" to StyleCategory.WRITERS,
             "hemingway" to StyleCategory.WRITERS,
             "dickens" to StyleCategory.WRITERS,
@@ -46,7 +47,7 @@ class StyleCatalogTest {
             assertEquals(expected.getValue(style.id), style.category, "style ${style.id} is miscategorized")
         }
         assertEquals(
-            listOf(4, 4, 4, 4, 5, 5),
+            listOf(4, 5, 4, 4, 5, 5),
             StyleCategory.entries.map { category ->
                 StyleCatalog.ALL.count { style -> style.category == category }
             },
@@ -533,16 +534,18 @@ class StyleCatalogTest {
     }
 
     @Test
-    fun `the three philosophers are minimal triples over the same dictations`() {
-        // ENC-105: Seneca, Marcus Aurelius, and Aristotle each restyle
-        // the SAME four source dictations, so the three textures —
-        // letter, notebook, lecture — are visible side by side in
-        // the examples, not merely asserted in the instructions.
+    fun `the four philosophers are minimal quadruples over the same dictations`() {
+        // ENC-105, extended by ENC-189: Seneca, Marcus Aurelius,
+        // Aristotle, and Socrates each restyle the SAME four source
+        // dictations, so the four textures — letter, notebook,
+        // lecture, examination — are visible side by side in the
+        // examples, not merely asserted in the instructions.
         val seneca = StyleCatalog.byId("seneca")
         val marcus = StyleCatalog.byId("marcus-aurelius")
         val aristotle = StyleCatalog.byId("aristotle")
+        val socrates = StyleCatalog.byId("socrates")
 
-        listOf(seneca, marcus, aristotle).forEach { style ->
+        listOf(seneca, marcus, aristotle, socrates).forEach { style ->
             assertTrue(style.fewShots.size >= 3, "${style.id} has fewer than three few-shots")
         }
         assertEquals(
@@ -554,6 +557,11 @@ class StyleCatalogTest {
             seneca.fewShots.map { shot -> shot.raw },
             aristotle.fewShots.map { shot -> shot.raw },
             "seneca and aristotle no longer share their source dictations",
+        )
+        assertEquals(
+            seneca.fewShots.map { shot -> shot.raw },
+            socrates.fewShots.map { shot -> shot.raw },
+            "seneca and socrates no longer share their source dictations",
         )
     }
 
