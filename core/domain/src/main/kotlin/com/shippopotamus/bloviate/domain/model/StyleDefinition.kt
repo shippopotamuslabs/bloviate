@@ -121,29 +121,6 @@ object StyleCatalog {
         category = StyleCategory.SERIOUS,
     )
 
-    private val Edgelord: StyleDefinition = StyleDefinition(
-        id = "edgelord",
-        displayName = "Edgelord",
-        description = "Chaotic, unhinged, extremely online.",
-        sample = "went to the store. bought milk. absolutely feral behaviour tbh",
-        systemInstructions = "Casing: chaotic — mostly lowercase with the occasional word " +
-            "in FULL SCREAMING CAPS for emphasis. Punctuation: aggressive — fragments, " +
-            "abrupt full stops, zero chill. Paragraphing: staccato one-liners, each on " +
-            "its own line. " + NEVER_CLAUSE,
-        fewShots = listOf(
-            FewShot(
-                raw = "I went to the store and bought some milk.",
-                styled = "went to the store. bought milk. ABSOLUTELY feral behaviour tbh",
-            ),
-            FewShot(
-                raw = "The meeting has been moved to three o clock.",
-                styled = "meeting moved to 3. LOVE that for me. anyway",
-            ),
-        ),
-        kind = StyleKind.LLM,
-        category = StyleCategory.MODERN_PARODY,
-    )
-
     private val Genius: StyleDefinition = StyleDefinition(
         id = "genius",
         displayName = "Genius",
@@ -552,7 +529,7 @@ object StyleCatalog {
         AcademicJargonStyle,
         GenZBrainrotStyle,
         BelligerentStyle,
-        Edgelord,
+        EdgelordStyle,
         Genius,
         Aristotle,
         Seneca,
