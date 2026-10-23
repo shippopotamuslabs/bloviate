@@ -5,6 +5,7 @@ import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.application.port.CustomStyleRecord
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncOutcome
+import com.shippopotamus.bloviate.application.usecase.GenerateCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleUseCase
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleValidator
@@ -12,6 +13,7 @@ import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
+import com.shippopotamus.bloviate.testing.FakeCustomStyleGenerationPort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleSyncPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
@@ -37,6 +39,7 @@ class CustomStyleEditorViewModelTest {
     private val fakeCustoms = FakeCustomStyleStorePort()
     private val fakeSync = FakeCustomStyleSyncPort()
     private val fakeStyle = FakeStylePreferencePort()
+    private val fakeGeneration = FakeCustomStyleGenerationPort()
     private lateinit var viewModel: CustomStyleEditorViewModel
 
     @BeforeEach
@@ -49,6 +52,7 @@ class CustomStyleEditorViewModelTest {
                 selection = fakeStyle,
                 validator = CustomStyleValidator(),
             ),
+            generate = GenerateCustomStyleUseCase(fakeGeneration),
             validator = CustomStyleValidator(),
         )
     }
