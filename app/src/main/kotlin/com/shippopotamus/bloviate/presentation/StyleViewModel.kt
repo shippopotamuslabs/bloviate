@@ -12,15 +12,17 @@ import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Style tab ViewModel (ENC-72 + ENC-73). Depends on use cases only; maps
- * the static catalog plus the live selection into the presentation-only
- * [StyleUiState]. Every catalog style is selectable.
+ * Style tab ViewModel (ENC-72 + ENC-73, customs ENC-199). Depends on use
+ * cases only; combines the merged catalog (customs first, then the
+ * static built-ins) with the live selection into the presentation-only
+ * [StyleUiState]. Every catalog style is selectable; the empty CUSTOM
+ * section drops out, so "My styles" appears only when customs exist.
  */
 @HiltViewModel
 class StyleViewModel @Inject constructor(
@@ -29,18 +31,18 @@ class StyleViewModel @Inject constructor(
     private val selectStyle: SelectStyleUseCase,
 ) : ViewModel() {
 
-    private val catalog: List<StyleDefinition> = observeCatalog()
+    private val catalog: StateFlow<List<StyleDefinition>> = observeCatalog()
+    private val selectedStyle: StateFlow<String> = observeSelectedStyle()
 
-    val uiState: StateFlow<StyleUiState> = observeSelectedStyle()
-        .map { selectedId -> buildUiState(selectedId) }
+    val uiState: StateFlow<StyleUiState> = combine(catalog, selectedStyle, ::buildUiState)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-            initialValue = buildUiState(observeSelectedStyle().value),
+            initialValue = buildUiState(catalog.value, selectedStyle.value),
         )
 
     /** Groups the catalog by category in enum order, alphabetical by display name within a section. */
-    private fun buildUiState(selectedId: String): StyleUiState =
+    private fun buildUiState(catalog: List<StyleDefinition>, selectedId: String): StyleUiState =
         StyleUiState(
             sections = StyleCategory.entries.mapNotNull { category ->
                 val styles = catalog.filter { style -> style.category == category }
