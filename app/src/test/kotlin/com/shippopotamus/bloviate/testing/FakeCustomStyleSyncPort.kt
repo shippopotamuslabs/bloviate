@@ -14,11 +14,31 @@ import com.shippopotamus.bloviate.domain.model.StyleDefinition
 class FakeCustomStyleSyncPort(
     var listResult: CustomStyleSyncOutcome<List<CustomStyleRecord>> =
         CustomStyleSyncOutcome.Ok(emptyList()),
+    var saveHandler: (StyleDefinition, Long?) -> CustomStyleSyncOutcome<CustomStyleRecord> =
+        { definition, expectedRevision ->
+            CustomStyleSyncOutcome.Ok(
+                CustomStyleRecord(
+                    definition = definition,
+                    revision = (expectedRevision ?: 0L) + 1L,
+                    updatedAtEpochMillis = 1L,
+                ),
+            )
+        },
     var deleteResult: CustomStyleSyncOutcome<Boolean> = CustomStyleSyncOutcome.Ok(true),
 ) : CustomStyleSyncPort {
 
     var listCallCount: Int = 0
         private set
+
+    private val mutableSavedInputs = mutableListOf<Pair<StyleDefinition, Long?>>()
+
+    /** (definition, expectedRevision) pairs passed to [save] so far, in order. */
+    val savedInputs: List<Pair<StyleDefinition, Long?>> get() = mutableSavedInputs.toList()
+
+    private val mutableDeletedIds = mutableListOf<String>()
+
+    /** Style ids passed to [delete] so far, in order. */
+    val deletedIds: List<String> get() = mutableDeletedIds.toList()
 
     override suspend fun list(): CustomStyleSyncOutcome<List<CustomStyleRecord>> {
         listCallCount++
@@ -28,8 +48,13 @@ class FakeCustomStyleSyncPort(
     override suspend fun save(
         definition: StyleDefinition,
         expectedRevision: Long?,
-    ): CustomStyleSyncOutcome<CustomStyleRecord> =
-        throw UnsupportedOperationException("FakeCustomStyleSyncPort never saves in ViewModel tests")
+    ): CustomStyleSyncOutcome<CustomStyleRecord> {
+        mutableSavedInputs += definition to expectedRevision
+        return saveHandler(definition, expectedRevision)
+    }
 
-    override suspend fun delete(styleId: String): CustomStyleSyncOutcome<Boolean> = deleteResult
+    override suspend fun delete(styleId: String): CustomStyleSyncOutcome<Boolean> {
+        mutableDeletedIds += styleId
+        return deleteResult
+    }
 }
