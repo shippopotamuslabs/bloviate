@@ -8,6 +8,7 @@ import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveStyleCatalogUseCase
+import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,7 +30,19 @@ class StyleViewModel @Inject constructor(
     observeCatalog: ObserveStyleCatalogUseCase,
     observeSelectedStyle: ObserveSelectedStyleUseCase,
     private val selectStyle: SelectStyleUseCase,
+    private val refreshCustomStyles: RefreshCustomStylesUseCase,
 ) : ViewModel() {
+
+    init {
+        // Custom-styles sync (BLO-25 S4): refresh the account cache when
+        // the Style tab opens. Fire-and-forget: the outcome stays in the
+        // use case, so a failed refresh never blocks the tab render — the
+        // catalog keeps streaming the local cache either way.
+        viewModelScope.launch {
+            refreshCustomStyles()
+        }
+    }
+
 
     private val catalog: StateFlow<List<StyleDefinition>> = observeCatalog()
     private val selectedStyle: StateFlow<String> = observeSelectedStyle()

@@ -1,6 +1,5 @@
 package com.shippopotamus.bloviate.application.evaluator
 
-import com.shippopotamus.bloviate.domain.model.StyleCatalog
 import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.application.port.LlmStylePort
@@ -34,12 +33,18 @@ data class StyleProcessResult(
  *
  * The selection is read from [StylePreferencePort] on every call, never
  * captured at construction, so a Style-tab change applies to the next
- * dictation (the same freshness contract as `StyleAwareTextPostProcessor`).
+ * dictation (the same freshness contract as `StyleAwareTextPostProcessor`)
+ * — and resolved through [StyleResolver] (BLO-25 S4), so a custom LLM
+ * style reaches the model. A custom id waits for the persisted snapshot
+ * via [StyleResolver.resolveAwaitLoaded] (cold-start safe); built-ins
+ * resolve immediately and unknown ids fall back to the catalog default,
+ * exactly as before.
  */
 class StylingTextPostProcessor @Inject constructor(
     private val local: TextPostProcessor,
     private val stylePreference: StylePreferencePort,
     private val llm: LlmStylePort,
+    private val resolver: StyleResolver,
 ) {
 
     /**
@@ -55,7 +60,7 @@ class StylingTextPostProcessor @Inject constructor(
         progress: SendProgressPort? = null,
     ): StyleProcessResult {
         val localText = local.process(rawTranscript)
-        val style = StyleCatalog.byId(stylePreference.selectedStyleId.value)
+        val style = resolver.resolveAwaitLoaded(stylePreference.selectedStyleId.value)
         if (style.kind != StyleKind.LLM) {
             return StyleProcessResult(
                 text = localText,
