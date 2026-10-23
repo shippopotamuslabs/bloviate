@@ -33,9 +33,9 @@ sealed interface LlmStyleOutcome {
 }
 
 /**
- * Styles one transcript with the user's own OpenRouter key (BYOK). The
- * model receives only the transcript plus the style's material (see
- * `StylePromptBuilder`) — never the field, the app, or anything else.
+ * Styles one transcript via the Firebase Function (ENC-151). The model
+ * receives only the transcript plus the style's material — never the
+ * field, the app, or anything else. No key exists on device.
  */
 interface LlmStylePort {
 

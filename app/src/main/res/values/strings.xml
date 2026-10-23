@@ -82,17 +82,7 @@
     <string name="bubble_tint_rose">Rose</string>
     <string name="bubble_tint_sky">Sky</string>
     <string name="style_row_select">Use %1$s style</string>
-    <string name="style_section_key">OpenRouter</string>
     <string name="style_section_styles">Write my dictation as</string>
-    <string name="style_pill_connected">AI connected</string>
-    <string name="style_pill_off">AI off</string>
-    <string name="style_api_key_label">OpenRouter API key</string>
-    <string name="style_api_key_masked">sk-or-••••••••••</string>
-    <string name="style_api_key_save">Save</string>
-    <string name="style_api_key_replace">Replace</string>
-    <string name="style_api_key_clear">Clear</string>
-    <string name="style_key_line_saved">Key stays encrypted on this phone. Your words and the chosen style go to the model.</string>
-    <string name="style_key_line_needed">Add your key to turn on the AI styles. The key stays encrypted on this phone.</string>
     <string name="style_tag_ai">AI</string>
     <string name="style_tag_on_device">on-device</string>
     <string name="style_footer">AI styles change the voice of your words.</string>

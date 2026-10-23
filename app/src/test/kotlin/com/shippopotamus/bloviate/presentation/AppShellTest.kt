@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test
  * slab of the column only while no IME is up. With a keyboard open, a
  * reserved bar slab would stack on top of the screens' `imePadding()`
  * (measured from the window's bottom edge) and leave a dead gap
- * between the content and the keyboard — the Style tab's OpenRouter
- * key field is where Sean photographed it. The inset rendering itself
+ * between the content and the keyboard — the Style tab is where
+ * Sean photographed it. The inset rendering itself
  * is verified on Sean's device; this pins the decision the shell
  * feeds it.
  */
