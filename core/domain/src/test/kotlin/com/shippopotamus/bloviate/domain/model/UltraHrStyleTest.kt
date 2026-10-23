@@ -176,6 +176,28 @@ class UltraHrStyleTest {
         }
     }
 
+    @Test
+    fun `ultra hr content note and support resources are conditional not ritual`() {
+        // BLO-153: the content note opens only where the matter genuinely
+        // bites and support resources close only where they could help —
+        // the examples must not bolt the frame onto every message.
+        val instructions = UltraHrStyle.systemInstructions
+        assertTrue(
+            !instructions.contains("whether asked for or not"),
+            "instructions still mandate support resources on every output",
+        )
+        assertEquals(
+            1,
+            UltraHrStyle.fewShots.count { shot -> shot.styled.startsWith("Content note") },
+            "exactly the heavy example should open with a content note",
+        )
+        assertEquals(
+            1,
+            UltraHrStyle.fewShots.count { shot -> shot.styled.contains("support resources") },
+            "support resources should appear in exactly one example, not as a closing ritual",
+        )
+    }
+
     companion object {
         private val SECOND_PERSON = Regex("\\b(you|your|yours|yourself|yourselves)\\b", RegexOption.IGNORE_CASE)
     }
