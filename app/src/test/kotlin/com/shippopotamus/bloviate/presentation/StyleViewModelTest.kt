@@ -2,11 +2,17 @@ package com.shippopotamus.bloviate.presentation
 
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.application.evaluator.StyleResolver
+import com.shippopotamus.bloviate.application.port.CustomStyleRecord
+import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.domain.model.StyleCatalog
 import com.shippopotamus.bloviate.domain.model.StyleCategory
+import com.shippopotamus.bloviate.domain.model.StyleDefinition
+import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveStyleCatalogUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
+import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.flow.collect
@@ -26,12 +32,16 @@ class StyleViewModelTest {
     val mainDispatcherExtension = MainDispatcherExtension()
 
     private val fakeStyle = FakeStylePreferencePort()
+    private val fakeCustoms = FakeCustomStyleStorePort()
+    private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
     private lateinit var viewModel: StyleViewModel
 
     @BeforeEach
     fun setup() {
         viewModel = StyleViewModel(
-            observeCatalog = ObserveStyleCatalogUseCase(),
+            observeCatalog = ObserveStyleCatalogUseCase(
+                StyleResolver(store = fakeCustoms, scope = resolverScope),
+            ),
             observeSelectedStyle = ObserveSelectedStyleUseCase(fakeStyle),
             selectStyle = SelectStyleUseCase(fakeStyle),
         )
@@ -54,6 +64,73 @@ class StyleViewModelTest {
                 val initial = awaitItem()
                 assertEquals(StyleCatalog.ALL.map { style -> style.id }.toSet(), initial.sections.flatMap { section -> section.styles }.map { it.id }.toSet())
                 assertEquals(listOf(StyleCatalog.DEFAULT.id), initial.sections.flatMap { section -> section.styles }.filter { it.isSelected }.map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `with no customs the custom section is dropped`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                val initial = awaitItem()
+                assertTrue(initial.sections.none { section -> section.headerRes == R.string.style_section_custom })
+                assertEquals(StyleCatalog.ALL.size, initial.sections.sumOf { section -> section.styles.size })
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `with customs the my styles section leads with customs alphabetical`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(
+                listOf(
+                    customRecord(id = "custom-bravo", name = "Bravo"),
+                    customRecord(id = "custom-alpha", name = "alpha"),
+                ),
+            )
+
+            viewModel.uiState.test {
+                // The first emission predates the resolver's catalog update;
+                // the customs arrive on the next one.
+                awaitItem()
+                val updated = awaitItem()
+                assertEquals(R.string.style_section_custom, updated.sections.first().headerRes)
+                assertEquals(
+                    listOf("custom-alpha", "custom-bravo"),
+                    updated.sections.first().styles.map { option -> option.id },
+                )
+                assertEquals(
+                    StyleCatalog.ALL.size + 2,
+                    updated.sections.sumOf { section -> section.styles.size },
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a selected custom style is marked selected and survives`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+            keepUiStateHot()
+            viewModel.onStyleSelected("custom-mine")
+            advanceUntilIdle()
+
+            assertEquals("custom-mine", fakeStyle.selectedStyleId.value)
+            val selected = viewModel.uiState.value.sections.flatMap { section -> section.styles }.filter { option -> option.isSelected }
+            assertEquals(listOf("custom-mine"), selected.map { option -> option.id })
+        }
+
+    @Test
+    fun `an external customs change is reflected in state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertTrue(awaitItem().sections.none { section -> section.headerRes == R.string.style_section_custom })
+
+                fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
+
+                val updated = awaitItem()
+                assertEquals(R.string.style_section_custom, updated.sections.first().headerRes)
+                assertEquals(listOf("custom-mine"), updated.sections.first().styles.map { option -> option.id })
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -150,4 +227,23 @@ class StyleViewModelTest {
                 cancelAndIgnoreRemainingEvents()
             }
         }
+
+    private fun customRecord(id: String, name: String): CustomStyleRecord =
+        CustomStyleRecord(
+            definition = StyleDefinition(
+                id = id,
+                displayName = name,
+                description = "A custom style.",
+                sample = "Yeah, tomorrow.",
+                systemInstructions = "My voice. NEVER change facts.",
+                fewShots = listOf(
+                    FewShot(raw = "hear this", styled = "Hear this."),
+                    FewShot(raw = "try again", styled = "Try again."),
+                ),
+                kind = StyleKind.LLM,
+                category = StyleCategory.CUSTOM,
+            ),
+            revision = 0L,
+            updatedAtEpochMillis = 0L,
+        )
 }

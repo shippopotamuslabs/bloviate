@@ -21,11 +21,17 @@ import javax.inject.Singleton
 /**
  * [StylePreferencePort] backed by the shared preferences DataStore.
  *
- * Persisted format (schema v1, see `contracts/DATA_LAYER_RULES.md` §2): a
- * version int plus the style id string. A missing or unknown version, or an
- * unrecognized id, reads as the catalog default (`normal-caps-casual`) — an
- * explicit invalidation, never a silent reinterpretation — and the next save
- * rewrites the record at v1.
+ * Persisted format (schema v2, see `contracts/DATA_LAYER_RULES.md` §2): a
+ * version int plus the style id string. A record with no version key has
+ * never been written and reads as the catalog default (`normal-caps-
+ * casual`). A v1 record keeps its exact v1 meaning: ids resolve through
+ * the static catalog ([StyleCatalog.byId]), so a removed or custom id
+ * stored at v1 still reads as the default — an explicit invalidation,
+ * never a silent reinterpretation. A v2 record preserves its raw
+ * non-blank id verbatim, so custom-style ids survive the read; a blank
+ * or missing id still reads as the default. Any other version (> 2 or
+ * otherwise invalid) invalidates the whole record to the default, and
+ * the next save rewrites it at v2.
  */
 @Singleton
 class DataStoreStylePreferenceStore @Inject constructor(
@@ -48,25 +54,38 @@ class DataStoreStylePreferenceStore @Inject constructor(
             initialValue = DEFAULT_STYLE_ID,
         )
 
+    /**
+     * Persists [styleId] verbatim at schema v2: no static-catalog
+     * normalization on write, so custom ids round-trip. Resolution
+     * fallback for unknown ids stays the pipeline's job.
+     */
     override suspend fun selectStyle(styleId: String) {
         dataStore.edit { preferences ->
-            preferences[KEY_SCHEMA_VERSION] = SCHEMA_VERSION
+            preferences[KEY_SCHEMA_VERSION] = SCHEMA_VERSION_V2
             preferences[KEY_STYLE_ID] = styleId
         }
     }
 
-    private fun Preferences.toStyleId(): String {
-        if (this[KEY_SCHEMA_VERSION] != SCHEMA_VERSION) return DEFAULT_STYLE_ID
-        val id = this[KEY_STYLE_ID] ?: return DEFAULT_STYLE_ID
-        // byId resolves unknown ids to the default — a removed style can
-        // never wedge the pipeline; .id normalises back to the stored id.
-        return StyleCatalog.byId(id).id
-    }
+    private fun Preferences.toStyleId(): String =
+        when (this[KEY_SCHEMA_VERSION]) {
+            SCHEMA_VERSION_V1 -> {
+                val id = this[KEY_STYLE_ID] ?: return DEFAULT_STYLE_ID
+                // byId resolves unknown ids to the default — a removed style can
+                // never wedge the pipeline; .id normalises back to the stored id.
+                StyleCatalog.byId(id).id
+            }
+            SCHEMA_VERSION_V2 -> {
+                val id = this[KEY_STYLE_ID]
+                if (id.isNullOrBlank()) DEFAULT_STYLE_ID else id
+            }
+            else -> DEFAULT_STYLE_ID
+        }
 
     private companion object {
         /** The style an absent or invalidated record reads as (ENC-72: today's baseline behavior). */
         val DEFAULT_STYLE_ID: String = StyleCatalog.DEFAULT.id
-        const val SCHEMA_VERSION: Int = 1
+        const val SCHEMA_VERSION_V1: Int = 1
+        const val SCHEMA_VERSION_V2: Int = 2
         val KEY_SCHEMA_VERSION = intPreferencesKey("style_schema_version")
         val KEY_STYLE_ID = stringPreferencesKey("selected_style_id")
     }
