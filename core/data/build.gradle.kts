@@ -47,6 +47,12 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.functions)
 
+    // Google Sign-In via Credential Manager (ENC-197): pins mirror
+    // Stratum's catalog exactly.
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
+
     // whisper-android, consumed via composite build (see settings.gradle.kts);
     // coordinates are substituted with the included-build projects.
     implementation(libs.whisper.android)

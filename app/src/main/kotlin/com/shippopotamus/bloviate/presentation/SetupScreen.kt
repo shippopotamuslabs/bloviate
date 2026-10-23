@@ -20,6 +20,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Layers
@@ -98,6 +99,7 @@ fun SetupScreen(
     onBubbleSizeChange: (BubbleSizeUi) -> Unit,
     onBubbleShapeChange: (BubbleShapeUi) -> Unit,
     onBubbleTintChange: (BubbleTintUi) -> Unit,
+    onSignOut: () -> Unit,
     onRunSetupAgain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -165,6 +167,13 @@ fun SetupScreen(
                 text = stringResource(R.string.setup_section_guide),
             )
             SetupGuideCard(onRunSetupAgain = onRunSetupAgain)
+            DashboardSectionHeader(
+                text = stringResource(R.string.setup_section_account),
+            )
+            AccountCard(
+                auth = uiState.auth,
+                onSignOut = onSignOut,
+            )
             SetupFooter()
         }
     }
@@ -857,6 +866,35 @@ private fun SetupGuideCard(
 }
 
 /**
+ * The signed-in account (ENC-197): who the app is signed in as, with
+ * the way out. Shown only while the gate holds a Google session — the
+ * launcher shows the sign-in screen otherwise, so there is no
+ * signed-out rendering of this card.
+ */
+@Composable
+private fun AccountCard(
+    auth: AuthUi,
+    onSignOut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val signedIn = auth as? AuthUi.SignedIn ?: return
+    DashboardCard(modifier = modifier) {
+        DashboardRow(
+            label = signedIn.displayName ?: signedIn.email
+                ?: stringResource(R.string.account_unknown),
+            icon = Icons.Filled.AccountCircle,
+            sub = signedIn.displayName?.let { signedIn.email }
+                ?: stringResource(R.string.account_google),
+            trailing = {
+                Button(onClick = onSignOut) {
+                    Text(text = stringResource(R.string.account_sign_out))
+                }
+            },
+        )
+    }
+}
+
+/**
  * The quiet footer (ENC-75): the privacy story in one line, the model
  * attributions, and the exact build identity (ENC-69 — one-off test
  * builds all report version 1.0, so the commit SHA is the only reliable
@@ -926,6 +964,7 @@ private fun SetupScreenEmptyPreview() {
             onBubbleSizeChange = {},
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
+            onSignOut = {},
             onRunSetupAgain = {},
         )
     }
@@ -968,6 +1007,7 @@ private fun SetupScreenPopulatedPreview() {
             onBubbleSizeChange = {},
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
+            onSignOut = {},
             onRunSetupAgain = {},
         )
     }
