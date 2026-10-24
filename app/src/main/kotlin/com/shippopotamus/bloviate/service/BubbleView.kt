@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.service
 
+import android.view.MotionEvent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -23,10 +24,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithCache
@@ -39,11 +44,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -72,6 +82,7 @@ import com.shippopotamus.bloviate.presentation.tintColors
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.hypot
 
 private val BUBBLE_ELEVATION: Dp = 6.dp
 
@@ -153,8 +164,11 @@ internal fun recordingRowWidthDp(renderParams: BubbleRenderParams): Float =
  * - [RecordingBarState.Recording]: separate elements in a row —
  *   an **X** bubble cancels, a pill carries a live ~10-bar waveform
  *   plus elapsed time, and a **check** bubble stops + transcribes.
- *   There is no hold-to-talk and no drag in this layout: X and check
- *   are independent tap targets (ENC-167).
+ *   There is no hold-to-talk. The whole row drags on raw screen
+ *   coordinates (BLO-152, ENC-162's mechanism): one pointer stream
+ *   arbitrates — released within touch slop it is a tap hit-tested
+ *   against the X slot (left) and check slot (right), center taps
+ *   are no-ops; moved past slop it is a drag and never fires X/check.
  * - [RecordingBarState.Transcribing] / [RecordingBarState.Polishing]:
  *   the bar while the send pipeline runs, showing the stage's name as
  *   small shimmering text (ENC-76) — the pipeline has two stages with
@@ -258,6 +272,10 @@ fun BubbleContent(
                 renderParams = renderParams,
                 onCancelRecording = onCancelRecording,
                 onSendRecording = onSendRecording,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragCancel,
             )
             RecordingBarState.Transcribing,
             RecordingBarState.Polishing,
@@ -365,6 +383,10 @@ private fun RecordingBar(
     renderParams: BubbleRenderParams,
     onCancelRecording: () -> Unit,
     onSendRecording: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float, Float, Long) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Frame-clock redraw for the waveform (ENC-69 round 2).
@@ -390,11 +412,31 @@ private fun RecordingBar(
     }
     val scale = if (inDismissZone) DISMISS_ZONE_SCALE else FULL_SCALE
     // Separate elements, instant swap (ENC-167): [X bubble]
-    // [waveform + elapsed pill] [check bubble]. X and check are
-    // independent tap targets (Surface onClick); there is no drag
-    // gesture in this layout at all.
+    // [waveform + elapsed pill] [check bubble]. The whole row shares
+    // one raw-coordinate gesture stream (BLO-152, ENC-162's mechanism):
+    // taps arbitrate against the X slot (left) and check slot (right),
+    // so the slots carry no Surface onClick of their own — a tap and a
+    // drag can never fight over the stream the way sibling detectors
+    // on parent/child would. Slop and slot width come from composition
+    // locals (the interop filter below has no Density scope), and the
+    // laid-out row width via onSizeChanged for the UP hit test.
+    val touchSlopPx = LocalViewConfiguration.current.touchSlop
+    val slotWidthPx = with(LocalDensity.current) { renderParams.barSlotDp.dp.toPx() }
+    var rowWidthPx by remember { mutableIntStateOf(0) }
     Row(
         modifier = modifier
+            .onSizeChanged { rowWidthPx = it.width }
+            .recordingBarGestures(
+                touchSlopPx = touchSlopPx,
+                rowWidthPx = rowWidthPx,
+                slotWidthPx = slotWidthPx,
+                onCancelTap = onCancelRecording,
+                onSendTap = onSendRecording,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragCancel,
+            )
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -404,7 +446,6 @@ private fun RecordingBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            onClick = onCancelRecording,
             modifier = Modifier.size(renderParams.barSlotDp.dp),
             shape = appearance.shape.bubbleShape(),
             color = containerColor,
@@ -415,6 +456,10 @@ private fun RecordingBar(
                 modifier = Modifier.semantics {
                     contentDescription = cancelDescription
                     role = Role.Button
+                    onClick {
+                        onCancelRecording()
+                        true
+                    }
                 },
                 contentAlignment = Alignment.Center,
             ) {
@@ -464,7 +509,6 @@ private fun RecordingBar(
             }
         }
         Surface(
-            onClick = onSendRecording,
             modifier = Modifier.size(renderParams.barSlotDp.dp),
             shape = appearance.shape.bubbleShape(),
             color = if (inDismissZone) {
@@ -483,6 +527,10 @@ private fun RecordingBar(
                 modifier = Modifier.semantics {
                     contentDescription = sendDescription
                     role = Role.Button
+                    onClick {
+                        onSendRecording()
+                        true
+                    }
                 },
                 contentAlignment = Alignment.Center,
             ) {
@@ -719,6 +767,147 @@ private fun WaveformCanvas(
                 cornerRadius = CornerRadius(barWidthPx / 2f, barWidthPx / 2f),
             )
         }
+    }
+}
+
+/** Per-gesture accumulators for the raw-coordinate bar drag below. */
+private class RawBarGestureState {
+    var dragging: Boolean = false
+    var downLocalX: Float = 0f
+    var lastRawX: Float = 0f
+    var lastRawY: Float = 0f
+    var totalX: Float = 0f
+    var totalY: Float = 0f
+}
+
+/**
+ * Gesture arbitration for the recording row (BLO-152, restored from
+ * ENC-162's proven mechanism and adapted to the ENC-167 separate-row
+ * geometry: [X slot][spacing][waveform pill][spacing][check slot]).
+ * One pointer stream decides: released within the touch slop → a tap,
+ * hit-tested against the cancel slot (left [slotWidthPx]) and the send
+ * slot (right [slotWidthPx]), a center release doing nothing; moved
+ * past the slop → a drag ([BubbleDragSession] semantics, the same drag
+ * the bubble uses) and never a button tap. Doing the arbitration in one
+ * handler is what keeps the row's buttons and its drag from fighting
+ * over the stream the way sibling detectors on parent/child would. The
+ * slot width is a parameter (ENC-68) because the user's size step scales
+ * the bar — the hit test must measure the slots that are actually drawn.
+ *
+ * Drag deltas come from [MotionEvent] raw screen coordinates, not from
+ * differencing window-local `change.position` values (ENC-162): the row
+ * lives in an overlay window that moves under the finger while dragging,
+ * so window-local positions shift with the window and corrupt the deltas
+ * (device-confirmed jitter). Raw screen coordinates are immune — the
+ * window's own motion never enters them. The delta contract matches the
+ * bubble's drag: slop crossing emits the accumulated total, later moves
+ * emit per-event deltas, all in px, which is exactly what
+ * [BubbleDragController] already consumes. The tap hit test still uses
+ * the LOCAL x, and the touch semantics blocks on the slots are untouched
+ * (TalkBack-driven, unaffected by touch consumption).
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Modifier.recordingBarGestures(
+    touchSlopPx: Float,
+    rowWidthPx: Int,
+    slotWidthPx: Float,
+    onCancelTap: () -> Unit,
+    onSendTap: () -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: (Float, Float, Long) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+): Modifier {
+    val latestCancelTap by rememberUpdatedState(onCancelTap)
+    val latestSendTap by rememberUpdatedState(onSendTap)
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDrag by rememberUpdatedState(onDrag)
+    val latestDragEnd by rememberUpdatedState(onDragEnd)
+    val latestDragCancel by rememberUpdatedState(onDragCancel)
+    // Remembered so an elapsed-tick recomposition mid-gesture does not
+    // reset the accumulators; reset per gesture on ACTION_DOWN.
+    val gesture = remember { RawBarGestureState() }
+    return pointerInteropFilter { event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gesture.dragging = false
+                gesture.downLocalX = event.x
+                gesture.lastRawX = event.rawX
+                gesture.lastRawY = event.rawY
+                gesture.totalX = 0f
+                gesture.totalY = 0f
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.rawX - gesture.lastRawX
+                val deltaY = event.rawY - gesture.lastRawY
+                gesture.lastRawX = event.rawX
+                gesture.lastRawY = event.rawY
+                gesture.totalX += deltaX
+                gesture.totalY += deltaY
+                if (!gesture.dragging && hypot(gesture.totalX, gesture.totalY) > touchSlopPx) {
+                    gesture.dragging = true
+                    latestDragStart()
+                    latestDrag(gesture.totalX, gesture.totalY, event.eventTime)
+                } else if (gesture.dragging && (deltaX != 0f || deltaY != 0f)) {
+                    latestDrag(deltaX, deltaY, event.eventTime)
+                }
+                true
+            }
+            MotionEvent.ACTION_UP -> {
+                finishBarGesture(
+                    wasCancelled = false,
+                    wasDragging = gesture.dragging,
+                    downX = gesture.downLocalX,
+                    widthPx = rowWidthPx.toFloat(),
+                    slotWidthPx = slotWidthPx,
+                    onCancelTap = latestCancelTap,
+                    onSendTap = latestSendTap,
+                    onDragEnd = latestDragEnd,
+                    onDragCancel = latestDragCancel,
+                )
+                gesture.dragging = false
+                true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                finishBarGesture(
+                    wasCancelled = true,
+                    wasDragging = gesture.dragging,
+                    downX = gesture.downLocalX,
+                    widthPx = rowWidthPx.toFloat(),
+                    slotWidthPx = slotWidthPx,
+                    onCancelTap = latestCancelTap,
+                    onSendTap = latestSendTap,
+                    onDragEnd = latestDragEnd,
+                    onDragCancel = latestDragCancel,
+                )
+                gesture.dragging = false
+                true
+            }
+            else -> false
+        }
+    }
+}
+
+@Suppress("LongParameterList") // One-shot gesture verdict: every input is needed exactly once.
+internal fun finishBarGesture(
+    wasCancelled: Boolean,
+    wasDragging: Boolean,
+    downX: Float,
+    widthPx: Float,
+    slotWidthPx: Float,
+    onCancelTap: () -> Unit,
+    onSendTap: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+) {
+    when {
+        wasCancelled -> if (wasDragging) onDragCancel()
+        wasDragging -> onDragEnd()
+        downX < slotWidthPx -> onCancelTap()
+        downX > widthPx - slotWidthPx -> onSendTap()
+        else -> Unit // A tap on the waveform/elapsed area does nothing.
     }
 }
 
