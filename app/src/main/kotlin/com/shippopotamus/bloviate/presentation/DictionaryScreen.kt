@@ -13,10 +13,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -150,7 +152,10 @@ private fun WordsCard(
                     label = word,
                     dividerAbove = index > 0,
                     trailing = {
-                        IconButton(onClick = { onRemoveWordClick(word) }) {
+                        IconButton(
+                            onClick = { onRemoveWordClick(word) },
+                            shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        ) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = stringResource(
@@ -182,7 +187,11 @@ private fun WordsCard(
                         .weight(1f)
                         .semantics { contentDescription = fieldLabel },
                 )
-                Button(onClick = onAddWordClick) {
+                Button(
+                    onClick = onAddWordClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.dictionary_add))
                 }
             }
@@ -219,7 +228,10 @@ private fun CorrectionsCard(
                     ),
                     dividerAbove = index > 0,
                     trailing = {
-                        IconButton(onClick = { onRemoveCorrectionClick(correction.heardAs) }) {
+                        IconButton(
+                            onClick = { onRemoveCorrectionClick(correction.heardAs) },
+                            shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        ) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
                                 contentDescription = stringResource(
@@ -261,7 +273,11 @@ private fun CorrectionsCard(
                         .weight(1f)
                         .semantics { contentDescription = replacementLabel },
                 )
-                Button(onClick = onAddCorrectionClick) {
+                Button(
+                    onClick = onAddCorrectionClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.dictionary_add))
                 }
             }

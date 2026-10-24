@@ -13,10 +13,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -61,7 +63,10 @@ fun CustomStyleGenerationScreen(
                     Text(text = stringResource(R.string.style_generate_title))
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.style_editor_back),
@@ -130,13 +135,19 @@ fun CustomStyleGenerationScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onErrorDismiss) {
+                    TextButton(
+                        onClick = onErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
             }
             Button(
                 onClick = onGenerateClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
                 enabled = uiState.canGenerate,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -152,6 +163,8 @@ fun CustomStyleGenerationScreen(
             }
             TextButton(
                 onClick = onStartBlankClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.TextButtonContentPadding,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(text = stringResource(R.string.style_generate_start_blank))

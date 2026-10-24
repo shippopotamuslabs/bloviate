@@ -16,11 +16,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -80,7 +82,10 @@ fun CustomStyleEditorScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.style_editor_back),
@@ -101,6 +106,7 @@ fun CustomStyleEditorScreen(
                         } else {
                             IconButton(
                                 onClick = onRegenerateClick,
+                                shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
                                 enabled = !uiState.isSaving,
                             ) {
                                 Icon(
@@ -230,7 +236,11 @@ fun CustomStyleEditorScreen(
                 }
             }
             if (uiState.canAddPair) {
-                TextButton(onClick = onAddPair) {
+                TextButton(
+                    onClick = onAddPair,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
                     Text(text = stringResource(R.string.style_editor_pair_add))
                 }
             }
@@ -241,7 +251,11 @@ fun CustomStyleEditorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onSaveErrorDismiss) {
+                    TextButton(
+                        onClick = onSaveErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
@@ -255,13 +269,19 @@ fun CustomStyleEditorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onSaveErrorDismiss) {
+                    TextButton(
+                        onClick = onSaveErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
             }
             Button(
                 onClick = onSaveClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
                 enabled = uiState.isValid && !uiState.isSaving && !uiState.isRegenerating,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -354,7 +374,10 @@ private fun PairEditor(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (canRemove) {
-                IconButton(onClick = onRemove) {
+                IconButton(
+                    onClick = onRemove,
+                    shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = stringResource(

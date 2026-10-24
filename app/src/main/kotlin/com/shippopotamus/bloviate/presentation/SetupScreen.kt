@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -790,14 +791,22 @@ private fun ModelRow(
                     text = stringResource(R.string.model_chip_ready),
                     tone = StatusTone.POSITIVE,
                 )
-                ModelUiStatus.Absent -> Button(onClick = onDownloadClick) {
+                ModelUiStatus.Absent -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_download))
                 }
                 is ModelUiStatus.Downloading -> CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                 )
-                is ModelUiStatus.Failed -> Button(onClick = onDownloadClick) {
+                is ModelUiStatus.Failed -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_retry))
                 }
             }
@@ -886,7 +895,11 @@ private fun AccountCard(
             sub = signedIn.displayName?.let { signedIn.email }
                 ?: stringResource(R.string.account_google),
             trailing = {
-                Button(onClick = onSignOut) {
+                Button(
+                    onClick = onSignOut,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.account_sign_out))
                 }
             },

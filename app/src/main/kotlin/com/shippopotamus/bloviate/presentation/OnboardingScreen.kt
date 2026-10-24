@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -93,7 +94,11 @@ fun OnboardingScreen(
                         tone = StatusTone.NEUTRAL,
                         modifier = Modifier.padding(end = BloviateSpacing.s8),
                     )
-                    TextButton(onClick = onSkip) {
+                    TextButton(
+                        onClick = onSkip,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.onboarding_skip))
                     }
                 },
@@ -194,19 +199,35 @@ private fun StepNavigation(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (step != OnboardingStepUi.WELCOME) {
-            TextButton(onClick = onBack) {
+            TextButton(
+                onClick = onBack,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.TextButtonContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_back))
             }
         }
         Spacer(modifier = Modifier.weight(1f))
         when (step) {
-            OnboardingStepUi.WELCOME -> Button(onClick = onContinue) {
+            OnboardingStepUi.WELCOME -> Button(
+                onClick = onContinue,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_get_started))
             }
-            OnboardingStepUi.TEST -> Button(onClick = onFinish) {
+            OnboardingStepUi.TEST -> Button(
+                onClick = onFinish,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_finish))
             }
-            else -> Button(onClick = onContinue) {
+            else -> Button(
+                onClick = onContinue,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_continue))
             }
         }
@@ -316,6 +337,8 @@ private fun GateStep(
                 {
                     Button(
                         onClick = onAction,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.ContentPadding,
                         modifier = Modifier
                             .padding(
                                 start = BloviateSpacing.s16,
@@ -521,14 +544,22 @@ private fun WizardModelRow(
                     text = stringResource(R.string.model_chip_ready),
                     tone = StatusTone.POSITIVE,
                 )
-                ModelUiStatus.Absent -> Button(onClick = onDownloadClick) {
+                ModelUiStatus.Absent -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_download))
                 }
                 is ModelUiStatus.Downloading -> CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                 )
-                is ModelUiStatus.Failed -> Button(onClick = onDownloadClick) {
+                is ModelUiStatus.Failed -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_retry))
                 }
             }
@@ -630,7 +661,11 @@ private fun TestStep(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (!uiState.bubbleServiceRunning) {
-                Button(onClick = onStartBubble) {
+                Button(
+                    onClick = onStartBubble,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.onboarding_test_start_bubble))
                 }
             } else if (!uiState.stepSatisfied(OnboardingStepUi.TEST)) {
