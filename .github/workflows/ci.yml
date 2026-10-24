@@ -1,0 +1,381 @@
+# Bloviate CI — GitHub Actions port of .gitlab-ci.yml.
+#
+# Gate model (Sean's CI philosophy, same as Stratum's ported pipeline):
+#   - pull_request pipelines are the ONLY test gate: fast, change-relevant
+#     jobs only, 10-minute ideal / 20-minute max wall.
+#   - push pipelines on main build + deploy only (no re-testing).
+#   - the nightly schedule runs the full gate as the safety net, plus the
+#     release assembly.
+#   - the signed release build never gates PRs: it runs on main pushes
+#     (feeding distribute-internal), nightly, and on manual dispatch.
+#
+# Job mapping (GitLab -> Actions):
+#   static-analysis   -> detekt + lint jobs in parallel, aggregated by a
+#                        `static-analysis` job that keeps the name.
+#   unit-tests        -> per-area matrix legs, aggregated by `unit-tests`.
+#                        DELTA: the legs also run :core:domain:test and
+#                        :core:application:test. GitLab's bare
+#                        `testDebugUnitTest` invocation only matched
+#                        projects that HAVE that task, so the two JVM
+#                        modules' suites never executed in GitLab CI.
+#   assemble-debug    -> DROPPED (Stratum STR-176 precedent): its compile
+#                        coverage is subsumed by the unit-test legs and no
+#                        lane consumed the debug APK artifact.
+#   assemble-release  -> assemble-release (retiered off PRs, see above).
+#   distribute-internal -> distribute-internal (push to main only).
+#   functions-tests   -> NEW. The functions suite (125 node:test cases)
+#                        existed but was never wired into GitLab CI; here
+#                        it is path-gated to functions/** on PRs and always
+#                        runs nightly.
+#
+# Bloviate specifics vs Stratum:
+#   - google-services.json IS committed (app/google-services.json), so no
+#     job materializes it from secrets.
+#   - whisper-android is a git submodule consumed via includeBuild, with
+#     whisper.cpp nested inside it: Android jobs check out submodules
+#     recursively. .gitmodules now points at the GitHub sibling repo
+#     (../whisper-android) and the gitlink records the rewritten-history
+#     equivalent of the old GitLab commit (identical tree).
+#   - No OSV jobs: this repo has none of Stratum's SBOM/osv tooling.
+#   - No screenshot tests exist in this repo. No Play deploy lane exists:
+#     distribution is Firebase App Distribution only.
+#
+# GitLab `workflow:rules` equivalence:
+#   - merge_request_event && target == default branch -> pull_request: [main]
+#     (stacked PRs targeting feature branches get no CI, STR-110 cost control)
+#   - push to default branch                          -> push: [main]
+#   - schedule                                         -> schedule: cron below
+#   - manual fallback runs                             -> workflow_dispatch
+name: CI
+
+"on":
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Actions cron is UTC-only with no DST tracking.
+    # 06:00 UTC = 02:00 EDT (Mar-Nov) / 01:00 EST (winter).
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force_functions_tests:
+        description: "Run functions-tests even if no functions paths changed (GitLab manual fallback)"
+        type: boolean
+        default: false
+
+# GitLab `default: interruptible: true` -> cancel superseded PR/push runs.
+# Schedule runs are never cancelled; the event is part of the group so a
+# push can never cancel a nightly run either.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+permissions:
+  contents: read
+
+env:
+  # Same values as the GitLab `variables:` block. GRADLE_USER_HOME stays
+  # in-tree so the cache step below captures it, exactly as on GitLab.
+  # (GIT_SUBMODULE_STRATEGY has no Actions equivalent; the checkout steps
+  # request recursive submodules instead.)
+  GRADLE_USER_HOME: ${{ github.workspace }}/.ci-gradle-home
+  ANDROID_USER_HOME: ${{ github.workspace }}/../ci-home/android-home
+  GRADLE_OPTS: "-Dorg.gradle.caching=true"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Path-filter detection (replaces GitLab per-job `changes:` rules).
+  # Runs on PR/dispatch only; filtered jobs treat a skipped `changes`
+  # job via the !cancelled() pattern in their `if:` conditions.
+  # ---------------------------------------------------------------------
+  changes:
+    name: changes
+    # dorny/paths-filter lists the PR's files through the API on
+    # pull_request events; grant exactly what the job needs.
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    outputs:
+      functions: ${{ steps.filter.outputs.functions }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            functions:
+              - 'functions/**/*'
+              - '.github/workflows/ci.yml'
+
+  # ---------------------------------------------------------------------
+  # Shared Gradle dependency cache (port of the .android-job cache stanza:
+  # keyed on gradle/libs.versions.toml, jars + wrapper dists only).
+  # Repeated per Android job because Actions has no YAML anchors/extends.
+  # Every Android job checks out submodules recursively: the composite
+  # build needs whisper-android (and its nested whisper.cpp) present.
+  # ---------------------------------------------------------------------
+
+  # GitLab: static-analysis (stage lint, extends .android-job).
+  # Split into detekt + lint jobs that run in PARALLEL; the
+  # static-analysis job below aggregates them so the gate keeps its name.
+  detekt:
+    name: detekt
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/android-setup
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-gradle-home/caches/modules-2
+            .ci-gradle-home/wrapper
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+      - name: detekt
+        run: ./gradlew detekt
+      - name: Upload detekt reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detekt-reports
+          path: "**/build/reports/detekt/"
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/android-setup
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-gradle-home/caches/modules-2
+            .ci-gradle-home/wrapper
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+      - name: lint
+        run: ./gradlew lintDebug
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: "**/build/reports/lint-results-debug.html"
+          if-no-files-found: ignore
+          retention-days: 7
+
+  static-analysis:
+    name: static-analysis
+    runs-on: ubuntu-latest
+    needs: [detekt, lint]
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'schedule')
+    steps:
+      - name: Verify detekt + lint passed
+        run: |
+          echo "detekt: ${{ needs.detekt.result }} / lint: ${{ needs.lint.result }}"
+          test "${{ needs.detekt.result }}" = "success" && test "${{ needs.lint.result }}" = "success"
+
+  # GitLab: unit-tests (stage test, extends .android-job).
+  # Split into per-area matrix legs that run in PARALLEL; the unit-tests
+  # job below aggregates them so the gate keeps its name.
+  # fail-fast is off so one red leg never hides the others' results.
+  unit-test-legs:
+    name: unit-tests (${{ matrix.leg }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: app
+            tasks: ":app:testDebugUnitTest"
+          - leg: core-jvm
+            tasks: ":core:domain:test :core:application:test"
+          - leg: core-data
+            tasks: ":core:data:testDebugUnitTest"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/android-setup
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-gradle-home/caches/modules-2
+            .ci-gradle-home/wrapper
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+      - name: Unit tests (${{ matrix.leg }})
+        run: ./gradlew ${{ matrix.tasks }}
+      - name: Publish test results
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: "**/build/test-results/**/TEST-*.xml"
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports-${{ matrix.leg }}
+          path: "**/build/reports/tests/"
+          if-no-files-found: ignore
+          retention-days: 14
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-latest
+    needs: [unit-test-legs]
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'schedule')
+    steps:
+      - name: Verify all unit-test legs passed
+        run: |
+          echo "unit-test legs: ${{ needs.unit-test-legs.result }}"
+          test "${{ needs.unit-test-legs.result }}" = "success"
+
+  # Functions tests (NEW — the suite was never wired into GitLab CI).
+  # Node version matches functions/package.json engines.
+  functions-tests:
+    name: functions-tests
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: >-
+      ${{ !cancelled() && (
+        github.event_name == 'schedule' ||
+        (github.event_name == 'pull_request' && needs.changes.outputs.functions == 'true') ||
+        (github.event_name == 'workflow_dispatch' && inputs.force_functions_tests)
+      ) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Build and test functions
+        working-directory: functions
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm test
+
+  # GitLab: assemble-release (stage test; feeds distribute-internal).
+  # Retiered 2026-10-24 (Sean's CI philosophy): the signed release build
+  # no longer gates PRs. It runs on main pushes (feeding the deploy lane),
+  # nightly, and on manual dispatch from main. PRs stay compile-verified
+  # by the unit-test legs; a release-only break (signing/shrinking)
+  # surfaces on main within minutes of merge instead of blocking the PR.
+  assemble-release:
+    name: assemble-release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/android-setup
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-gradle-home/caches/modules-2
+            .ci-gradle-home/wrapper
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+      - name: Keystore bootstrap (optional — unsigned without secrets)
+        uses: ./.github/actions/keystore-setup
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+          store-password: ${{ secrets.STORE_PASSWORD }}
+          key-alias: ${{ secrets.KEY_ALIAS }}
+          key-password: ${{ secrets.KEY_PASSWORD }}
+          strict: "false"
+      - name: Assemble release
+        run: ./gradlew :app:assembleRelease
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            .keystore-signed-flag
+          # .keystore-signed-flag is a dotfile: upload-artifact v4 skips
+          # hidden files unless told otherwise. distribute-internal
+          # hard-fails without this flag, exactly as on GitLab.
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # GitLab: distribute-internal (stage deploy; main pushes only, never
+  # schedule — the event split enforces this by construction here).
+  # DELTA: GitLab also needed unit-tests + static-analysis; on Actions
+  # those jobs do not run on push events (the gate model tests on the PR,
+  # main build+deploys), so this job needs assemble-release only — the
+  # same shape as Stratum's port.
+  distribute-internal:
+    name: distribute-internal
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [assemble-release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download signed release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: release-apk
+      - name: Materialize Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Missing FIREBASE_SERVICE_ACCOUNT_JSON secret" && exit 1)
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Distribute signed APK via Firebase App Distribution
+        run: |
+          test -f .keystore-signed-flag || (echo "APK was not signed — keystore secrets missing in assemble-release" && exit 1)
+          shopt -s nullglob
+          APK_FILES=(app/build/outputs/apk/release/*.apk)
+          shopt -u nullglob
+          if [ ${#APK_FILES[@]} -eq 0 ]; then echo "No APK found" && exit 1; fi
+          if [ ${#APK_FILES[@]} -gt 1 ]; then echo "Multiple APKs found: ${APK_FILES[*]}" && exit 1; fi
+          # firebase-tools is PINNED: bump the pin deliberately in a
+          # commit — never float on latest (GitLab rule, kept). HOME
+          # points at a fresh temp dir for this call so no cached
+          # firebase user login can shadow the service account: the
+          # upload authenticates deterministically as the service
+          # account (ENC-166).
+          HOME="$(mktemp -d)" npx firebase-tools@15.34.0 appdistribution:distribute "${APK_FILES[0]}" \
+            --app 1:74044613867:android:37d80fbdff97cd7b0d8aae \
+            --groups "Internal" \
+            --release-notes "Build ${GITHUB_SHA::7} from main" \
+            --non-interactive
+      - name: Upload distributed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributed-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
