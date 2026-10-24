@@ -232,7 +232,8 @@ class BubbleWindowPlacement(
     private fun RecordingBarState.isBarForm(): Boolean =
         this is RecordingBarState.Recording ||
             this == RecordingBarState.Transcribing ||
-            this == RecordingBarState.Polishing
+            this == RecordingBarState.Polishing ||
+            this is RecordingBarState.NotStyled
 
     /**
      * Keep the resting bubble on-screen when its size or the bounds change
