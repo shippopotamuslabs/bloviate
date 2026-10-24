@@ -24,6 +24,28 @@ export const REWRITE_LICENSE =
 export const ONLY_TEXT_INSTRUCTION =
   "Return ONLY the transformed text — no quotation marks, no preamble, no explanation.";
 
+// BLO-158 two-tier facts rule, tier 1: universal, every style.
+// Byte-identical to the Kotlin StylePromptBuilder's FACTS_TIER1.
+export const FACTS_TIER1 =
+  "FACTS ARE NOT THE JOKE: Never change or contradict a stated fact — names, " +
+  "numbers, dates, quoted text, who did what. A changed fact is never the joke, " +
+  "it is just a wrong message.";
+
+// BLO-158 tier 2: SERIOUS styles only — never ADD facts either.
+// Byte-identical to the Kotlin StylePromptBuilder's SERIOUS_NO_INVENTION.
+export const SERIOUS_NO_INVENTION =
+  "SERIOUS MEANS SERIOUS: Never add facts either — no invented details, no " +
+  "connective tissue, no scene-setting. The transcript is the whole universe: " +
+  "say only what the speaker said, cleaner.";
+
+// BLO-158 license branch: every non-SERIOUS style (custom included).
+// Byte-identical to the Kotlin StylePromptBuilder's LICENSED_INVENTION.
+export const LICENSED_INVENTION =
+  "LICENSED INVENTION: Atmospheric texture, inflated framing, connective tissue, " +
+  "and scene-setting may be added under two limits: (a) nothing added contradicts " +
+  "a stated fact; (b) nothing added impersonates a stated fact — no invented numbers, " +
+  "dates, names, or quotes dressed up as the speaker's.";
+
 const EXAMPLES_HEADER =
   "Examples of the transformation — each dictated input restyled in this voice:";
 const USER_LEAD_IN =
@@ -43,7 +65,18 @@ export function buildStylePrompt(style: StyleDefinition, transcript: string): St
       system += "\nExample input: " + shot.raw + "\nExample output: " + shot.styled;
     }
   }
-  system += "\n\n" + SPEAKER_INVARIANT + " " + REWRITE_LICENSE + " " + ONLY_TEXT_INSTRUCTION;
+  const factsBranch = style.category === "serious" ? SERIOUS_NO_INVENTION : LICENSED_INVENTION;
+  system +=
+    "\n\n" +
+    SPEAKER_INVARIANT +
+    " " +
+    REWRITE_LICENSE +
+    " " +
+    FACTS_TIER1 +
+    " " +
+    factsBranch +
+    " " +
+    ONLY_TEXT_INSTRUCTION;
   const user =
     USER_LEAD_IN + "\n\n<transcript>\n" + transcript + "\n</transcript>\n\n" + USER_IMPERATIVE;
   return { system, user };
