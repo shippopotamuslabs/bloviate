@@ -10,9 +10,9 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
     systemInstructions = "Casing: normal sentence case — capitalise the first word of " +
         "each sentence and proper nouns, nothing cutesy. Punctuation: earnest — " +
         "full stops everywhere, exclamation reserved for the win, commas where a " +
-        "thought-leader pauses for applause. Paragraphing: a line break after every " +
-        "sentence — one sentence per line, never a dense block, closing with a " +
-        "hashtag tail. " +
+        "thought-leader pauses for applause. Paragraphing: short lines and air — " +
+        "one sentence per line is the native rhythm, never a dense block; the " +
+        "closing varies with the post. " +
         "Voice: Corporate LinkedIn — the satire-flagship thought-leader. First " +
         "person throughout: the output is the speaker's own post, never a memo " +
         "about someone else. Mundane events become humble-brag lessons ('I got " +
@@ -21,8 +21,11 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
         "hyperproductive signalling, hustle theatre (4am starts, ice baths), " +
         "shareholder value, lesson plus positive spin, emoji bullets, P.S. hooks, " +
         "and a closing 'Agree?'. Facts stay true while the framing inflates — " +
-        "the humble-brag never invents a win, it inflates a real one. Every post " +
-        "ends with a hashtag tail. " +
+        "the humble-brag never invents a win, it inflates a real one. The " +
+        "signature closers (numbered lesson lists, the hashtag tail, 'Agree?', " +
+        "the P.S. hook) are moves, not a ritual: land one or two where the post " +
+        "earns them, in the combinations real posts use — a two-line thought " +
+        "does not grow a lesson list, and no two posts need to end the same way. " +
         "NEVER write a dry status memo or a plain professional update — that " +
         "unadorned clarity belongs to Professional, never to the thought-leader. " +
         "The post performs gratitude; it does not merely report. " +
@@ -54,13 +57,10 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
                 "lost two hours of logs from server nine",
             styled = "I am humbled to announce our Acme Corp deploy failed at step three on Friday.\n" +
                 "We lost two hours of logs from server nine.\n" +
-                "Here is what it taught me about ownership:\n" +
-                "🚀 Lesson 1: setbacks are data in disguise.\n" +
-                "🚀 Lesson 2: the team that debugs together grows together.\n" +
+                "Here is what it taught me about ownership: a setback is just data wearing a disguise, and the team that debugs together grows together.\n" +
                 "We rebuilt, we relogged, we shipped stronger.\n" +
                 "P.S. Failure is just success in progress.\n" +
-                "#Ownership #Engineering #GrowthMindset\n" +
-                "Agree?",
+                "#Ownership #Engineering #GrowthMindset",
         ),
         FewShot(
             raw = "i told dave i disagree with the plan because the forty thousand " +
@@ -68,11 +68,8 @@ internal val CorporateLinkedInStyle: StyleDefinition = StyleDefinition(
             styled = "I told Dave I disagree with the plan, and I say it with love.\n" +
                 "The forty thousand dollar budget is real.\n" +
                 "The March fifteenth deadline is real.\n" +
-                "Here is what disagreement taught me about leadership:\n" +
-                "💡 Lesson 1: honesty is a love language.\n" +
-                "💡 Lesson 2: candor today saves quarters tomorrow.\n" +
+                "Disagreement taught me that candor today saves quarters tomorrow — honesty is a love language.\n" +
                 "I am grateful for teams where hard truths make us family.\n" +
-                "#Leadership #Candor #GrowthMindset\n" +
                 "Agree?",
         ),
     ),

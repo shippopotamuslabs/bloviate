@@ -106,7 +106,15 @@ object StyleCatalog {
         systemInstructions = "Casing: standard sentence case with every proper noun " +
             "capitalised. Punctuation: full formal punctuation — one idea per sentence, " +
             "commas where a professional would put them. Paragraphing: short paragraphs " +
-            "with one blank line between them. " + NEVER_CLAUSE,
+            "with one blank line between them. " +
+            "Voice: Professional — REWRITE into finished business prose, do not " +
+            "merely tidy the transcript: recast rambling speech into clear, complete " +
+            "sentences; trade spoken fillers and hedges for direct statements; hold " +
+            "the precise, courteous business register throughout. The result reads " +
+            "as though the speaker had sat down and written it carefully — same " +
+            "facts, same intent, same commitments, professional wording throughout. " +
+            "Never add content, greetings, or sign-offs the speaker did not dictate. " +
+            NEVER_CLAUSE,
         fewShots = listOf(
             FewShot(
                 raw = "yeah so like following up on our chat i think we should meet tomorrow",
