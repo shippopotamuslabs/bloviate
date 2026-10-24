@@ -116,6 +116,14 @@ private const val DONE_DISPLAY_MS: Long = 1_200L
 private const val ERROR_DISPLAY_MS: Long = 1_500L
 
 /**
+ * Display window for the [RecordingBarState.NotStyled] pill (BLO-147),
+ * mirroring [BubbleRecordingController]'s timer value. Longer than Done:
+ * the pill carries a sentence, not a check, so it stays up long enough
+ * to read.
+ */
+private const val NOT_STYLED_DISPLAY_MS: Long = 3_000L
+
+/**
  * Widest elapsed readout the recording bar can show (ENC-162): the
  * recording's absolute backstop is ten minutes, which
  * [ElapsedTimeFormatter] renders as `10:00`. Every live value is four
@@ -175,6 +183,10 @@ internal fun recordingRowWidthDp(renderParams: BubbleRenderParams): Float =
  *   very different latencies, and the bar says which one it is in.
  * - [RecordingBarState.Done] / [RecordingBarState.Error]: transient
  *   bubble treatments while the pipeline finishes; not interactive.
+ * - [RecordingBarState.NotStyled]: the insert landed but the cloud style
+ *   pass fell back for an entitlement or sign-in cause (BLO-147), so the
+ *   bubble shows a brief labeled pill naming what happened instead of
+ *   the plain Done check. Same transient shape, longer window.
  *
  * Gestures are detected inside the composition: the composition's internal
  * child view is the touch target, so a view-level touch listener on the
@@ -232,6 +244,7 @@ fun BubbleContent(
         val displayMs = when (barState) {
             is RecordingBarState.Done -> DONE_DISPLAY_MS
             RecordingBarState.Error -> ERROR_DISPLAY_MS
+            is RecordingBarState.NotStyled -> NOT_STYLED_DISPLAY_MS
             RecordingBarState.Idle,
             is RecordingBarState.Recording,
             RecordingBarState.Transcribing,
@@ -290,6 +303,20 @@ fun BubbleContent(
             )
             is RecordingBarState.Done -> DoneBubble(
                 autoFinish = barState.autoFinish,
+                appearance = appearance,
+                renderParams = renderParams,
+            )
+            is RecordingBarState.NotStyled -> NotStyledPill(
+                text = stringResource(
+                    requireNotNull(barState.notStyledTextRes()) {
+                        "Every not-styled notice carries pill text: $barState"
+                    },
+                ),
+                description = stringResource(
+                    requireNotNull(barState.notStyledDescriptionRes()) {
+                        "Every not-styled notice carries a description: $barState"
+                    },
+                ),
                 appearance = appearance,
                 renderParams = renderParams,
             )
@@ -557,6 +584,51 @@ internal fun RecordingBarState.processingLabelRes(): Int? = when (this) {
     RecordingBarState.Idle,
     is RecordingBarState.Recording,
     is RecordingBarState.Done,
+    is RecordingBarState.NotStyled,
+    RecordingBarState.Error,
+    -> null
+}
+
+/**
+ * The pill text for a [RecordingBarState.NotStyled] state (BLO-147): the
+ * notice names why the insert went in unstyled. Every other state has
+ * no not-styled text (it renders its own treatment instead). The text is
+ * also the pill's visible label, so what a screen reader announces via
+ * [notStyledDescriptionRes] says the same thing in the same register.
+ */
+internal fun RecordingBarState.notStyledTextRes(): Int? = when (this) {
+    is RecordingBarState.NotStyled -> when (notice) {
+        RecordingBarState.StyleFallbackNotice.SUBSCRIPTION_REQUIRED ->
+            R.string.bubble_not_styled_subscription
+        RecordingBarState.StyleFallbackNotice.SIGN_IN_REQUIRED ->
+            R.string.bubble_not_styled_sign_in
+    }
+    RecordingBarState.Idle,
+    is RecordingBarState.Recording,
+    RecordingBarState.Transcribing,
+    RecordingBarState.Polishing,
+    is RecordingBarState.Done,
+    RecordingBarState.Error,
+    -> null
+}
+
+/**
+ * The content description for a [RecordingBarState.NotStyled] pill
+ * (BLO-147): what happened, in the same plain register as the pill
+ * text. Every other state has none.
+ */
+internal fun RecordingBarState.notStyledDescriptionRes(): Int? = when (this) {
+    is RecordingBarState.NotStyled -> when (notice) {
+        RecordingBarState.StyleFallbackNotice.SUBSCRIPTION_REQUIRED ->
+            R.string.bubble_not_styled_subscription_description
+        RecordingBarState.StyleFallbackNotice.SIGN_IN_REQUIRED ->
+            R.string.bubble_not_styled_sign_in_description
+    }
+    RecordingBarState.Idle,
+    is RecordingBarState.Recording,
+    RecordingBarState.Transcribing,
+    RecordingBarState.Polishing,
+    is RecordingBarState.Done,
     RecordingBarState.Error,
     -> null
 }
@@ -698,6 +770,43 @@ private fun DoneBubble(
                 painter = painterResource(R.drawable.ic_check),
                 contentDescription = null,
                 modifier = Modifier.size(renderParams.bubbleIconDp.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The pill shown when the insert landed but the cloud style pass fell
+ * back for an entitlement or sign-in cause (BLO-147). Same geometry and
+ * tint as the [ProcessingBar] pill — it hugs the label with the same
+ * s24 insets — but the text is static (this is a result, not a stage),
+ * so there is no shimmer.
+ */
+@Composable
+private fun NotStyledPill(
+    text: String,
+    description: String,
+    appearance: BubbleAppearance,
+    renderParams: BubbleRenderParams,
+    modifier: Modifier = Modifier,
+) {
+    val tint = appearance.tint.tintColors()
+    Surface(
+        modifier = modifier
+            .height(renderParams.barHeightDp.dp)
+            .semantics { contentDescription = description },
+        shape = appearance.shape.barShape(),
+        color = tint.container,
+        contentColor = tint.content,
+        shadowElevation = BUBBLE_ELEVATION,
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = BloviateSpacing.s24),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
             )
         }
     }
@@ -1065,6 +1174,36 @@ private fun BubbleContentDoneSilencePreview() {
     PreviewTheme {
         BubbleContent(
             barState = RecordingBarState.Done(autoFinish = AutoFinishReason.SILENCE),
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Not styled - subscription", showBackground = true)
+@Composable
+private fun BubbleContentNotStyledSubscriptionPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.NotStyled(
+                RecordingBarState.StyleFallbackNotice.SUBSCRIPTION_REQUIRED,
+            ),
+            waveformLevels = { emptyList() },
+            inDismissZone = false,
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Not styled - sign in", showBackground = true)
+@Composable
+private fun BubbleContentNotStyledSignInPreview() {
+    PreviewTheme {
+        BubbleContent(
+            barState = RecordingBarState.NotStyled(
+                RecordingBarState.StyleFallbackNotice.SIGN_IN_REQUIRED,
+            ),
             waveformLevels = { emptyList() },
             inDismissZone = false,
         )

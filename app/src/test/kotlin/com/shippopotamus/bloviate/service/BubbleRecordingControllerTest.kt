@@ -67,6 +67,7 @@ class BubbleRecordingControllerTest {
             workDispatcher = UnconfinedTestDispatcher(),
             doneDisplayMs = DONE_DISPLAY_MS,
             errorDisplayMs = ERROR_DISPLAY_MS,
+            notStyledDisplayMs = NOT_STYLED_DISPLAY_MS,
             isEngineWarming = isEngineWarming,
         )
 
@@ -910,6 +911,89 @@ class BubbleRecordingControllerTest {
     }
 
     @Test
+    fun `a permission denied fallback shows the subscription notice`() = runTest {
+        // BLO-147: a fresh Firebase UID without an entitlement styles
+        // nothing — the raw text is inserted, then the bubble names why.
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "permission-denied")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
+        assertEquals(
+            RecordingBarState.NotStyled(RecordingBarState.StyleFallbackNotice.SUBSCRIPTION_REQUIRED),
+            controller.barState.value,
+        )
+    }
+
+    @Test
+    fun `a no auth fallback shows the sign in notice`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "no-auth")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
+        assertEquals(
+            RecordingBarState.NotStyled(RecordingBarState.StyleFallbackNotice.SIGN_IN_REQUIRED),
+            controller.barState.value,
+        )
+    }
+
+    @Test
+    fun `not styled returns to idle after its display window`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "permission-denied")
+
+        controller.onSendTap()
+        runCurrent()
+        assertTrue(
+            controller.barState.value is RecordingBarState.NotStyled,
+            "got ${controller.barState.value}",
+        )
+
+        advanceTimeBy(NOT_STYLED_DISPLAY_MS)
+        runCurrent()
+        assertEquals(RecordingBarState.Idle, controller.barState.value)
+    }
+
+    @Test
+    fun `a transport fallback stays silent on done`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "unavailable")
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("hello world"), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
+    }
+
+    @Test
+    fun `styled text with no fallback shows plain done`() = runTest {
+        val controller = createController(backgroundScope)
+        startRecording(controller)
+        fakeStylePreference.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.Styled(text = "Polished words.", llmMs = 10L)
+
+        controller.onSendTap()
+        runCurrent()
+
+        assertEquals(listOf("Polished words."), fakeSink.transcripts)
+        assertEquals(RecordingBarState.Done(), controller.barState.value)
+    }
+
+    @Test
     fun `an insertion failure after polishing shows error`() = runTest {
         val controller = createController(backgroundScope)
         startRecording(controller)
@@ -980,5 +1064,6 @@ class BubbleRecordingControllerTest {
     private companion object {
         const val DONE_DISPLAY_MS: Long = 100L
         const val ERROR_DISPLAY_MS: Long = 200L
+        const val NOT_STYLED_DISPLAY_MS: Long = 300L
     }
 }
