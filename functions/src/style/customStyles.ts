@@ -233,7 +233,7 @@ const crudOptions = {
   // App Check not enforced yet for the same reason (client mints no tokens).
   enforceAppCheck: false,
   timeoutSeconds: 30,
-  memory: "128MiB" as const,
+  memory: "512MiB" as const,
 };
 
 const crudLogger = createLogger({ service: "customStyles" });
