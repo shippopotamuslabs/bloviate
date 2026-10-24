@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -80,6 +81,8 @@ fun SignInScreen(
             Spacer(modifier = Modifier.height(BloviateSpacing.s24))
             Button(
                 onClick = onSignInClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
                 enabled = !isSigningIn,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -106,7 +109,11 @@ fun SignInScreen(
                     color = MaterialTheme.colorScheme.error,
                     textAlign = TextAlign.Center,
                 )
-                TextButton(onClick = onErrorDismiss) {
+                TextButton(
+                    onClick = onErrorDismiss,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
                     Text(text = stringResource(R.string.signin_error_dismiss))
                 }
             }

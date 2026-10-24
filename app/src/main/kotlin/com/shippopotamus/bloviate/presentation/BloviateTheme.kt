@@ -271,6 +271,29 @@ object BloviateShapes {
 }
 
 /**
+ * The Button Shape Gospel's named tokens (BLO-3;
+ * contracts/UI_DESIGN_SPEC.md §6.8). Bloviate's consumer language is the
+ * full pill: stock buttons already inherit it from the theme
+ * ([BloviateShapes.Pill] = [CircleShape] via `MaterialExpressiveTheme`),
+ * so the default needs no call-site change — these names pin the law.
+ * The square variant is for toolbar/secondary/dense contexts only, never
+ * mixed with the pill in the same row; one screen = one shape language.
+ * Both variants morph on press to [ShippopotamusPressedShape].
+ */
+
+/** DEFAULT PILL — the consumer button shape (§6.8). */
+val ShippopotamusButtonShape: Shape = CircleShape
+
+/** ALLOWED VARIANT (medium) — square buttons, e.g. inside 12dp cards (§6.8). */
+val ShippopotamusButtonShapeSquare: Shape = RoundedCornerShape(12.dp)
+
+/** ALLOWED VARIANT (large) — square buttons at large emphasis (§6.8). */
+val ShippopotamusButtonShapeSquareLarge: Shape = RoundedCornerShape(16.dp)
+
+/** Pressed shape — both variants morph to this on press (§6.8). */
+val ShippopotamusPressedShape: Shape = RoundedCornerShape(12.dp)
+
+/**
  * The morphable polygon vocabulary (ENC-90): the M3 Expressive shape
  * system ([MaterialShapes]) adopted alongside the motion scheme. These
  * are the polygons the Compose Gospel names (§6.2: expressive shapes
