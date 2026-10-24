@@ -34,9 +34,9 @@ fun StatusPill(
     val colors = tone.colors()
     Surface(
         shape = BloviateShapes.Pill,
-        color = colors.container.copy(alpha = PILL_CONTAINER_ALPHA),
+        color = colors.container,
         contentColor = colors.content,
-        border = BorderStroke(1.dp, colors.content.copy(alpha = PILL_BORDER_ALPHA)),
+        border = BorderStroke(1.dp, colors.content),
         modifier = modifier,
     ) {
         Row(
@@ -59,9 +59,6 @@ fun StatusPill(
         }
     }
 }
-
-private const val PILL_CONTAINER_ALPHA = 0.55f
-private const val PILL_BORDER_ALPHA = 0.35f
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
 @Preview(name = "Pills - Dark", showBackground = true)

@@ -150,6 +150,20 @@ private fun SignInScreenIdlePreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "SignIn - Signing in", showBackground = true)
+@Composable
+private fun SignInScreenSigningInPreview() {
+    PreviewTheme {
+        SignInScreen(
+            isSigningIn = true,
+            signInError = null,
+            onSignInClick = {},
+            onErrorDismiss = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
 @Preview(name = "SignIn - Error", showBackground = true)
 @Composable
 private fun SignInScreenErrorPreview() {
