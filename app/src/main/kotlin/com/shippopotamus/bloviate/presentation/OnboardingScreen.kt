@@ -754,6 +754,36 @@ private fun OnboardingTestLandedPreview() {
 }
 
 @Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Wizard Model Downloading - Dark", showBackground = true)
+@Composable
+private fun OnboardingModelDownloadingPreview() {
+    PreviewTheme {
+        OnboardingScreen(
+            uiState = OnboardingUiState(
+                step = OnboardingStepUi.MODEL,
+                watcherEnabled = true,
+                overlayPermissionGranted = true,
+                micPermissionGranted = true,
+                whisperModelStatus = ModelUiStatus.Downloading(percent = 42),
+            ),
+            onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
+            onRequestMicPermission = {},
+            onStartBubble = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
+            onTestFieldTextChange = {},
+            onContinue = {},
+            onBack = {},
+            onSkip = {},
+            onFinish = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
 @Preview(name = "Wizard Welcome - Dark", showBackground = true)
 @Composable
 private fun OnboardingWelcomePreview() {

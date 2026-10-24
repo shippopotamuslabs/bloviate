@@ -1037,3 +1037,40 @@ private fun SetupScreenPopulatedPreview() {
         )
     }
 }
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Downloading - Dark", showBackground = true)
+@Composable
+private fun SetupScreenDownloadingPreview() {
+    PreviewTheme {
+        SetupScreen(
+            uiState = MainUiState(
+                watcherEnabled = true,
+                watcherConnected = true,
+                overlayPermissionGranted = true,
+                bubbleServiceRunning = true,
+                batteryExempt = true,
+                micPermissionGranted = true,
+                whisperModelStatus = ModelUiStatus.Downloading(percent = 42),
+                parakeetModelStatus = ModelUiStatus.Absent,
+                selectedEngine = DictationEngineUi.WHISPER,
+            ),
+            onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
+            onStartBubble = {},
+            onStopBubble = {},
+            onAutoStartEnabledChange = {},
+            onRequestMicPermission = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
+            onBubbleOpacityChange = {},
+            onBubbleSizeChange = {},
+            onBubbleShapeChange = {},
+            onBubbleTintChange = {},
+            onSignOut = {},
+            onRunSetupAgain = {},
+        )
+    }
+}
