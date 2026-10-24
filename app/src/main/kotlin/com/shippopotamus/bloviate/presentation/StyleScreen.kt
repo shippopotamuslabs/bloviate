@@ -17,15 +17,17 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,10 +37,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.tooling.preview.Preview
+import dev.chrisbanes.haze.hazeSource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.R
@@ -148,12 +152,18 @@ fun StyleRoute(
                             discardConfirm = false
                             editorOpen = false
                         },
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
                     ) {
                         Text(text = stringResource(R.string.style_editor_discard_confirm))
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { discardConfirm = false }) {
+                    TextButton(
+                        onClick = { discardConfirm = false },
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_editor_discard_keep))
                     }
                 },
@@ -168,12 +178,20 @@ fun StyleRoute(
                 title = { Text(text = stringResource(R.string.style_generate_confirm_regenerate_title)) },
                 text = { Text(text = stringResource(R.string.style_generate_confirm_regenerate_message)) },
                 confirmButton = {
-                    TextButton(onClick = editorViewModel::onRegenerateConfirm) {
+                    TextButton(
+                        onClick = editorViewModel::onRegenerateConfirm,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_generate_confirm_regenerate_confirm))
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = editorViewModel::onRegenerateDismissConfirm) {
+                    TextButton(
+                        onClick = editorViewModel::onRegenerateDismissConfirm,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_editor_discard_keep))
                     }
                 },
@@ -226,21 +244,30 @@ fun StyleScreen(
     onDeleteErrorDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = { Text(text = stringResource(R.string.tab_style)) },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
@@ -299,12 +326,20 @@ fun StyleScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = onDeleteConfirm) {
+                TextButton(
+                    onClick = onDeleteConfirm,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
                     Text(text = stringResource(R.string.style_delete_confirm))
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDeleteDismiss) {
+                TextButton(
+                    onClick = onDeleteDismiss,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
                     Text(text = stringResource(R.string.style_delete_cancel))
                 }
             },
@@ -393,13 +428,19 @@ private fun CustomStyleRow(
         showChevron = false,
         dividerAbove = true,
         trailing = {
-            IconButton(onClick = onEdit) {
+            IconButton(
+                onClick = onEdit,
+                shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+            ) {
                 Icon(
                     imageVector = Icons.Filled.Edit,
                     contentDescription = stringResource(R.string.style_edit_custom, option.displayName),
                 )
             }
-            IconButton(onClick = onDelete) {
+            IconButton(
+                onClick = onDelete,
+                shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+            ) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = stringResource(R.string.style_delete_custom, option.displayName),
@@ -428,7 +469,11 @@ private fun DeleteErrorLine(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
-        TextButton(onClick = onDismiss) {
+        TextButton(
+            onClick = onDismiss,
+            shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+            contentPadding = ButtonDefaults.TextButtonContentPadding,
+        ) {
             Text(text = stringResource(R.string.style_error_dismiss))
         }
     }

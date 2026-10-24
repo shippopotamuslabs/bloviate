@@ -13,24 +13,28 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import com.shippopotamus.bloviate.R
 import com.shippopotamus.bloviate.application.usecase.MAX_GENERATE_DESCRIPTION_CHARS
+import dev.chrisbanes.haze.hazeSource
 
 /**
  * The AI style-draft Start screen (BLO-160 S7): the in-tab destination the
@@ -54,14 +58,22 @@ fun CustomStyleGenerationScreen(
     onErrorDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = {
                     Text(text = stringResource(R.string.style_generate_title))
                 },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.style_editor_back),
@@ -71,14 +83,18 @@ fun CustomStyleGenerationScreen(
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
@@ -130,13 +146,19 @@ fun CustomStyleGenerationScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onErrorDismiss) {
+                    TextButton(
+                        onClick = onErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
             }
             Button(
                 onClick = onGenerateClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
                 enabled = uiState.canGenerate,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -152,6 +174,8 @@ fun CustomStyleGenerationScreen(
             }
             TextButton(
                 onClick = onStartBlankClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.TextButtonContentPadding,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(text = stringResource(R.string.style_generate_start_blank))

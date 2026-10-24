@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,7 +43,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,8 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -77,8 +80,9 @@ import kotlin.math.roundToInt
  *
  * The column scrolls: the sections together exceed short viewports
  * (fold cover screens, split windows), and every row must stay
- * reachable (ENC-65). The shell's navigation bar owns the bottom
- * system inset, so the column does not pad for it.
+ * reachable (ENC-65). The shell's glass bar overlays the content, so
+ * the column draws full-bleed as the bar's haze source and reserves
+ * its top offset and bottom clearance inside the scroll.
  */
 @Suppress("LongParameterList") // Fully state-hoisted screen: one callback per control, by design.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -103,10 +107,15 @@ fun SetupScreen(
     onRunSetupAgain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = { Text(text = stringResource(R.string.app_name)) },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 actions = {
                     SetupStatusPill(
                         status = uiState.setupStatus(),
@@ -116,14 +125,18 @@ fun SetupScreen(
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
@@ -790,14 +803,22 @@ private fun ModelRow(
                     text = stringResource(R.string.model_chip_ready),
                     tone = StatusTone.POSITIVE,
                 )
-                ModelUiStatus.Absent -> Button(onClick = onDownloadClick) {
+                ModelUiStatus.Absent -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_download))
                 }
                 is ModelUiStatus.Downloading -> CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                 )
-                is ModelUiStatus.Failed -> Button(onClick = onDownloadClick) {
+                is ModelUiStatus.Failed -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_retry))
                 }
             }
@@ -886,7 +907,11 @@ private fun AccountCard(
             sub = signedIn.displayName?.let { signedIn.email }
                 ?: stringResource(R.string.account_google),
             trailing = {
-                Button(onClick = onSignOut) {
+                Button(
+                    onClick = onSignOut,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.account_sign_out))
                 }
             },
@@ -992,6 +1017,43 @@ private fun SetupScreenPopulatedPreview() {
                     shape = BubbleShapeUi.CLOVER,
                     tint = BubbleTintUi.SKY,
                 ),
+            ),
+            onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
+            onStartBubble = {},
+            onStopBubble = {},
+            onAutoStartEnabledChange = {},
+            onRequestMicPermission = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
+            onBubbleOpacityChange = {},
+            onBubbleSizeChange = {},
+            onBubbleShapeChange = {},
+            onBubbleTintChange = {},
+            onSignOut = {},
+            onRunSetupAgain = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Downloading - Dark", showBackground = true)
+@Composable
+private fun SetupScreenDownloadingPreview() {
+    PreviewTheme {
+        SetupScreen(
+            uiState = MainUiState(
+                watcherEnabled = true,
+                watcherConnected = true,
+                overlayPermissionGranted = true,
+                bubbleServiceRunning = true,
+                batteryExempt = true,
+                micPermissionGranted = true,
+                whisperModelStatus = ModelUiStatus.Downloading(percent = 42),
+                parakeetModelStatus = ModelUiStatus.Absent,
+                selectedEngine = DictationEngineUi.WHISPER,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},

@@ -168,6 +168,38 @@ class BloviateThemeTest {
     }
 
     @Test
+    fun `button shape gospel default is the full pill (BLO-3, UI_DESIGN_SPEC 6_8)`() {
+        assertEquals(CircleShape, ShippopotamusButtonShape)
+    }
+
+    @Test
+    fun `button shape gospel square variant is 12dp medium and 16dp large (BLO-3, UI_DESIGN_SPEC 6_8)`() {
+        assertEquals(RoundedCornerShape(12.dp), ShippopotamusButtonShapeSquare)
+        assertEquals(RoundedCornerShape(16.dp), ShippopotamusButtonShapeSquareLarge)
+    }
+
+    @Test
+    fun `button shape gospel pressed shape is 12dp for both variants (BLO-3, UI_DESIGN_SPEC 6_8)`() {
+        assertEquals(RoundedCornerShape(12.dp), ShippopotamusPressedShape)
+    }
+
+    @Test
+    fun `gospel pressed shape differs from the library stock pressed default (BLO-3)`() {
+        // Stock M3 Expressive buttons resolve their default pressed shape
+        // from the small shape token (ButtonSmallTokens.PressedContainerShape
+        // = CornerSmall -> Shapes.small = 8.dp under this theme), while the
+        // gospel mandates 12.dp. Every stock Button/TextButton call site
+        // therefore passes ButtonDefaults.shapes(pressedShape =
+        // ShippopotamusPressedShape) explicitly (and every IconButton
+        // IconButtonDefaults.shapes(pressedShape =
+        // ShippopotamusPressedShape)); the resting shape stays unset so the
+        // pill still comes from the theme. The 0.96 press scale stays
+        // unimplemented — the library exposes no such knob.
+        assertEquals(RoundedCornerShape(8.dp), BloviateShapes.Scale.small)
+        assertNotEquals(BloviateShapes.Scale.small, ShippopotamusPressedShape)
+    }
+
+    @Test
     fun `display and headline styles carry the gospel sizes at regular weight`() {
         val type = BloviateTypography
         assertStyle(type.displayLarge, size = 57, lineHeight = 64, weight = FontWeight.Normal)
@@ -287,6 +319,27 @@ class BloviateThemeTest {
         assertEquals(MaterialShapes.Clover4Leaf, BloviateMorphShapes.Clover4Leaf)
         assertEquals(MaterialShapes.Arch, BloviateMorphShapes.Arch)
         assertNotEquals(BloviateMorphShapes.Circle, BloviateMorphShapes.Pill)
+    }
+
+    @Test
+    fun `glass top bar token wears bg-base at 65 percent with a 24dp blur (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(24.dp, ShippopotamusHazeTopBar.blurRadius)
+        assertEquals(BloviatePalette.BgBase.copy(alpha = 0.65f), ShippopotamusHazeTopBar.tint)
+        assertEquals(0.5f, ShippopotamusHazeTopBar.noiseFactor)
+    }
+
+    @Test
+    fun `glass bottom bar token wears surface-1 at 75 percent with a 20dp blur (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(20.dp, ShippopotamusHazeBottomBar.blurRadius)
+        assertEquals(BloviatePalette.Surface1.copy(alpha = 0.75f), ShippopotamusHazeBottomBar.tint)
+        assertEquals(0.5f, ShippopotamusHazeBottomBar.noiseFactor)
+    }
+
+    @Test
+    fun `glass sheet token is the heavy blur since HazeStyle_Thick has no 2_x equivalent (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(28.dp, ShippopotamusHazeSheet.blurRadius)
+        assertEquals(BloviatePalette.Surface3.copy(alpha = 0.75f), ShippopotamusHazeSheet.tint)
+        assertEquals(0.5f, ShippopotamusHazeSheet.noiseFactor)
     }
 
     @Test

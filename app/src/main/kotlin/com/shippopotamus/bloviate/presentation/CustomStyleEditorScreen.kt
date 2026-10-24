@@ -16,25 +16,29 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import com.shippopotamus.bloviate.R
+import dev.chrisbanes.haze.hazeSource
 
 /**
  * The manual custom-style editor (BLO-25 S5): the in-tab destination for
@@ -65,9 +69,12 @@ fun CustomStyleEditorScreen(
     onRegenerateClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = {
                     Text(
                         text = stringResource(
@@ -79,8 +86,13 @@ fun CustomStyleEditorScreen(
                         ),
                     )
                 },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.style_editor_back),
@@ -101,6 +113,7 @@ fun CustomStyleEditorScreen(
                         } else {
                             IconButton(
                                 onClick = onRegenerateClick,
+                                shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
                                 enabled = !uiState.isSaving,
                             ) {
                                 Icon(
@@ -114,13 +127,17 @@ fun CustomStyleEditorScreen(
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         if (uiState.loadFailed) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .hazeSource(state = hazeState, zIndex = 0f)
+                    .padding(
+                        top = innerPadding.calculateTopPadding(),
+                        bottom = glassBottomBarClearance(),
+                    )
                     .padding(BloviateSpacing.s16),
                 verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
             ) {
@@ -135,9 +152,13 @@ fun CustomStyleEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
@@ -230,7 +251,11 @@ fun CustomStyleEditorScreen(
                 }
             }
             if (uiState.canAddPair) {
-                TextButton(onClick = onAddPair) {
+                TextButton(
+                    onClick = onAddPair,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
                     Text(text = stringResource(R.string.style_editor_pair_add))
                 }
             }
@@ -241,7 +266,11 @@ fun CustomStyleEditorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onSaveErrorDismiss) {
+                    TextButton(
+                        onClick = onSaveErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
@@ -255,13 +284,19 @@ fun CustomStyleEditorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    TextButton(onClick = onSaveErrorDismiss) {
+                    TextButton(
+                        onClick = onSaveErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.style_error_dismiss))
                     }
                 }
             }
             Button(
                 onClick = onSaveClick,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
                 enabled = uiState.isValid && !uiState.isSaving && !uiState.isRegenerating,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -354,7 +389,10 @@ private fun PairEditor(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (canRemove) {
-                IconButton(onClick = onRemove) {
+                IconButton(
+                    onClick = onRemove,
+                    shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = stringResource(

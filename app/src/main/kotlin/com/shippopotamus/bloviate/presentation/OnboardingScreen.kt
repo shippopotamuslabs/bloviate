@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -33,15 +34,17 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.shippopotamus.bloviate.R
+import dev.chrisbanes.haze.hazeSource
 
 /**
  * The first-run wizard (ENC-67): seven steps — welcome, the five setup
@@ -79,10 +82,15 @@ fun OnboardingScreen(
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = { Text(text = stringResource(R.string.onboarding_title)) },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 actions = {
                     StatusChip(
                         text = stringResource(
@@ -93,21 +101,29 @@ fun OnboardingScreen(
                         tone = StatusTone.NEUTRAL,
                         modifier = Modifier.padding(end = BloviateSpacing.s8),
                     )
-                    TextButton(onClick = onSkip) {
+                    TextButton(
+                        onClick = onSkip,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
                         Text(text = stringResource(R.string.onboarding_skip))
                     }
                 },
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
@@ -194,19 +210,35 @@ private fun StepNavigation(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (step != OnboardingStepUi.WELCOME) {
-            TextButton(onClick = onBack) {
+            TextButton(
+                onClick = onBack,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.TextButtonContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_back))
             }
         }
         Spacer(modifier = Modifier.weight(1f))
         when (step) {
-            OnboardingStepUi.WELCOME -> Button(onClick = onContinue) {
+            OnboardingStepUi.WELCOME -> Button(
+                onClick = onContinue,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_get_started))
             }
-            OnboardingStepUi.TEST -> Button(onClick = onFinish) {
+            OnboardingStepUi.TEST -> Button(
+                onClick = onFinish,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_finish))
             }
-            else -> Button(onClick = onContinue) {
+            else -> Button(
+                onClick = onContinue,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.ContentPadding,
+            ) {
                 Text(text = stringResource(R.string.onboarding_continue))
             }
         }
@@ -316,6 +348,8 @@ private fun GateStep(
                 {
                     Button(
                         onClick = onAction,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.ContentPadding,
                         modifier = Modifier
                             .padding(
                                 start = BloviateSpacing.s16,
@@ -521,14 +555,22 @@ private fun WizardModelRow(
                     text = stringResource(R.string.model_chip_ready),
                     tone = StatusTone.POSITIVE,
                 )
-                ModelUiStatus.Absent -> Button(onClick = onDownloadClick) {
+                ModelUiStatus.Absent -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_download))
                 }
                 is ModelUiStatus.Downloading -> CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
                 )
-                is ModelUiStatus.Failed -> Button(onClick = onDownloadClick) {
+                is ModelUiStatus.Failed -> Button(
+                    onClick = onDownloadClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.model_retry))
                 }
             }
@@ -630,7 +672,11 @@ private fun TestStep(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (!uiState.bubbleServiceRunning) {
-                Button(onClick = onStartBubble) {
+                Button(
+                    onClick = onStartBubble,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
                     Text(text = stringResource(R.string.onboarding_test_start_bubble))
                 }
             } else if (!uiState.stepSatisfied(OnboardingStepUi.TEST)) {
@@ -689,6 +735,36 @@ private fun OnboardingTestLandedPreview() {
                 bubbleServiceRunning = true,
                 parakeetModelStatus = ModelUiStatus.Ready,
                 testFieldText = "The quick brown fox, dictated hands-free.",
+            ),
+            onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
+            onRequestMicPermission = {},
+            onStartBubble = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
+            onTestFieldTextChange = {},
+            onContinue = {},
+            onBack = {},
+            onSkip = {},
+            onFinish = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Wizard Model Downloading - Dark", showBackground = true)
+@Composable
+private fun OnboardingModelDownloadingPreview() {
+    PreviewTheme {
+        OnboardingScreen(
+            uiState = OnboardingUiState(
+                step = OnboardingStepUi.MODEL,
+                watcherEnabled = true,
+                overlayPermissionGranted = true,
+                micPermissionGranted = true,
+                whisperModelStatus = ModelUiStatus.Downloading(percent = 42),
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},
