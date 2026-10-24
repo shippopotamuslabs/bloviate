@@ -31,12 +31,15 @@ Two kinds of styles exist:
 
 - Mechanical styles run on the phone as plain string transforms. They cost nothing and need no account. The catalog has two: `normal-caps-casual`, the default, and `lowercase-casual`.
 - Cloud styles run on a language model through the Firebase Function. The server catalog holds 32 of them, in six sections:
-  - Serious, 3: Polish, Professional, Essayist. Polish edits lightly. Professional rewrites into finished business prose. Essayist writes the long form.
-  - Ancient Philosophers, 8: Cicero, Aristotle, Seneca, Marcus Aurelius, Socrates, Plato, Aquinas, Augustine.
-  - Writers, 4: Shakespeare, Hemingway, Dickens, Oscar Wilde.
-  - Eras and Genres, 4: Noir Detective, Pirate, Talkie, The Colonel.
-  - Personas, 5: Attenborough, Drill Sergeant, Town Crier, Belligerent, Genius.
-  - Modern Parody, 8: Corporate LinkedIn, Ultra HR, Silicon Valley Bro, Legal Contract, Academic Jargon, Gen Z Brainrot, Edgelord, AI Psychosis.
+
+| Section | Count | Styles |
+| --- | ---: | --- |
+| Serious | 3 | Polish, Professional, Essayist. Polish edits lightly. Professional rewrites into finished business prose. Essayist writes the long form. |
+| Ancient Philosophers | 8 | Cicero, Aristotle, Seneca, Marcus Aurelius, Socrates, Plato, Aquinas, Augustine |
+| Writers | 4 | Shakespeare, Hemingway, Dickens, Oscar Wilde |
+| Eras and Genres | 4 | Noir Detective, Pirate, Talkie, The Colonel |
+| Personas | 5 | Attenborough, Drill Sergeant, Town Crier, Belligerent, Genius |
+| Modern Parody | 8 | Corporate LinkedIn, Ultra HR, Silicon Valley Bro, Legal Contract, Academic Jargon, Gen Z Brainrot, Edgelord, AI Psychosis |
 
 Serious styles play by a stricter rule: they add no facts of their own. The other sections may invent color, framing, and flourish. They still may never contradict what you said or present invented facts as yours.
 
@@ -56,8 +59,10 @@ Cloud styling carries a monthly fair-use cap, counted in normalized tokens acros
 
 The `styleText` function sends each request through a chain, in this order:
 
-1. DeepSeek V4.1 Flash, routed through OpenRouter across a pinned provider list (Inference.net, Together, Baseten, Fireworks, Crusoe, DeepInfra, FP8 builds first).
-2. Gemini 3.1 Flash-Lite, pinned to Google Vertex providers on OpenRouter and sorted by latency, if the primary chain fails or its output fails the guard.
+| Step | Model | Routing |
+| ---: | --- | --- |
+| 1 | DeepSeek V4.1 Flash | OpenRouter across a pinned provider list (Inference.net, Together, Baseten, Fireworks, Crusoe, DeepInfra, FP8 builds first) |
+| 2 | Gemini 3.1 Flash-Lite | OpenRouter, pinned to Google Vertex providers and sorted by latency. Runs when the primary chain fails or its output fails the guard. |
 
 Returned text passes an output guard and a response cleaner before the app sees it. If the final output still fails the guard, the app gets your cleaned transcript back. Every attempt logs a structured record with token counts and an estimated cost, and styling outcomes report to Crashlytics from the app.
 
@@ -67,12 +72,14 @@ API keys live server side in Firebase secrets. The app holds no model key.
 
 The Android app is four Gradle modules plus a composite build. Dependencies point one way: app to application to domain, data implements the ports.
 
-- `:app` holds the Android entry points: the accessibility field watcher, the bubble overlay service, the boot receiver, Compose screens, and Hilt wiring.
-- `:core:application` holds use cases and the ports they consume: transcription, styling, model stores, dictionary, auth session, preferences.
-- `:core:domain` holds the rules with no framework in them: style definitions, the dictation pipeline evaluators, the personal dictionary, engine resolution, bubble geometry and gesture math.
-- `:core:data` holds the implementations: the two transcription engines, Firebase gateways for styling and custom styles, model downloaders and stores, DataStore preferences.
-- `third_party/whisper-android` is a git submodule consumed as a Gradle composite build. It carries the whisper.cpp engine and its own nested whisper.cpp submodule, so clones need two levels of submodules.
-- `functions/` is a separate TypeScript codebase, Node 22, deployed as Firebase Functions. It holds the callable endpoints: `styleText`, `saveCustomStyle`, `listCustomStyles`, `deleteCustomStyle`, `generateCustomStyle`.
+| Module | What it holds |
+| --- | --- |
+| `:app` | The Android entry points: the accessibility field watcher, the bubble overlay service, the boot receiver, Compose screens, and Hilt wiring |
+| `:core:application` | Use cases and the ports they consume: transcription, styling, model stores, dictionary, auth session, preferences |
+| `:core:domain` | The rules with no framework in them: style definitions, the dictation pipeline evaluators, the personal dictionary, engine resolution, bubble geometry and gesture math |
+| `:core:data` | The implementations: the two transcription engines, Firebase gateways for styling and custom styles, model downloaders and stores, DataStore preferences |
+| `third_party/whisper-android` | A git submodule consumed as a Gradle composite build. It carries the whisper.cpp engine and its own nested whisper.cpp submodule, so clones need two levels of submodules |
+| `functions/` | A separate TypeScript codebase, Node 22, deployed as Firebase Functions. It holds the callable endpoints: `styleText`, `saveCustomStyle`, `listCustomStyles`, `deleteCustomStyle`, `generateCustomStyle` |
 
 House rules for the codebase live in `contracts/`: architecture, code style, data layer, transcription, unit testing, UI design, and the voice contract for user-facing copy. `AGENTS.md` at the root routes coding work to the right contract. Read those before changing behavior; they state requirements, and pull requests get checked against them.
 
