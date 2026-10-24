@@ -402,6 +402,7 @@ test("acceptance: technical dictation restyled and returned", async () => {
 
 const CUSTOM_DEF = {
   id: "custom-noir",
+  category: "custom",
   displayName: "My Noir",
   description: "My own hard-boiled voice.",
   sample: "The coffee was cold.",
