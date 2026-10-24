@@ -1,0 +1,68 @@
+# Composite equivalent of the GitLab `.android-job` before_script:
+# Java toolchain, SDK licenses, the preview-channel platform the app
+# compiles against, the pinned NDK + CMake the whisper-android native
+# build requires, and the sdk.dir files the composite build resolves
+# per build.
+#
+# Differences from Stratum's android-setup:
+# - NO google-services.json step: Bloviate commits app/google-services.json
+#   (Firebase integrated in ENC-151/ENC-197), so there is nothing to
+#   materialize from secrets.
+# - Adds the NDK 28.2.13676358 + CMake 3.22.1 installs and the dual
+#   local.properties writes: the included whisper-android build does not
+#   see this repo's local.properties, so it gets its own sdk.dir.
+name: android-setup
+description: Shared Android job setup (port of .android-job before_script)
+
+inputs:
+  java-version:
+    description: JDK for Gradle (daemon JVM per gradle/gradle-daemon-jvm.properties)
+    required: false
+    default: "21"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - name: Accept SDK licenses and install compile platform, NDK, CMake
+      shell: bash
+      run: |
+        chmod +x gradlew
+        # Actions runs bash with -eo pipefail: a `yes |` feeder dying of
+        # SIGPIPE would poison the pipeline status, so drop pipefail here
+        # and judge sdkmanager by the install results instead.
+        set +o pipefail
+        # GitHub-hosted runners ship the Android SDK with ANDROID_HOME set,
+        # so the GitLab shell-executor fallback ($HOME/Android/Sdk) and the
+        # corrupt-CLI-bundle self-heal are unnecessary here.
+        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+        command -v sdkmanager || (echo "sdkmanager not found under $ANDROID_HOME" && exit 1)
+        # Best-effort license acceptance (output kept out of the log); an
+        # install fails loudly if a license is genuinely missing.
+        yes | sdkmanager --licenses > /dev/null 2>&1 || true
+        # App + whisper-android compile against 37, published as
+        # android-37.0 on the preview channel (3); fall back to the
+        # default channel in case it has graduated. Output is NOT
+        # silenced — a failed install must say why in the log.
+        sdkmanager --channel=3 "platforms;android-37.0" || sdkmanager "platforms;android-37.0"
+        # whisper-android pins NDK 28.2.13676358 and CMake 3.22.1 for its
+        # externalNativeBuild (whisper.cpp); both are idempotent installs.
+        sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
+
+    - name: Write sdk.dir for the root and included builds
+      shell: bash
+      run: |
+        # The composite build resolves the SDK location per build: the
+        # included whisper-android build does not see this repo's
+        # local.properties, so write sdk.dir into both (the repo README
+        # documents the same step for IDEs). local.properties is
+        # gitignored in both repos.
+        printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+        if [ -d third_party/whisper-android ]; then
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > third_party/whisper-android/local.properties
+        fi
