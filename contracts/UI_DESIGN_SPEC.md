@@ -1,5 +1,5 @@
 # UI_DESIGN_SPEC.md
-**Bloviate – UI Design Contract v1.7**
+**Bloviate – UI Design Contract v1.8**
 (Adapted from Enclave `UI_DESIGN_SPEC.md` v2.6 — its theme-token, preview, and rigor rules; Enclave's product-specific theme families and chat shapes do not apply here.)
 
 > **v1.1 amendment (2026-10-19, ENC-75, under the user's explicit direction):**
@@ -86,6 +86,17 @@
 > retired for the overlay. (The v1.4 note's line that those springs are
 > "untouched" is superseded by this amendment for the bubble overlay.)
 
+> **v1.8 amendment (2026-10-23, BLO-152, under the user's explicit
+> direction — his Contract Waiver for this edit):** the v1.7 note's
+> clause "the recording row has no drag gesture" is superseded.
+> Recording-row drag is restored to the ENC-162 decision ("drag stays
+> enabled in every bar state") and BLO-122 free placement: the whole
+> recording row drags on raw screen coordinates, and a bar-form drag end
+> re-anchors subsequent placements. ENC-167 deleting the drag was an
+> accidental regression, fixed in BLO-152. Everything else in v1.7
+> (separate elements, instant swap, no morph, one-shot placement)
+> stands, with drag as the stated exception in §3.
+
 UI contract for Bloviate's two surfaces: the in-app screens (onboarding, settings, model manager) and the floating bubble. Always enforce together with `ARCHITECTURE_RULES.md` (which defines the structural Scaffold/navigation patterns and the overlay service rules).
 
 ---
@@ -168,9 +179,9 @@ The bubble is rendered by `BubbleOverlayService` (window rules in `ARCHITECTURE_
 | Error | Danger-token flash/shake (theme semantic color, §1) |
 
 - RMS/waveform updates arrive via deferred lambda reads (`CODE_STYLE_RULES.md` §4.5) — the bubble must not recompose its whole tree per audio frame.
-- The recording layout is **separate elements, swapped instantly** (ENC-167): a row of separate surfaces wearing the user's appearance (shape/tint/opacity) — [X bubble] [waveform + elapsed pill] [check bubble] — with spacing between them. The check bubble carries `primary`/`onPrimary` directly on its outer surface (the check glyph sits centered on it, exactly like the X glyph — no nested inner circle); in the dismiss zone both X and check swap to the error-container colors. No element morphs: there is no `animateContentSize`, no size spring, and no `AnimatedVisibility` size/expand transition on the overlay root; every state change is an instant content swap (at most a fade on appearing elements). X and check are **independent tap targets**; there is **no drag gesture in the recording layout at all** (idle drag, the bottom dismiss zone, and position persistence are unchanged).
+- The recording layout is **separate elements, swapped instantly** (ENC-167): a row of separate surfaces wearing the user's appearance (shape/tint/opacity) — [X bubble] [waveform + elapsed pill] [check bubble] — with spacing between them. The check bubble carries `primary`/`onPrimary` directly on its outer surface (the check glyph sits centered on it, exactly like the X glyph — no nested inner circle); in the dismiss zone both X and check swap to the error-container colors. No element morphs: there is no `animateContentSize`, no size spring, and no `AnimatedVisibility` size/expand transition on the overlay root; every state change is an instant content swap (at most a fade on appearing elements). X and check are **tap targets arbitrated on the same single pointer stream as the row's drag**: the whole row drags on raw screen coordinates (ENC-162's mechanism — never window-local deltas, which jitter in the self-moving overlay window); released within touch slop it is a tap hit-tested against the X slot (left) and the check slot (right), with the center a no-op; past the slop it is a drag and never fires X/check. X/check keep `Role.Button`, content descriptions, and semantics `onClick` actions so TalkBack is unchanged. (Idle drag, the bottom dismiss zone, and position persistence are unchanged.)
 - **Free placement, side from the anchor.** There is no snap-to-edge or dock. The persisted anchor fractions are unchanged. Expansion side is a pure function of the anchor: an anchor whose center is left of the screen center becomes the X and the row unfolds rightward; any other anchor becomes the check and the row unfolds leftward.
-- **One-shot placement from known sizes.** Every bar-form state's window position is computed once, before its content composes, from the fixed element widths (slot sizes + waveform width + padding constants) — never from a measured live view width, and never corrected per frame. The window-content edge sitting at the anchor's spot does not move across Recording, Processing, and Done (right-side anchors: the content's right edge stays on the anchor's right edge; left-side mirrored). The single exception is one pre-computed fit shift, applied once before the first frame of the new state, when the row would overflow near the screen center. A window resize during recording does not move the window.
+- **One-shot placement from known sizes.** Every bar-form state's window position is computed once, before its content composes, from the fixed element widths (slot sizes + waveform width + padding constants) — never from a measured live view width, and never corrected per frame. The window-content edge sitting at the anchor's spot does not move across Recording, Processing, and Done (right-side anchors: the content's right edge stays on the anchor's right edge; left-side mirrored). The single placement exception is one pre-computed fit shift, applied once before the first frame of the new state, when the row would overflow near the screen center. The user-drag exception (BLO-152): absent a user drag the anchor edge does not move; while a drag is active the drag controller is the sole writer of the window layout (ENC-154); a bar-form drag end shifts the anchor by the window's own displacement from its last one-shot place — clamped on-screen for the bubble size and persisted normalized against the BUBBLE size, never the row width — pushes no layout, and subsequent bar-form placements and the return to Idle compute from the dragged anchor. A window resize during recording does not move the window.
 - The processing pill **hugs its label** (ENC-89, placement per ENC-167): Transcribing/Polishing carry no waveform, no side bubbles, and no buttons, so their width is the stage word plus s24 horizontal padding — never the recording row's wide skeleton — showing the stage label with the ENC-76 shimmer. It is placed by the same one-shot anchor-edge rule. Done/Error are a **single bubble at the anchor spot**, unchanged.
 - Touch targets ≥ 48.dp. The bubble must remain fully on-screen after drag, rotation, and fold/unfold.
 - Dismiss (drag to bottom) is a visual state too: the bubble shrinks toward the dismiss zone while dragging.
