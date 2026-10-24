@@ -8,6 +8,19 @@ export const SPEAKER_INVARIANT =
   "salutations, letter framing, or counsel directed at the speaker. Change " +
   "only the voice, never who is speaking or who is spoken to.";
 
+export const REWRITE_LICENSE =
+  "INTENT, NOT WORDING: Keep what the speaker means — their intent, facts, " +
+  "names, numbers, dates, and quoted text — never their exact phrasing. " +
+  "Recast freely into the voice: new sentence shapes, new verbs, new order, " +
+  "compression or expansion where the voice demands it. How far the recast " +
+  "goes is set by the voice itself: a cleanup voice stays close to the " +
+  "words, a persona voice rewrites fully — but no voice is a mere " +
+  "copy-editor unless its own instructions say so. A voice's signature " +
+  "formatting devices (lesson lists, content notes, hashtag tails, " +
+  "sign-offs) are a toolkit, not a template: deploy one where it lands " +
+  "for this text, skip it where it does not, and never force the same " +
+  "closing structure onto every output.";
+
 export const ONLY_TEXT_INSTRUCTION =
   "Return ONLY the transformed text — no quotation marks, no preamble, no explanation.";
 
@@ -30,7 +43,7 @@ export function buildStylePrompt(style: StyleDefinition, transcript: string): St
       system += "\nExample input: " + shot.raw + "\nExample output: " + shot.styled;
     }
   }
-  system += "\n\n" + SPEAKER_INVARIANT + " " + ONLY_TEXT_INSTRUCTION;
+  system += "\n\n" + SPEAKER_INVARIANT + " " + REWRITE_LICENSE + " " + ONLY_TEXT_INSTRUCTION;
   const user =
     USER_LEAD_IN + "\n\n<transcript>\n" + transcript + "\n</transcript>\n\n" + USER_IMPERATIVE;
   return { system, user };
