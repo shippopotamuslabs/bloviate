@@ -533,6 +533,7 @@ object StyleCatalog {
         NormalCapsCasual,
         PolishStyle,
         Professional,
+        EssayistStyle,
         CiceroStyle,
         ShakespeareStyle,
         HemingwayStyle,
