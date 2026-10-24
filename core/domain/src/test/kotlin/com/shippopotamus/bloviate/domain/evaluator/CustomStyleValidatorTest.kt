@@ -75,13 +75,13 @@ class CustomStyleValidatorTest {
     }
 
     @Test
-    fun `a description at exactly one hundred twenty chars passes and one more fails`() {
+    fun `a description at exactly two hundred forty chars passes and one more fails`() {
         assertEquals(
             emptyList<CustomStyleViolation>(),
-            validator.validate(validCustom().copy(description = "d".repeat(120))),
+            validator.validate(validCustom().copy(description = "d".repeat(240))),
         )
         assertTrue(
-            validator.validate(validCustom().copy(description = "d".repeat(121))).contains(
+            validator.validate(validCustom().copy(description = "d".repeat(241))).contains(
                 CustomStyleViolation.DESCRIPTION_TOO_LONG,
             ),
         )
@@ -95,10 +95,10 @@ class CustomStyleValidatorTest {
     }
 
     @Test
-    fun `a sample at exactly one hundred eighty chars passes and one more fails`() {
-        assertEquals(emptyList<CustomStyleViolation>(), validator.validate(validCustom().copy(sample = "s".repeat(180))))
+    fun `a sample at exactly five hundred twelve chars passes and one more fails`() {
+        assertEquals(emptyList<CustomStyleViolation>(), validator.validate(validCustom().copy(sample = "s".repeat(512))))
         assertTrue(
-            validator.validate(validCustom().copy(sample = "s".repeat(181))).contains(CustomStyleViolation.SAMPLE_TOO_LONG),
+            validator.validate(validCustom().copy(sample = "s".repeat(513))).contains(CustomStyleViolation.SAMPLE_TOO_LONG),
         )
     }
 
@@ -112,13 +112,13 @@ class CustomStyleValidatorTest {
     }
 
     @Test
-    fun `instructions at exactly twenty-four hundred chars pass and one more fails`() {
+    fun `instructions at exactly six thousand chars pass and one more fails`() {
         assertEquals(
             emptyList<CustomStyleViolation>(),
-            validator.validate(validCustom().copy(systemInstructions = "i".repeat(2400))),
+            validator.validate(validCustom().copy(systemInstructions = "i".repeat(6000))),
         )
         assertTrue(
-            validator.validate(validCustom().copy(systemInstructions = "i".repeat(2401))).contains(
+            validator.validate(validCustom().copy(systemInstructions = "i".repeat(6001))).contains(
                 CustomStyleViolation.INSTRUCTIONS_TOO_LONG,
             ),
         )
