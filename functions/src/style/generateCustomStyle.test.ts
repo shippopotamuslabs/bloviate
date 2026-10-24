@@ -11,6 +11,8 @@ import {
   type GenerateCustomStyleDeps,
 } from "./generateCustomStyle";
 import {
+  buildGenerationPrompt,
+  buildRepairPrompt,
   CANONICAL_RAW_DICTATIONS,
   CLASSIFIER_JSON_SCHEMA,
   DESCRIPTION_BLOCK_CLOSE,
@@ -41,7 +43,15 @@ import {
   type GenerationLimitStore,
 } from "./customGenerationLimits";
 import { styleById } from "./styleCatalog";
-import { FACTS_CLAUSE, LANGUAGE_CLAUSE } from "./customStyleStore";
+import {
+  FACTS_CLAUSE,
+  LANGUAGE_CLAUSE,
+  MAX_DESCRIPTION,
+  MAX_DISPLAY_NAME,
+  MAX_FEW_SHOT_SIDE,
+  MAX_SAMPLE,
+  MAX_SYSTEM_INSTRUCTIONS,
+} from "./customStyleStore";
 import {
   FALLBACK_MODEL,
   PRIMARY_MODEL,
@@ -557,6 +567,27 @@ test("invalid draft triggers one repair on the same model with reason codes only
   assert.equal(res.draft.sample, "The coffee was cold, and Tuesday had an alibi.");
 });
 
+test("generation and repair system prompts state the hard validation caps from constants", () => {
+  const caps = [MAX_DISPLAY_NAME, MAX_DESCRIPTION, MAX_SAMPLE, MAX_SYSTEM_INSTRUCTIONS, MAX_FEW_SHOT_SIDE];
+  const gen = buildGenerationPrompt("noir detective voice");
+  for (const cap of caps) {
+    assert.ok(gen.system.includes(String(cap)), `generation system prompt missing cap ${cap}`);
+  }
+  assert.ok(gen.system.includes("ONE short line"), "generation system prompt must keep sample to one short line");
+  const repair = buildRepairPrompt({
+    description: "warm noir",
+    failedDraftJson: "{}",
+    reasons: ["bad-sample"],
+  });
+  for (const cap of caps) {
+    assert.ok(repair.system.includes(String(cap)), `repair system prompt missing cap ${cap}`);
+  }
+  // Repair user part still carries the validator reason codes.
+  assert.ok(repair.user.includes("bad-sample"));
+  // Caps live in the system prompt: no user content leaks into the system.
+  assert.ok(!repair.system.includes("warm noir"));
+});
+
 test("still-invalid after repair is failed-precondition with a stable reason", async () => {
   const bad = draftWithSample("You are going to love this voice, my friend.");
   const limits = fakeLimits();
@@ -703,11 +734,11 @@ test("validateGeneratedDraft shape: non-object, wrong keys, extra keys", () => {
 });
 
 test("validateGeneratedDraft reuses the S3 length caps", () => {
-  assert.ok(checkReasons((d) => { d.displayName = "d".repeat(41); }).includes(DRAFT_REASON_DISPLAY_NAME));
+  assert.ok(checkReasons((d) => { d.displayName = "d".repeat(MAX_DISPLAY_NAME + 1); }).includes(DRAFT_REASON_DISPLAY_NAME));
   assert.ok(checkReasons((d) => { d.displayName = "   "; }).includes(DRAFT_REASON_DISPLAY_NAME));
-  assert.ok(checkReasons((d) => { d.description = "d".repeat(121); }).includes(DRAFT_REASON_DESCRIPTION));
-  assert.ok(checkReasons((d) => { d.sample = "s".repeat(181); }).includes(DRAFT_REASON_SAMPLE));
-  assert.ok(checkReasons((d) => { d.systemInstructions = "i".repeat(2401); }).includes(DRAFT_REASON_INSTRUCTIONS));
+  assert.ok(checkReasons((d) => { d.description = "d".repeat(MAX_DESCRIPTION + 1); }).includes(DRAFT_REASON_DESCRIPTION));
+  assert.ok(checkReasons((d) => { d.sample = "s".repeat(MAX_SAMPLE + 1); }).includes(DRAFT_REASON_SAMPLE));
+  assert.ok(checkReasons((d) => { d.systemInstructions = "i".repeat(MAX_SYSTEM_INSTRUCTIONS + 1); }).includes(DRAFT_REASON_INSTRUCTIONS));
   assert.ok(checkReasons((d) => { d.systemInstructions = ""; }).includes(DRAFT_REASON_INSTRUCTIONS));
   assert.ok(checkReasons((d) => { d.fewShotStyledOutputs = ["a", "b", "c"]; }).includes(DRAFT_REASON_FEW_SHOT_COUNT));
   assert.ok(
@@ -723,14 +754,19 @@ test("validateGeneratedDraft reuses the S3 length caps", () => {
   );
   // Boundary values pass.
   const boundary = validDraftObject();
-  boundary.displayName = "d".repeat(40);
-  boundary.description = "d".repeat(120);
-  boundary.sample = "s".repeat(180);
-  boundary.systemInstructions = "i".repeat(2400);
+  boundary.displayName = "d".repeat(MAX_DISPLAY_NAME);
+  boundary.description = "d".repeat(MAX_DESCRIPTION);
+  boundary.sample = "s".repeat(MAX_SAMPLE);
+  boundary.systemInstructions = "i".repeat(MAX_SYSTEM_INSTRUCTIONS);
   const sides = boundary.fewShotStyledOutputs as string[];
   sides[0] = `${"s".repeat(1400)} sarah backup step three hours tuesday logs`;
   assert.equal(sides[0].length <= 1500, true);
   assert.equal(validateGeneratedDraft(boundary).ok, true);
+  // Interior regression (BLO-164): a 248-char sample was rejected under the
+  // old 180 cap and must pass under the raised cap.
+  const interior = validDraftObject();
+  interior.sample = "s".repeat(248);
+  assert.equal(validateGeneratedDraft(interior).ok, true);
 });
 
 test("validateGeneratedDraft few-shot guard: off-topic styled output rejected", () => {
