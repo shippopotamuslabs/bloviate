@@ -338,7 +338,7 @@ class StyleViewModelTest {
                     ),
                     initial.sections.map { section -> section.headerRes },
                 )
-                assertEquals(listOf(0, 4, 8, 4, 4, 5, 7), initial.sections.map { section -> section.styles.size })
+                assertEquals(listOf(0, 5, 8, 4, 4, 5, 7), initial.sections.map { section -> section.styles.size })
                 StyleCategory.entries.filter { category -> category != StyleCategory.CUSTOM }.forEachIndexed { index, category ->
                     val expectedIds = StyleCatalog.ALL
                         .filter { style -> style.category == category }

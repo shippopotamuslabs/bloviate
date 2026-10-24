@@ -6,6 +6,7 @@ import { buildStylePrompt } from "./stylePromptBuilder";
 const EXPECTED_IDS = [
   "polish",
   "professional",
+  "essayist",
   "cicero",
   "shakespeare",
   "hemingway",
@@ -36,8 +37,8 @@ const EXPECTED_IDS = [
   "the-colonel",
 ];
 
-test("catalog has exactly 30 styles in expected order", () => {
-  assert.equal(STYLE_CATALOG.length, 30);
+test("catalog has exactly 31 styles in expected order", () => {
+  assert.equal(STYLE_CATALOG.length, 31);
   assert.deepEqual([...LLM_STYLE_IDS], EXPECTED_IDS);
   assert.deepEqual(
     STYLE_CATALOG.map((s) => s.id),
