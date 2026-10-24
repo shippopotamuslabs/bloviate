@@ -551,6 +551,7 @@ object StyleCatalog {
         GenZBrainrotStyle,
         BelligerentStyle,
         EdgelordStyle,
+        AiPsychosisStyle,
         Genius,
         Aristotle,
         Seneca,
