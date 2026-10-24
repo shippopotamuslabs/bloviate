@@ -6,6 +6,7 @@ import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
 import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
@@ -22,6 +23,7 @@ import com.shippopotamus.bloviate.application.usecase.ObserveResidentPresenceUse
 import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStopUseCase
+import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
@@ -67,10 +69,28 @@ class MainViewModel @Inject constructor(
     private val setAutoStartEnabled: SetAutoStartEnabledUseCase,
     private val recordBubbleUserStart: RecordBubbleUserStartUseCase,
     private val recordBubbleUserStop: RecordBubbleUserStopUseCase,
-    observeAuthState: ObserveAuthStateUseCase,
+    private val observeAuthState: ObserveAuthStateUseCase,
     private val signInWithGoogle: SignInWithGoogleUseCase,
     private val signOut: SignOutUseCase,
+    private val refreshCustomStyles: RefreshCustomStylesUseCase,
 ) : ViewModel() {
+
+    init {
+        // Custom-styles sync (BLO-25 S4): refresh the account cache
+        // whenever the gate shows a signed-in user — a fresh sign-in and
+        // an already-signed-in process start alike (the StateFlow replays
+        // the current state to this collector). Fire-and-forget: the
+        // outcome stays in the use case, so a failed refresh never
+        // blocks the status screen or the sign-in flow.
+        viewModelScope.launch {
+            observeAuthState().collect { state ->
+                if (state is AuthState.Authenticated) {
+                    refreshCustomStyles()
+                }
+            }
+        }
+    }
+
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())

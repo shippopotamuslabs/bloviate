@@ -5,8 +5,10 @@ import com.shippopotamus.bloviate.domain.model.InsertionResult
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.StopResult
 import com.shippopotamus.bloviate.domain.model.RecordingSessionState
+import com.shippopotamus.bloviate.application.evaluator.StyleResolver
 import com.shippopotamus.bloviate.application.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
+import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
@@ -42,6 +44,7 @@ class BubbleRecordingControllerTest {
     private val fakeParakeetStore = FakeParakeetModelStorePort()
     private val fakeStylePreference = FakeStylePreferencePort()
     private val fakeLlm = FakeLlmStylePort()
+    private val fakeCustoms = FakeCustomStyleStorePort()
 
     private fun createController(
         scope: CoroutineScope,
@@ -54,6 +57,7 @@ class BubbleRecordingControllerTest {
                 local = fakePostProcessor,
                 stylePreference = fakeStylePreference,
                 llm = fakeLlm,
+                resolver = StyleResolver(store = fakeCustoms, scope = scope),
             ),
             transcriptSink = fakeSink,
             enginePreference = fakeEnginePreference,
