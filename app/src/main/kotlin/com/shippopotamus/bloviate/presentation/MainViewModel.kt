@@ -9,6 +9,7 @@ import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveAuthStateUseCase
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
@@ -25,6 +26,8 @@ import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCas
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
+import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
+import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -64,6 +67,9 @@ class MainViewModel @Inject constructor(
     private val setAutoStartEnabled: SetAutoStartEnabledUseCase,
     private val recordBubbleUserStart: RecordBubbleUserStartUseCase,
     private val recordBubbleUserStop: RecordBubbleUserStopUseCase,
+    observeAuthState: ObserveAuthStateUseCase,
+    private val signInWithGoogle: SignInWithGoogleUseCase,
+    private val signOut: SignOutUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
     private val overlayPermissionGranted = MutableStateFlow(isOverlayPermissionGranted())
@@ -77,18 +83,39 @@ class MainViewModel @Inject constructor(
         enabled to connected
     }
 
+    /**
+     * Transient sign-in surface state (ENC-197): in-flight flag plus
+     * the last failure's user-facing message. Not persisted — the
+     * auth gate itself is the live [observeAuthState] stream.
+     */
+    private val signInUi = MutableStateFlow(SignInUi())
+
+    /**
+     * Gate plus its surface state as one stream (ENC-197): folded
+     * together so the screen-wide combines keep five inputs each.
+     */
+    private val authAndSignIn = combine(observeAuthState(), signInUi) { authState, signIn ->
+        authState to signIn
+    }
+
     private val baseUiState: StateFlow<MainUiState> = combine(
         watcherSignals,
         overlayPermissionGranted,
         observeBubbleServiceRunning(),
         micPermissionGranted,
-    ) { (watcherOn, watcherConnected), overlayGranted, bubbleRunning, micGranted ->
+        authAndSignIn,
+    ) { watcherOnConnected, overlayGranted, bubbleRunning, micGranted, authStateSignIn ->
+        val (watcherOn, watcherConnected) = watcherOnConnected
+        val (authState, signIn) = authStateSignIn
         mapToUiState(
             watcherEnabled = watcherOn,
             watcherConnected = watcherConnected,
             overlayPermissionGranted = overlayGranted,
             bubbleServiceRunning = bubbleRunning,
             micPermissionGranted = micGranted,
+            auth = authState.toUi(),
+            isSigningIn = signIn.isSigningIn,
+            signInError = signIn.signInError,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -99,6 +126,9 @@ class MainViewModel @Inject constructor(
             overlayPermissionGranted = isOverlayPermissionGranted(),
             bubbleServiceRunning = observeBubbleServiceRunning().value,
             micPermissionGranted = isMicPermissionGranted(),
+            auth = observeAuthState().value.toUi(),
+            isSigningIn = signInUi.value.isSigningIn,
+            signInError = signInUi.value.signInError,
         ),
     )
 
@@ -118,7 +148,8 @@ class MainViewModel @Inject constructor(
         observeParakeetModelState(),
         observeEnginePreference(),
         appearancePresenceBattery,
-    ) { baseState, whisperState, parakeetState, engine, (appearance, presence, exempt) ->
+    ) { baseState, whisperState, parakeetState, engine, appearancePresenceExempt ->
+        val (appearance, presence, exempt) = appearancePresenceExempt
         baseState.copy(
             whisperModelStatus = mapModelStatus(whisperState),
             parakeetModelStatus = mapModelStatus(parakeetState),
@@ -238,6 +269,47 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Sign-in button tapped (ENC-197): runs the Credential Manager
+     * flow through the use case. Success flips the gate via the auth
+     * listener; a user dismissal stays silent; any other failure lands
+     * its user-facing message in the state until dismissed or retried.
+     */
+    fun onSignInClick() {
+        viewModelScope.launch {
+            signInUi.update { it.copy(isSigningIn = true, signInError = null) }
+            val result = signInWithGoogle()
+            signInUi.update {
+                it.copy(
+                    isSigningIn = false,
+                    signInError = result.exceptionOrNull()?.let { failure ->
+                        if (failure.isSignInDismissal()) {
+                            null
+                        } else {
+                            failure.toGoogleSignInMessage()
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    /** Dismisses the sign-in error line. */
+    fun onSignInErrorDismiss() {
+        signInUi.update { it.copy(signInError = null) }
+    }
+
+    /**
+     * Sign-out tapped in Setup (ENC-197): the auth listener flips the
+     * gate back to the sign-in screen. Fire-and-forget — the listener
+     * is the source of truth, not this call's result.
+     */
+    fun onSignOutClick() {
+        viewModelScope.launch {
+            signOut()
+        }
+    }
+
     /** Re-reads the system settings; called when the screen resumes after a settings detour. */
     fun onResumed() {
         watcherEnabled.update { isFieldWatcherEnabled() }
@@ -262,6 +334,9 @@ class MainViewModel @Inject constructor(
         overlayPermissionGranted: Boolean,
         bubbleServiceRunning: Boolean,
         micPermissionGranted: Boolean,
+        auth: AuthUi,
+        isSigningIn: Boolean,
+        signInError: String?,
     ): MainUiState =
         MainUiState(
             watcherEnabled = watcherEnabled,
@@ -269,6 +344,9 @@ class MainViewModel @Inject constructor(
             overlayPermissionGranted = overlayPermissionGranted,
             bubbleServiceRunning = bubbleServiceRunning,
             micPermissionGranted = micPermissionGranted,
+            auth = auth,
+            isSigningIn = isSigningIn,
+            signInError = signInError,
         )
 
     private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
@@ -311,3 +389,9 @@ class MainViewModel @Inject constructor(
         const val PERCENT_MAX = 100
     }
 }
+
+/** Transient sign-in surface state: never persisted (ENC-197). */
+private data class SignInUi(
+    val isSigningIn: Boolean = false,
+    val signInError: String? = null,
+)

@@ -20,3 +20,9 @@ local.properties
 /.idea
 /.kotlin
 **/.kotlin/
+
+# Release signing (local-only secrets and key material)
+keystore.properties
+.keystore/
+*.jks
+*.keystore

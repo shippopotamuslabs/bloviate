@@ -1,9 +1,38 @@
 package com.shippopotamus.bloviate.presentation
 
+import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
 import com.shippopotamus.bloviate.domain.model.BubbleTint
+
+/**
+ * Presentation-only mapping of the launcher auth gate (ENC-197): the
+ * sign-in screen shows unless [SignedIn]. Carries display strings only
+ * — never the domain [AuthState] or Firebase types.
+ */
+sealed interface AuthUi {
+
+    /** The cached session has not been read yet; the gate waits. */
+    data object Loading : AuthUi
+
+    /** No Google session: the launcher shows the sign-in screen. */
+    data object SignedOut : AuthUi
+
+    /** A Google-signed-in user: the launcher shows the app shell. */
+    data class SignedIn(
+        val displayName: String?,
+        val email: String?,
+    ) : AuthUi
+}
+
+internal fun AuthState.toUi(): AuthUi =
+    when (this) {
+        AuthState.Loading -> AuthUi.Loading
+        AuthState.Unauthenticated -> AuthUi.SignedOut
+        is AuthState.Authenticated ->
+            AuthUi.SignedIn(displayName = user.displayName, email = user.email)
+    }
 
 /** Presentation-only mapping of the user's selected dictation engine. */
 enum class DictationEngineUi {
@@ -213,4 +242,13 @@ data class MainUiState(
     val selectedEngine: DictationEngineUi = DictationEngineUi.PARAKEET,
     val engineFallback: EngineFallbackUi? = null,
     val bubbleAppearance: BubbleAppearanceUi = BubbleAppearanceUi(),
+
+    /** The launcher auth gate (ENC-197): sign-in screen unless [AuthUi.SignedIn]. */
+    val auth: AuthUi = AuthUi.Loading,
+
+    /** A sign-in attempt is in flight from the sign-in screen. */
+    val isSigningIn: Boolean = false,
+
+    /** The last sign-in failure's user-facing message, until dismissed or retried. */
+    val signInError: String? = null,
 )
