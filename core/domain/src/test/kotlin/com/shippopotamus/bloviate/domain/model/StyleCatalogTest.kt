@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test
 class StyleCatalogTest {
 
     @Test
-    fun `the catalog holds exactly thirty two styles`() {
-        assertEquals(32, StyleCatalog.ALL.size)
+    fun `the catalog holds exactly thirty three styles`() {
+        assertEquals(33, StyleCatalog.ALL.size)
     }
 
     @Test
@@ -18,6 +18,7 @@ class StyleCatalogTest {
             "normal-caps-casual" to StyleCategory.SERIOUS,
             "polish" to StyleCategory.SERIOUS,
             "professional" to StyleCategory.SERIOUS,
+            "essayist" to StyleCategory.SERIOUS,
             "cicero" to StyleCategory.PHILOSOPHERS,
             "aristotle" to StyleCategory.PHILOSOPHERS,
             "seneca" to StyleCategory.PHILOSOPHERS,
@@ -52,7 +53,7 @@ class StyleCatalogTest {
             assertEquals(expected.getValue(style.id), style.category, "style ${style.id} is miscategorized")
         }
         assertEquals(
-            listOf(0, 4, 8, 4, 4, 5, 7),
+            listOf(0, 5, 8, 4, 4, 5, 7),
             StyleCategory.entries.map { category ->
                 StyleCatalog.ALL.count { style -> style.category == category }
             },
