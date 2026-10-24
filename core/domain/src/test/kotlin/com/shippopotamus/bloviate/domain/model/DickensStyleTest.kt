@@ -124,6 +124,36 @@ class DickensStyleTest {
     }
 
     @Test
+    fun `dickens few-shots exercise licensed invention without inventing facts`() {
+        // BLO-158 licensed-invention pin: a non-SERIOUS style's examples
+        // may add atmospheric texture absent from the raw side — the
+        // parliament of pigeons was never dictated — while carrying no
+        // invented number, date, name, or quote, and keeping every stated
+        // fact (park, phone, battery) intact.
+        val casual = DickensStyle.fewShots.first { shot -> shot.raw.contains("phone") }
+
+        assertTrue(
+            casual.styled.contains("parliament"),
+            "dickens added no atmospheric texture: ${casual.styled}",
+        )
+        assertTrue(
+            !casual.raw.contains("parliament"),
+            "the texture word was already in the raw side",
+        )
+        assertTrue(casual.styled.contains("park"), "dickens dropped the park: ${casual.styled}")
+        assertTrue(casual.styled.contains("phone"), "dickens renamed the phone: ${casual.styled}")
+        assertTrue(casual.styled.contains("battery"), "dickens dropped the battery: ${casual.styled}")
+        assertTrue(
+            casual.styled.none { char -> char.isDigit() },
+            "dickens invented a number: ${casual.styled}",
+        )
+        assertTrue(
+            !casual.styled.contains("\""),
+            "dickens invented a quote: ${casual.styled}",
+        )
+    }
+
+    @Test
     fun `dickens first-person fixtures stay in the first person`() {
         DickensStyle.fewShots.forEach { shot ->
             if (FIRST_PERSON.containsMatchIn(shot.raw)) {

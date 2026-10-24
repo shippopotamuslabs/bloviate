@@ -258,6 +258,102 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `every style's prompt carries the tier-1 facts clause`() {
+        // BLO-158 two-tier facts rule, tier 1: universal, every style —
+        // never change or contradict a stated fact.
+        StyleCatalog.ALL.forEach { style ->
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+
+            assertTrue(
+                prompt.system.content.contains("FACTS ARE NOT THE JOKE"),
+                "${style.id} system message lacks the tier-1 facts clause",
+            )
+            assertTrue(
+                prompt.system.content.contains("A changed fact is never the joke"),
+                "${style.id} system message lacks the changed-fact line",
+            )
+        }
+    }
+
+    @Test
+    fun `serious styles ban invention while every other style licenses it`() {
+        // BLO-158 two-tier facts rule, tier 2: SERIOUS styles never ADD
+        // facts either — the transcript is the whole universe. Every
+        // other category (CUSTOM included) takes the licensed-invention
+        // branch instead, under the two stated limits.
+        listOf("polish", "professional", "essayist", "lowercase-casual", "normal-caps-casual").forEach { id ->
+            val style = StyleCatalog.byId(id)
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+
+            assertTrue(
+                prompt.system.content.contains("SERIOUS MEANS SERIOUS"),
+                "$id system message lacks the tier-2 invention ban",
+            )
+            assertTrue(
+                prompt.system.content.contains("The transcript is the whole universe"),
+                "$id system message lacks the whole-universe line",
+            )
+            assertTrue(
+                !prompt.system.content.contains("LICENSED INVENTION"),
+                "$id system message carries the license branch",
+            )
+        }
+        // One specimen per non-SERIOUS category: seneca
+        // (PHILOSOPHERS), dickens (WRITERS), talkie (ERAS_AND_GENRES),
+        // attenborough (PERSONAS), corporate-linkedin (MODERN_PARODY).
+        listOf("seneca", "dickens", "talkie", "attenborough", "corporate-linkedin").forEach { id ->
+            val style = StyleCatalog.byId(id)
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+
+            assertTrue(
+                prompt.system.content.contains("LICENSED INVENTION"),
+                "$id system message lacks the licensed-invention clause",
+            )
+            assertTrue(
+                prompt.system.content.contains("(a) nothing added contradicts a stated fact"),
+                "$id system message lacks license limit (a)",
+            )
+            assertTrue(
+                prompt.system.content.contains("(b) nothing added impersonates a stated fact"),
+                "$id system message lacks license limit (b)",
+            )
+            assertTrue(
+                !prompt.system.content.contains("SERIOUS MEANS SERIOUS"),
+                "$id system message carries the tier-2 ban",
+            )
+        }
+    }
+
+    @Test
+    fun `fact clauses ride ahead of the only-text rule`() {
+        // BLO-158: the only-text instruction stays final in the system
+        // message — the fact clauses land before it, never after.
+        listOf("professional", "dickens").forEach { id ->
+            val style = StyleCatalog.byId(id)
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+            val onlyTextAt = prompt.system.content.indexOf("Return ONLY the transformed text")
+
+            assertTrue(onlyTextAt >= 0, "$id system message lost the only-text rule")
+            assertTrue(
+                prompt.system.content.indexOf("FACTS ARE NOT THE JOKE") < onlyTextAt,
+                "$id tier-1 clause does not precede the only-text rule",
+            )
+        }
+        val serious = builder.build(style = StyleCatalog.byId("professional"), transcript = TRANSCRIPT)
+        assertTrue(
+            serious.system.content.indexOf("SERIOUS MEANS SERIOUS") <
+                serious.system.content.indexOf("Return ONLY the transformed text"),
+            "tier-2 clause does not precede the only-text rule",
+        )
+        val licensed = builder.build(style = StyleCatalog.byId("dickens"), transcript = TRANSCRIPT)
+        assertTrue(
+            licensed.system.content.indexOf("LICENSED INVENTION") <
+                licensed.system.content.indexOf("Return ONLY the transformed text"),
+            "license clause does not precede the only-text rule",
+        )
+    }
+
+    @Test
     fun `prompt carries no field or app context`() {
         val prompt = builder.build(style = professional, transcript = "plain words")
 

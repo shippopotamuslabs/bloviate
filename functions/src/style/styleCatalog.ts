@@ -8,6 +8,7 @@
 export type FewShot = { raw: string; styled: string };
 export type StyleDefinition = {
   id: string;
+  category: string;
   displayName: string;
   description: string;
   sample: string;
@@ -17,6 +18,7 @@ export type StyleDefinition = {
 export const STYLE_CATALOG: StyleDefinition[] = [
   {
     id: "polish",
+    category: "serious",
     displayName: "Polish",
     description: "Light-touch cleanup — fillers and false starts out, your voice intact.",
     sample: "Yeah so I was thinking we could just grab dinner tomorrow.",
@@ -30,6 +32,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "professional",
+    category: "serious",
     displayName: "Professional",
     description: "Crisp, polished, ready to send.",
     sample: "Following up on our discussion, I propose we meet tomorrow.",
@@ -41,6 +44,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "essayist",
+    category: "serious",
     displayName: "Essayist",
     description: "Book-quality literary prose — your argument at full strength.",
     sample: "Yesterday evening I walked to the park, and what I truly think finally came clear.",
@@ -53,6 +57,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "cicero",
+    category: "philosophers",
     displayName: "Cicero",
     description: "Tricolons, anaphora, and rhetorical questions building to thunder.",
     sample: "I went to the store, I bought the bread, I came home — and what a triumph was that small errand!",
@@ -65,6 +70,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "shakespeare",
+    category: "writers",
     displayName: "Shakespeare",
     description: "Early Modern English, grammatically true — thou, thee, and blank-verse music.",
     sample: "Good morrow to this grey forenoon: my coffee smoketh beside me, and I am well content.",
@@ -77,6 +83,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "hemingway",
+    category: "writers",
     displayName: "Hemingway",
     description: "Short true sentences — plain words, and nothing extra.",
     sample: "I woke early and the coffee was hot. It was a good morning.",
@@ -89,6 +96,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "dickens",
+    category: "writers",
     displayName: "Dickens",
     description: "Rolling periods, moral weather, and comic sketches of ordinary life.",
     sample: "The fog lay thick over the morning bus queue, and every soul in it clutched a small warm hope of being on time.",
@@ -101,6 +109,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "noir-detective",
+    category: "eras_and_genres",
     displayName: "Noir Detective",
     description: "Hard-boiled first-person case narration — laconic, world-weary, similes like cheap whiskey.",
     sample: "The coffee was cold, the rain kept its own counsel, and Tuesday had an alibi.",
@@ -113,6 +122,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "attenborough",
+    category: "personas",
     displayName: "Attenborough",
     description: "Hushed nature-documentary wonder at ordinary moments.",
     sample: "And here I am, in the soft light of morning, drawn — as ever — toward the kettle.",
@@ -125,6 +135,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "drill-sergeant",
+    category: "personas",
     displayName: "Drill Sergeant",
     description: "Clipped parade-ground commands — move move move, Sergeant judges, you report.",
     sample: "Up! Boots on! Bed made! Move move move!",
@@ -137,6 +148,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "town-crier",
+    category: "personas",
     displayName: "Town Crier",
     description: "Public proclamation cadence for your own news — dates and lists cried, never framed.",
     sample: "On Friday the shop shuts at noon, and three parcels wait at the counter — mark it plain and mark it true.",
@@ -149,6 +161,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "pirate",
+    category: "eras_and_genres",
     displayName: "Pirate",
     description: "Age-of-sail vernacular for everyday life — nautical metaphors, shipshape grammar, arr strictly rationed.",
     sample: "The traffic lay becalmed on the highway, so I trimmed my sails and waited for the tide to turn.",
@@ -161,6 +174,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "corporate-linkedin",
+    category: "modern_parody",
     displayName: "Corporate LinkedIn",
     description: "Thought-leadership humble-brag — every setback is a lesson, every lesson is a hashtag.",
     sample: "I am humbled to announce I spilled coffee on my shirt this morning. Here is what it taught me about resilience.",
@@ -173,6 +187,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "ultra-hr",
+    category: "modern_parody",
     displayName: "Ultra HR",
     description: "Holding space for a more inclusive restyle of your message.",
     sample: "Just circling back to hold space for a kinder framing of this deadline.",
@@ -185,6 +200,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "silicon-valley-bro",
+    category: "modern_parody",
     displayName: "Silicon Valley Bro",
     description: "Shipping apps, lifting heavy, bootstrapping the dream.",
     sample: "Just a guy in South Carolina shipping apps, hitting the gym, and turning a goofy voice transcriber into a real business.",
@@ -198,6 +214,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "legal-contract",
+    category: "modern_parody",
     displayName: "Legal Contract",
     description: "Every errand an obligation — whereas-clauses, hereinafters, and defined terms.",
     sample: "WHEREAS the undersigned requires milk, NOW THEREFORE the Party shall procure two gallons by Tuesday, time being of the essence.",
@@ -210,6 +227,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "academic-jargon",
+    category: "modern_parody",
     displayName: "Academic Jargon",
     description: "Dense postmodern seminar prose — problematises, interrogates, and never quite says the thing.",
     sample: "The Tuesday coffee run with Priya thus emerges as a privileged site of caffeinated sociality.",
@@ -222,6 +240,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "gen-z-brainrot",
+    category: "modern_parody",
     displayName: "Gen Z Brainrot",
     description: "Chronically-online meme-lexicon chaos with the facts intact.",
     sample: "went to the store for milk no cap, aura intact, the lore stays unmatched",
@@ -234,6 +253,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "belligerent",
+    category: "personas",
     displayName: "Belligerent",
     description: "Loud, profane bar-stool rant — aggrieved, blaming, zero self-awareness.",
     sample: "ARE YOU KIDDING ME?! I paid the damn meter and those bastards towed my car anyway!",
@@ -246,6 +266,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "edgelord",
+    category: "modern_parody",
     displayName: "Edgelord",
     description: "Deliberately shocking, deadpan, and proud of it.",
     sample: "They moved the meeting to three. Three. A war crime with a calendar invite.",
@@ -258,6 +279,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "genius",
+    category: "personas",
     displayName: "Genius",
     description: "Precise, erudite, faintly condescending.",
     sample: "The proposition, while superficially plausible, collapses under scrutiny.",
@@ -269,6 +291,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "aristotle",
+    category: "philosophers",
     displayName: "Aristotle",
     description: "Definitions, distinctions, and first causes.",
     sample: "Let us distinguish: a meeting deliberates; a message informs. This was a message.",
@@ -282,6 +305,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "seneca",
+    category: "philosophers",
     displayName: "Seneca",
     description: "Stoic letters on time, anger, and fortune.",
     sample: "I have the time. I am the one who gives it away.",
@@ -295,6 +319,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "marcus-aurelius",
+    category: "philosophers",
     displayName: "Marcus Aurelius",
     description: "Meditations to yourself, terse and spare.",
     sample: "Begin. The obstacle is the work; do the work.",
@@ -308,6 +333,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "socrates",
+    category: "philosophers",
     displayName: "Socrates",
     description: "Questions, definitions tested, and ignorance honestly confessed.",
     sample: "I say I am too busy. But do I know what busy means, or only that I repeat it?",
@@ -321,6 +347,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "plato",
+    category: "philosophers",
     displayName: "Plato",
     description: "Shadows, Forms, and the sun outside the cave.",
     sample: "I speak of meetings, yet have I ever seen the Meeting itself?",
@@ -334,6 +361,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "aquinas",
+    category: "philosophers",
     displayName: "Aquinas",
     description: "Objections heard, authorities weighed, the question settled.",
     sample: "It seems the standup is useless. On the contrary…",
@@ -347,6 +375,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "augustine",
+    category: "philosophers",
     displayName: "Augustine",
     description: "Confession, memory, and a restless heart honestly examined.",
     sample: "I did it for no gain at all. I loved the fault itself — that is the confession.",
@@ -360,6 +389,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "oscar-wilde",
+    category: "writers",
     displayName: "Oscar Wilde",
     description: "Epigrams, paradoxes, and devastating politeness.",
     sample: "To miss one meeting is a misfortune; to miss two looks like carelessness.",
@@ -371,6 +401,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "talkie",
+    category: "eras_and_genres",
     displayName: "Transatlantic",
     description: "Bright 1920s American vernacular — period words, period structure, the broadsheet's written voice.",
     sample: "Say, I am feeling in the pink today, so let us cut a rug tonight — everything is copacetic, see?",
@@ -384,6 +415,7 @@ export const STYLE_CATALOG: StyleDefinition[] = [
   },
   {
     id: "the-colonel",
+    category: "eras_and_genres",
     displayName: "The Colonel",
     description: "Courtly, periodic, unhurried — the old Southern written voice.",
     sample: "I am most grateful for the news, and I shall attend to the matter in due course.",
