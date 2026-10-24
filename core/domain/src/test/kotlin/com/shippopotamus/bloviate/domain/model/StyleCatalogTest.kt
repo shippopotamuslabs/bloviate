@@ -52,11 +52,19 @@ class StyleCatalogTest {
             assertEquals(expected.getValue(style.id), style.category, "style ${style.id} is miscategorized")
         }
         assertEquals(
-            listOf(4, 8, 4, 4, 5, 7),
+            listOf(0, 4, 8, 4, 4, 5, 7),
             StyleCategory.entries.map { category ->
                 StyleCatalog.ALL.count { style -> style.category == category }
             },
         )
+    }
+
+    @Test
+    fun `the custom category holds no built-in styles`() {
+        // ENC-199: CUSTOM leads the display order for the user's own
+        // styles; the built-in catalog leaves it empty.
+        assertEquals(StyleCategory.CUSTOM, StyleCategory.entries.first())
+        assertTrue(StyleCatalog.ALL.none { style -> style.category == StyleCategory.CUSTOM })
     }
 
     @Test

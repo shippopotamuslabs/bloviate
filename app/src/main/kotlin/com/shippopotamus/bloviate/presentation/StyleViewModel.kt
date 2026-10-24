@@ -55,6 +55,7 @@ class StyleViewModel @Inject constructor(
         )
 
     private fun StyleCategory.toHeaderRes(): Int = when (this) {
+        StyleCategory.CUSTOM -> R.string.style_section_custom
         StyleCategory.SERIOUS -> R.string.style_section_serious
         StyleCategory.PHILOSOPHERS -> R.string.style_section_philosophers
         StyleCategory.WRITERS -> R.string.style_section_writers
