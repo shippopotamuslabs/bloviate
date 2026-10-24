@@ -322,6 +322,27 @@ class BloviateThemeTest {
     }
 
     @Test
+    fun `glass top bar token wears bg-base at 65 percent with a 24dp blur (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(24.dp, ShippopotamusHazeTopBar.blurRadius)
+        assertEquals(BloviatePalette.BgBase.copy(alpha = 0.65f), ShippopotamusHazeTopBar.tint)
+        assertEquals(0.5f, ShippopotamusHazeTopBar.noiseFactor)
+    }
+
+    @Test
+    fun `glass bottom bar token wears surface-1 at 75 percent with a 20dp blur (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(20.dp, ShippopotamusHazeBottomBar.blurRadius)
+        assertEquals(BloviatePalette.Surface1.copy(alpha = 0.75f), ShippopotamusHazeBottomBar.tint)
+        assertEquals(0.5f, ShippopotamusHazeBottomBar.noiseFactor)
+    }
+
+    @Test
+    fun `glass sheet token is the heavy blur since HazeStyle_Thick has no 2_x equivalent (BLO-2, UI_DESIGN_SPEC 6_9)`() {
+        assertEquals(28.dp, ShippopotamusHazeSheet.blurRadius)
+        assertEquals(BloviatePalette.Surface3.copy(alpha = 0.75f), ShippopotamusHazeSheet.tint)
+        assertEquals(0.5f, ShippopotamusHazeSheet.noiseFactor)
+    }
+
+    @Test
     fun `extended colors expose the tokens material has no role for`() {
         val extended = GospelExtendedColors
         assertEquals(BloviatePalette.BgSubtle, extended.bgSubtle)
