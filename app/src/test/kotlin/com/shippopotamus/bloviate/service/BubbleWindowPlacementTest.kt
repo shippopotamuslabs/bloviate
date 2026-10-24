@@ -3,6 +3,8 @@ package com.shippopotamus.bloviate.service
 import android.content.Context
 import android.view.View
 import android.view.WindowManager
+import com.shippopotamus.bloviate.domain.evaluator.BubblePositionMath
+import com.shippopotamus.bloviate.domain.model.BubblePixelPosition
 import com.shippopotamus.bloviate.domain.model.BubblePosition
 import com.shippopotamus.bloviate.domain.model.RecordingBarState
 import com.shippopotamus.bloviate.domain.model.ScreenBounds
@@ -152,17 +154,109 @@ class BubbleWindowPlacementTest {
     }
 
     @Test
-    fun `a drag end reported in bar form persists nothing and moves nothing`() {
+    fun `a bar-form drag end persists the shifted anchor and pushes no layout`() {
+        // BLO-152: the recording row drags again. The drag controller
+        // already moved the window (left 100, down 100 from the placed
+        // spot); the anchor follows by that same displacement.
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        assertEquals(BAR_REST_X, params.x)
+        pushes.clear()
+        params.x = BAR_REST_X - DRAG_DX_PX
+        params.y = DOCK_Y + DRAG_DY_PX
+
+        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
+
+        val expectedAnchor = BubblePixelPosition(xPx = DOCK_X - DRAG_DX_PX, yPx = DOCK_Y + DRAG_DY_PX)
+        val expected = BubblePositionMath.toNormalized(
+            topLeft = expectedAnchor,
+            bubbleWidthPx = BUBBLE_PX,
+            bubbleHeightPx = BUBBLE_PX,
+            bounds = BOUNDS,
+        )
+        assertEquals(listOf(expected), savedPositions)
+        assertEquals(expected, placement.restingPosition)
+        assertTrue(pushes.isEmpty(), "a bar-form drag end must not push layout, got $pushes")
+        assertEquals(BAR_REST_X - DRAG_DX_PX, params.x)
+        assertEquals(DOCK_Y + DRAG_DY_PX, params.y)
+    }
+
+    @Test
+    fun `exiting bar form after a drag restores the dragged spot`() {
         dockRight()
         placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
         pushes.clear()
-        val placedX = params.x
+        params.x = BAR_REST_X - DRAG_DX_PX
+        params.y = DOCK_Y + DRAG_DY_PX
+        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
+        pushes.clear()
+
+        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
+
+        assertEquals(DOCK_X - DRAG_DX_PX, params.x)
+        assertEquals(DOCK_Y + DRAG_DY_PX, params.y)
+        assertEquals(DOCK_X - DRAG_DX_PX to DOCK_Y + DRAG_DY_PX, pushes.last())
+    }
+
+    @Test
+    fun `a left-side bar-form drag persists the shifted anchor and restores it on exit`() {
+        placement.restingPosition = BubblePosition(xFraction = 0f, yFraction = 0.5f)
+        params.x = 0
+        params.y = DOCK_Y
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        assertTrue(pushes.isEmpty(), "left dock unfolds rightward from the anchor with no push")
+        params.x = DRAG_DX_PX
+        params.y = DOCK_Y - DRAG_DY_PX
+
+        placement.onDragEnded(position = BubblePosition(xFraction = 1f, yFraction = 1f), bounds = BOUNDS)
+
+        val expectedAnchor = BubblePixelPosition(xPx = DRAG_DX_PX, yPx = DOCK_Y - DRAG_DY_PX)
+        val expected = BubblePositionMath.toNormalized(
+            topLeft = expectedAnchor,
+            bubbleWidthPx = BUBBLE_PX,
+            bubbleHeightPx = BUBBLE_PX,
+            bounds = BOUNDS,
+        )
+        assertEquals(listOf(expected), savedPositions)
+        assertEquals(expected, placement.restingPosition)
+
+        pushes.clear()
+        placement.onBarStateChanged(RecordingBarState.Idle, bounds = BOUNDS)
+
+        assertEquals(DRAG_DX_PX, params.x)
+        assertEquals(DOCK_Y - DRAG_DY_PX, params.y)
+    }
+
+    @Test
+    fun `a bar-form drag end with zero displacement persists nothing`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        pushes.clear()
 
         placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
 
         assertTrue(savedPositions.isEmpty())
         assertTrue(pushes.isEmpty())
-        assertEquals(placedX, params.x)
+        assertEquals(BAR_REST_X, params.x)
+    }
+
+    @Test
+    fun `recording to processing after a drag re-places from the dragged anchor without yanking`() {
+        dockRight()
+        placement.onBarStateChanged(RecordingBarState.Recording(elapsedMs = 0L), bounds = BOUNDS)
+        params.x = BAR_REST_X - DRAG_DX_PX
+        params.y = DOCK_Y + DRAG_DY_PX
+        placement.onDragEnded(position = BubblePosition(xFraction = 0f, yFraction = 0f), bounds = BOUNDS)
+        pushes.clear()
+
+        placement.onBarStateChanged(RecordingBarState.Transcribing, bounds = BOUNDS)
+
+        // From the dragged anchor (812, 1216): expand-left ideal is
+        // 812 + 168 - 300 = 680, which fits, so the row lands at 680 —
+        // not back at the undisplaced 756.
+        assertEquals(1, pushes.size)
+        assertEquals(DRAGGED_PROCESSING_X, params.x)
+        assertEquals(DOCK_Y + DRAG_DY_PX, params.y)
     }
 
     @Test
@@ -212,6 +306,9 @@ class BubbleWindowPlacementTest {
         const val BAR_REST_X: Int = 416
         const val REST_X: Int = 319
         const val REST_Y: Int = 893
+        const val DRAG_DX_PX: Int = 100
+        const val DRAG_DY_PX: Int = 100
+        const val DRAGGED_PROCESSING_X: Int = 680
         val BOUNDS = ScreenBounds(widthPx = 1080, heightPx = 2400)
     }
 }
