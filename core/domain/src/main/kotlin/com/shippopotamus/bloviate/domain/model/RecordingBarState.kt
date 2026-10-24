@@ -57,4 +57,27 @@ sealed interface RecordingBarState {
 
     /** Something failed (or a tap landed while the session is unavailable); brief error flash. */
     data object Error : RecordingBarState
+
+    /**
+     * Why the bubble names an unstyled insert instead of showing the
+     * plain [Done] check (BLO-147): cloud styling fell back for a reason
+     * worth telling the user about. Transient transport trouble stays
+     * silent — only entitlement and sign-in causes surface.
+     */
+    enum class StyleFallbackNotice {
+        /** The style call was refused: no entitlement for cloud styling. */
+        SUBSCRIPTION_REQUIRED,
+
+        /** No signed-in user: the style call never ran. */
+        SIGN_IN_REQUIRED,
+    }
+
+    /**
+     * The text was inserted, but the cloud style pass fell back for a
+     * [notice] cause — so instead of the plain [Done] check, the bubble
+     * shows a brief labeled pill naming what happened. Dictation is
+     * never blocked: the raw text is already in the field. Transient
+     * failures (no network, timed out) land on [Done] as before.
+     */
+    data class NotStyled(val notice: StyleFallbackNotice) : RecordingBarState
 }

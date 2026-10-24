@@ -56,8 +56,9 @@ import kotlinx.coroutines.withContext
  * on success, when the Error window elapses, when the host field is left,
  * and after the single retry is spent.
  *
- * Done and Error are transient: the controller returns them to Idle on a
- * timer ([DONE_DISPLAY_MS] / [ERROR_DISPLAY_MS]), and the overlay
+ * Done, Error, and NotStyled are transient: the controller returns them
+ * to Idle on a timer ([DONE_DISPLAY_MS] / [ERROR_DISPLAY_MS] /
+ * [NOT_STYLED_DISPLAY_MS]), and the overlay
  * composition reports its own display-window elapse through
  * [onTransientStateElapsed] as a backstop — whichever fires first wins.
  *
@@ -84,6 +85,7 @@ class BubbleRecordingController(
     private val workDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val doneDisplayMs: Long = DONE_DISPLAY_MS,
     private val errorDisplayMs: Long = ERROR_DISPLAY_MS,
+    private val notStyledDisplayMs: Long = NOT_STYLED_DISPLAY_MS,
     private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
     private val isEngineWarming: () -> Boolean = { false },
 ) {
@@ -263,6 +265,7 @@ class BubbleRecordingController(
                 }
                 RecordingBarState.Idle,
                 is RecordingBarState.Done,
+                is RecordingBarState.NotStyled,
                 RecordingBarState.Error,
                 -> Unit
             }
@@ -303,6 +306,7 @@ class BubbleRecordingController(
             }
             RecordingBarState.Idle,
             is RecordingBarState.Done,
+            is RecordingBarState.NotStyled,
             -> {
                 Log.d(TAG, "Host hidden by a non-password cause while the bar is $bar")
                 mutableBarState.update { RecordingBarState.Idle }
@@ -479,7 +483,11 @@ class BubbleRecordingController(
                 Log.w(TAG, "Auto-finished recording arrived while a send is already running; ignoring the duplicate")
                 return@collect
             }
-            if (bar is RecordingBarState.Done || bar is RecordingBarState.Error) {
+            if (
+                bar is RecordingBarState.Done ||
+                bar is RecordingBarState.NotStyled ||
+                bar is RecordingBarState.Error
+            ) {
                 Log.w(TAG, "Auto-finished recording arrived after the send finished; ignoring")
                 return@collect
             }
@@ -570,7 +578,20 @@ class BubbleRecordingController(
             when (result) {
                 is InsertionResult.Inserted -> {
                     retainedSamples = null
-                    showDone(autoFinish = autoFinish)
+                    // BLO-147: the raw text is in the field either way —
+                    // but when styling fell back for an entitlement or
+                    // sign-in cause, the bubble names it instead of the
+                    // plain Done check. Transport trouble stays silent.
+                    val notice = if (styled.fellBack) {
+                        styleFallbackNotice(styled.fellBackReason)
+                    } else {
+                        null
+                    }
+                    if (notice != null) {
+                        showNotStyled(notice)
+                    } else {
+                        showDone(autoFinish = autoFinish)
+                    }
                 }
                 is InsertionResult.Refused -> {
                     Log.w(TAG, "Insertion refused: ${result.reason}")
@@ -627,6 +648,18 @@ class BubbleRecordingController(
         scheduleReset(errorDisplayMs)
     }
 
+    /**
+     * BLO-147: the insert landed but the style pass fell back for a
+     * [notice] cause. Same transient shape as [showDone], with a longer
+     * window — the pill carries a sentence, not a check, so it stays up
+     * long enough to read.
+     */
+    private fun showNotStyled(notice: RecordingBarState.StyleFallbackNotice) {
+        mutableBarState.update { RecordingBarState.NotStyled(notice) }
+        Log.d(TAG, "Send finished unstyled; showing the fallback notice ($notice)")
+        scheduleReset(notStyledDisplayMs)
+    }
+
     /** Done/Error are transient: fall back to the mic bubble after their display window. */
     private fun scheduleReset(delayMs: Long) {
         cancelResetJob()
@@ -639,7 +672,11 @@ class BubbleRecordingController(
     /** Transient states (Done/Error) fall back to the mic bubble; anything else is left alone. */
     private fun returnToIdleIfTransient() {
         val bar = mutableBarState.value
-        if (bar is RecordingBarState.Done || bar == RecordingBarState.Error) {
+        if (
+            bar is RecordingBarState.Done ||
+            bar is RecordingBarState.NotStyled ||
+            bar == RecordingBarState.Error
+        ) {
             if (bar == RecordingBarState.Error) {
                 // The retry window has closed; the retained buffer's
                 // lifetime (§5.3: "long enough for one retry tap") is over.
@@ -668,5 +705,27 @@ class BubbleRecordingController(
         const val TRANSCRIPT_PREVIEW_CHARS: Int = 40
         const val DONE_DISPLAY_MS: Long = 1_200L
         const val ERROR_DISPLAY_MS: Long = 1_500L
+
+        /**
+         * Display window for the [RecordingBarState.NotStyled] pill
+         * (BLO-147): longer than Done — the pill carries a sentence, not
+         * a check, so it stays up long enough to read.
+         */
+        const val NOT_STYLED_DISPLAY_MS: Long = 3_000L
+
+        /**
+         * Maps a style fallback reason onto the notice the bubble shows
+         * (BLO-147). Only entitlement and sign-in causes surface — every
+         * other reason (transport trouble, quota, unknown codes) stays
+         * silent on Done, so a transient outage never nags.
+         */
+        fun styleFallbackNotice(reason: String?): RecordingBarState.StyleFallbackNotice? =
+            when (reason) {
+                "permission-denied" ->
+                    RecordingBarState.StyleFallbackNotice.SUBSCRIPTION_REQUIRED
+                "no-auth" ->
+                    RecordingBarState.StyleFallbackNotice.SIGN_IN_REQUIRED
+                else -> null
+            }
     }
 }

@@ -779,22 +779,41 @@ class BubbleOverlayService : Service() {
                 } else {
                     R.string.bubble_stage_polishing
                 }
-                val paint = Paint().apply {
-                    textSize = TypedValue.applyDimension(
-                        TypedValue.COMPLEX_UNIT_SP,
-                        PROCESSING_LABEL_TEXT_SIZE_SP,
-                        resources.displayMetrics,
-                    )
+                (measurePillTextPx(getString(labelRes), density)).roundToInt()
+            }
+            is RecordingBarState.NotStyled -> {
+                // BLO-147: same hugging pill as the processing states, so
+                // the one-shot placement measures the same way — the
+                // notice text plus the s24 insets.
+                val labelRes = requireNotNull(state.notStyledTextRes()) {
+                    "Every not-styled notice carries pill text: $state"
                 }
-                val textWidthPx = paint.measureText(getString(labelRes))
-                val paddingPx = (BloviateSpacing.s24 * 2).value * density
-                (textWidthPx + paddingPx).roundToInt()
+                (measurePillTextPx(getString(labelRes), density)).roundToInt()
             }
             RecordingBarState.Idle,
             is RecordingBarState.Done,
             RecordingBarState.Error,
             -> 0
         }
+    }
+
+    /**
+     * Width of a hugging pill label (ENC-167): the label measured at the
+     * labelLarge size plus the s24 insets each side. Shared by the
+     * processing pill and the BLO-147 not-styled pill, which hug the same
+     * way.
+     */
+    private fun measurePillTextPx(label: String, density: Float): Float {
+        val paint = Paint().apply {
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                PROCESSING_LABEL_TEXT_SIZE_SP,
+                resources.displayMetrics,
+            )
+        }
+        val textWidthPx = paint.measureText(label)
+        val paddingPx = (BloviateSpacing.s24 * 2).value * density
+        return textWidthPx + paddingPx
     }
 
     private fun createLayoutParams(): WindowManager.LayoutParams =
