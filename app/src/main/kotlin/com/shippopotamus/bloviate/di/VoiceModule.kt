@@ -14,7 +14,6 @@ import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
-import com.shippopotamus.bloviate.data.FirebaseAuthSession
 import com.shippopotamus.bloviate.data.FirebaseStyleClient
 import com.shippopotamus.bloviate.data.FirebaseStyleFunctionGateway
 import com.shippopotamus.bloviate.data.StyleFunctionGateway
@@ -89,9 +88,6 @@ abstract class VoiceModule {
 
     @Binds
     abstract fun bindStylePreferencePort(store: DataStoreStylePreferenceStore): StylePreferencePort
-
-    @Binds
-    abstract fun bindAuthSessionPort(session: FirebaseAuthSession): AuthSessionPort
 
     @Binds
     abstract fun bindStyleFunctionGateway(gateway: FirebaseStyleFunctionGateway): StyleFunctionGateway

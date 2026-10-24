@@ -1,31 +1,52 @@
 package com.shippopotamus.bloviate
 
+import android.app.Activity
 import android.app.Application
-import android.util.Log
-import com.shippopotamus.bloviate.application.port.AuthSessionPort
+import android.os.Bundle
+import com.shippopotamus.bloviate.data.SignInHostContext
 import dagger.hilt.android.HiltAndroidApp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
 class BloviateApplication : Application() {
 
+    /**
+     * Credential Manager needs a foreground Activity context (ENC-197).
+     * The composition root owns that wiring — not the activity — so
+     * `presentation/` never imports `data/`: lifecycle callbacks attach
+     * the resumed activity as sign-in host and release it on destroy.
+     *
+     * Startup performs no sign-in of any kind: the launcher UI gates on
+     * the live auth state, and anonymous sessions are never created.
+     */
     @Inject
-    lateinit var authSession: AuthSessionPort
+    lateinit var signInHostContext: SignInHostContext
 
     override fun onCreate() {
         super.onCreate()
-        // Fire-and-forget anonymous sign-in (ENC-151) so the first style
-        // call does not pay it. The uid is logged once so Sean can
-        // hand-write his Firestore entitlement override doc for dogfooding.
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            val uid = authSession.ensureSignedIn()
-            if (uid != null) {
-                Log.d("BloviateAuth", "anonymous uid=" + uid)
-            }
+        registerActivityLifecycleCallbacks(SignInHostCallbacks(signInHostContext))
+    }
+
+    private class SignInHostCallbacks(
+        private val hostContext: SignInHostContext,
+    ) : ActivityLifecycleCallbacks {
+
+        override fun onActivityResumed(activity: Activity) {
+            hostContext.attach(activity)
         }
+
+        override fun onActivityDestroyed(activity: Activity) {
+            hostContext.detach(activity)
+        }
+
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+
+        override fun onActivityStarted(activity: Activity) = Unit
+
+        override fun onActivityPaused(activity: Activity) = Unit
+
+        override fun onActivityStopped(activity: Activity) = Unit
+
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
     }
 }
