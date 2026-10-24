@@ -30,6 +30,12 @@ googleServices = "4.5.0"
 # catalog exactly so the two apps stay aligned.
 androidxCredentials = "1.7.0-alpha03"
 googleid = "1.2.1"
+# Custom-styles account cache (BLO-27 S2): JSON record encoding. No
+# Enclave pin to mirror (no Enclave checkout alongside this repo);
+# 1.11.0 is the newest stable proven in this environment's Gradle
+# cache next to the Kotlin 2.3.21 serialization compiler plugin
+# (Central's newest stable at the time is 1.12.0).
+kotlinxSerialization = "1.11.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -53,6 +59,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesVersion" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbineVersion" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutinesVersion" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectricVersion" }
 apter-junit5-robolectric-extension = { group = "tech.apter.junit5.jupiter", name = "robolectric-extension", version.ref = "apterJunit5Robolectric" }
@@ -72,6 +79,7 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintVersion" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }

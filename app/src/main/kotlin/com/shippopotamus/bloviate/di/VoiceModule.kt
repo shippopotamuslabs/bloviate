@@ -13,6 +13,7 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.data.DataStoreCustomStyleStore
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
 import com.shippopotamus.bloviate.data.FirebaseStyleClient
 import com.shippopotamus.bloviate.data.FirebaseStyleFunctionGateway
@@ -21,6 +22,7 @@ import com.shippopotamus.bloviate.application.evaluator.StyleAwareTextPostProces
 import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.application.port.AuthSessionPort
 import com.shippopotamus.bloviate.application.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.CustomStyleStorePort
 import com.shippopotamus.bloviate.application.port.DictionaryPort
 import com.shippopotamus.bloviate.application.port.EnginePreferencePort
 import com.shippopotamus.bloviate.application.port.LlmStylePort
@@ -88,6 +90,10 @@ abstract class VoiceModule {
 
     @Binds
     abstract fun bindStylePreferencePort(store: DataStoreStylePreferenceStore): StylePreferencePort
+
+    /** Account-owned custom-styles cache (BLO-27 S2) behind its application port. */
+    @Binds
+    abstract fun bindCustomStyleStorePort(store: DataStoreCustomStyleStore): CustomStyleStorePort
 
     @Binds
     abstract fun bindStyleFunctionGateway(gateway: FirebaseStyleFunctionGateway): StyleFunctionGateway
