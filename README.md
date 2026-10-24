@@ -109,7 +109,7 @@ cd bloviate
 
 Two levels of submodules matter here. Bloviate includes whisper-android, and whisper-android includes whisper.cpp. A plain clone followed by `git submodule update --init --recursive` gets the same tree.
 
-One snag to know about before you start: `.gitmodules` still points whisper-android at its old GitLab address. That GitLab project is private, so the submodule step fails for anyone outside the old group. Until the URL is updated in this repo, clone `github.com/shippopotamuslabs/whisper-android` into `third_party/whisper-android` by hand and run the same recursive submodule step inside it for whisper.cpp.
+The submodule resolves against this repo's own org: `.gitmodules` uses a relative URL for whisper-android, so the recursive clone fetches `github.com/shippopotamuslabs/whisper-android` with no extra steps.
 
 The included whisper-android build resolves the SDK location per build. Give it a `local.properties` of its own:
 
@@ -174,7 +174,7 @@ Eight test files cover the style chain, the prompt builder, the output guard, en
 
 ## CI and distribution
 
-A GitHub Actions port of the pipeline is in progress. The GitLab pipeline it replaces ran detekt and lint as one static analysis job, the unit test suite, debug and release assemblies, and a distribution job on every main merge.
+CI runs on GitHub Actions. Detekt and lint, the unit test suite in parallel legs, and the functions tests gate each pull request. Merges to main build the release.
 
 Distribution today is Firebase App Distribution. Every merge to main ships the release-signed APK to the Internal tester group. The Play Store listing is in preparation. Sideloading the debug or release APK works for anyone who builds it.
 
