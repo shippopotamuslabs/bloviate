@@ -136,6 +136,15 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.crashlytics)
 
+    // Glass Bars Gospel (BLO-2; UI_DESIGN_SPEC.md §6.9): Haze 2.0.1
+    // for the glass top/bottom bars — core (source/effect) plus the
+    // blur effect artifact (the `haze` umbrella does not include it).
+    // No haze-glass: the Sheet token is spelled out with
+    // HazeBlurStyle (2.x ships no Thick preset), and no hero surface
+    // needs refraction.
+    implementation(libs.haze)
+    implementation(libs.haze.blur)
+
     // Credential Manager exception types for the sign-in error mapper
     // (ENC-197); the session itself lives in :core:data.
     implementation(libs.androidx.credentials)

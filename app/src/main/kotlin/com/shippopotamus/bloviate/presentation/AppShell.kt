@@ -1,25 +1,22 @@
 package com.shippopotamus.bloviate.presentation
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -27,6 +24,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shippopotamus.bloviate.R
+import dev.chrisbanes.haze.rememberHazeState
 
 /**
  * The app's root route: the first-run wizard (ENC-67) while its
@@ -121,22 +119,33 @@ fun MainRoute(
  * tab's saved value, so it survives rotation and process recreation
  * without any persisted schema.
  *
- * Each tab screen owns its own `Scaffold` + `TopAppBar`
- * (contracts/ARCHITECTURE_RULES.md §4) — the shell is a plain column, not
- * a root Scaffold, and no padding values are threaded into the screens.
- * The [NavigationBar] owns the system navigation-bar inset, which is why
- * the screens no longer pad for it themselves.
+ * Each tab screen owns its own `Scaffold` + top bar
+ * (contracts/ARCHITECTURE_RULES.md §4) — the shell is a plain overlay
+ * box, not a root Scaffold, and no padding values are threaded into
+ * the screens. The bottom bar is glass (BLO-2; the Glass Bars Gospel,
+ * contracts/UI_DESIGN_SPEC.md §6.9): it overlays the full-height
+ * content instead of reserving a slab, so the tabs scroll under it.
+ * The bar shares the current screen's `HazeState` — provided here
+ * through [LocalScreenHazeState] and read by the screens with
+ * [rememberScreenHazeState] — because an effect must reference the
+ * state holding its source. The shell holds exactly one state: only
+ * one tab is composed at a time, so tab switches hand the state over
+ * cleanly as the old source unregisters.
  *
- * While the IME is up, the bar leaves the layout entirely (ENC-124).
- * The screens seat their content on the keyboard with `imePadding()`,
- * which measures the IME inset from the *window's* bottom edge — but
- * this column's content box ends above the bar, so a reserved bar slab
- * (80dp + the bar's own inset) stacked on top of the IME inset and left
- * a dead gap between content and keyboard on every tab. With the bar
- * gone, the content box reaches the window's bottom edge and the
- * screens' `imePadding()` lands content exactly on the keyboard. The
- * wizard never had the gap: it replaces this shell, so nothing sits
- * below its `imePadding()`.
+ * Inset ownership: the screens draw full-bleed to the window's
+ * bottom edge and reserve [glassBottomBarClearance] (bar height plus
+ * the system navigation-bar inset) inside their scroll content while
+ * the bar is showing, so the last row rests above the glass at rest
+ * yet scrolls under it. The bar itself carries the navigation-bars
+ * inset, so the gesture pill sits over glass, not over content.
+ *
+ * While the IME is up, the bar leaves the layout entirely (ENC-124):
+ * [LocalGlassBottomBarVisible] goes false, the clearance drops to
+ * zero, and the screens' `imePadding()` — measured from the
+ * *window's* bottom edge against the same full-bleed box — lands
+ * content exactly on the keyboard with no dead gap. The wizard never
+ * had the gap: it replaces this shell, so nothing sits below its
+ * `imePadding()`.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -149,34 +158,38 @@ fun AppShell(
     var selectedTabValue by rememberSaveable { mutableStateOf(MainTab.DEFAULT.toSavedValue()) }
     val selectedTab = MainTab.fromSavedValue(selectedTabValue)
     val imeVisible = WindowInsets.isImeVisible
-    Column(modifier = modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        ) {
-            when (selectedTab) {
-                MainTab.SETUP -> setupContent()
-                MainTab.STYLE -> styleContent()
-                MainTab.DICTIONARY -> dictionaryContent()
+    val barVisible = tabBarVisible(imeVisible = imeVisible)
+    val hazeState = rememberHazeState()
+    CompositionLocalProvider(
+        LocalScreenHazeState provides hazeState,
+        LocalGlassBottomBarVisible provides barVisible,
+    ) {
+        Box(modifier = modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                when (selectedTab) {
+                    MainTab.SETUP -> setupContent()
+                    MainTab.STYLE -> styleContent()
+                    MainTab.DICTIONARY -> dictionaryContent()
+                }
             }
-        }
-        if (tabBarVisible(imeVisible = imeVisible)) {
-            NavigationBar(containerColor = BloviateColors.extended.bgSubtle) {
-                MainTab.entries.forEach { tab ->
+            if (barVisible) {
+                val items = MainTab.entries.map { tab ->
                     val label = stringResource(tab.labelRes())
-                    NavigationBarItem(
-                        selected = tab == selectedTab,
-                        onClick = { selectedTabValue = tab.toSavedValue() },
-                        icon = {
-                            Icon(
-                                imageVector = tab.icon(),
-                                contentDescription = label,
-                            )
-                        },
-                        label = { Text(text = label) },
+                    GlassBottomBarItem(
+                        label = label,
+                        icon = tab.icon(),
+                        contentDescription = label,
                     )
                 }
+                ShippopotamusBottomBar(
+                    items = items,
+                    selectedIndex = MainTab.entries.indexOf(selectedTab),
+                    onItemSelected = { index ->
+                        selectedTabValue = MainTab.entries[index].toSavedValue()
+                    },
+                    hazeState = hazeState,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
         }
     }

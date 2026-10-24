@@ -28,15 +28,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import com.shippopotamus.bloviate.R
+import dev.chrisbanes.haze.hazeSource
 
 /**
  * The manual custom-style editor (BLO-25 S5): the in-tab destination for
@@ -67,9 +69,12 @@ fun CustomStyleEditorScreen(
     onRegenerateClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = {
                     Text(
                         text = stringResource(
@@ -81,6 +86,8 @@ fun CustomStyleEditorScreen(
                         ),
                     )
                 },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(
                         onClick = onBack,
@@ -120,13 +127,17 @@ fun CustomStyleEditorScreen(
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         if (uiState.loadFailed) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .hazeSource(state = hazeState, zIndex = 0f)
+                    .padding(
+                        top = innerPadding.calculateTopPadding(),
+                        bottom = glassBottomBarClearance(),
+                    )
                     .padding(BloviateSpacing.s16),
                 verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
             ) {
@@ -141,9 +152,13 @@ fun CustomStyleEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {

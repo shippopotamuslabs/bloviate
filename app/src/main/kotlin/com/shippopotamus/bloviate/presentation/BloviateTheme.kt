@@ -18,6 +18,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
@@ -292,6 +295,61 @@ val ShippopotamusButtonShapeSquareLarge: Shape = RoundedCornerShape(16.dp)
 
 /** Pressed shape — both variants morph to this on press (§6.8). */
 val ShippopotamusPressedShape: Shape = RoundedCornerShape(12.dp)
+
+/**
+ * The Glass Bars Gospel's reusable blur programs (BLO-2;
+ * contracts/UI_DESIGN_SPEC.md §6.9), written against the Haze 2.0 API
+ * as shipped in 2.0.1: the 1.x names in the contract (`hazeChild`,
+ * `HazeStyle`, `HazeStyle.Thick`) do not exist in 2.x. A bar blurs
+ * with `Modifier.hazeBlur(HazeInput.Backdrop(state), style)` where the
+ * content wears `Modifier.hazeSource(state)`; the 1.x `tint` (a
+ * `HazeTint` over the blur) maps to a `HazeColorEffect.tint` color
+ * effect in the 2.x [HazeBlurStyle] program below. The style program
+ * itself is opaque, so the token is this plain data (blur radius,
+ * tint, noise) and [toHazeBlurStyle] compiles it — the fields stay
+ * unit-pinned in `BloviateThemeTest`, with no magic numbers at the
+ * call sites. Tints come from [BloviatePalette], never raw hexes.
+ */
+@Immutable
+data class ShippopotamusHazeStyle(
+    val blurRadius: Dp,
+    val tint: Color,
+    val noiseFactor: Float,
+) {
+    /** Compiles this token into the opaque program `hazeBlur` consumes. */
+    fun toHazeBlurStyle(): HazeBlurStyle = HazeBlurStyle {
+        blurRadius(this@ShippopotamusHazeStyle.blurRadius)
+        colorEffects(listOf(HazeColorEffect.tint(this@ShippopotamusHazeStyle.tint)))
+        noiseFactor(this@ShippopotamusHazeStyle.noiseFactor)
+    }
+}
+
+/** The glass top-bar program: bg-base at 65% over a 24dp blur (§6.9). */
+val ShippopotamusHazeTopBar = ShippopotamusHazeStyle(
+    blurRadius = 24.dp,
+    tint = BloviatePalette.BgBase.copy(alpha = 0.65f),
+    noiseFactor = 0.5f,
+)
+
+/** The glass bottom-bar program: surface-1 at 75% over a 20dp blur (§6.9). */
+val ShippopotamusHazeBottomBar = ShippopotamusHazeStyle(
+    blurRadius = 20.dp,
+    tint = BloviatePalette.Surface1.copy(alpha = 0.75f),
+    noiseFactor = 0.5f,
+)
+
+/**
+ * The glass sheet program. §6.9 names `HazeStyle.Thick` here, which
+ * has no 2.0.1 equivalent (no preset styles ship in 2.x), so the
+ * "heavy blur for bottom sheets" is spelled out: the 28dp performance
+ * ceiling (§6.9) with a surface-3 tint, matching the bottom bar's
+ * 75% so the sheet and the bar agree when they share a frame.
+ */
+val ShippopotamusHazeSheet = ShippopotamusHazeStyle(
+    blurRadius = 28.dp,
+    tint = BloviatePalette.Surface3.copy(alpha = 0.75f),
+    noiseFactor = 0.5f,
+)
 
 /**
  * The morphable polygon vocabulary (ENC-90): the M3 Expressive shape

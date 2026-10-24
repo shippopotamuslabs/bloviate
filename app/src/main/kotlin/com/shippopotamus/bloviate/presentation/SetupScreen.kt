@@ -43,7 +43,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,8 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -78,8 +80,9 @@ import kotlin.math.roundToInt
  *
  * The column scrolls: the sections together exceed short viewports
  * (fold cover screens, split windows), and every row must stay
- * reachable (ENC-65). The shell's navigation bar owns the bottom
- * system inset, so the column does not pad for it.
+ * reachable (ENC-65). The shell's glass bar overlays the content, so
+ * the column draws full-bleed as the bar's haze source and reserves
+ * its top offset and bottom clearance inside the scroll.
  */
 @Suppress("LongParameterList") // Fully state-hoisted screen: one callback per control, by design.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,10 +107,15 @@ fun SetupScreen(
     onRunSetupAgain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberScreenHazeState()
+    val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(scrollState)
     Scaffold(
         topBar = {
-            TopAppBar(
+            ShippopotamusTopBar(
                 title = { Text(text = stringResource(R.string.app_name)) },
+                hazeState = hazeState,
+                scrollBehavior = scrollBehavior,
                 actions = {
                     SetupStatusPill(
                         status = uiState.setupStatus(),
@@ -117,14 +125,18 @@ fun SetupScreen(
             )
         },
         contentWindowInsets = WindowInsets(0),
-        modifier = modifier,
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .hazeSource(state = hazeState, zIndex = 0f)
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = glassBottomBarClearance(),
+                )
                 .padding(BloviateSpacing.s16),
             verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s16),
         ) {
