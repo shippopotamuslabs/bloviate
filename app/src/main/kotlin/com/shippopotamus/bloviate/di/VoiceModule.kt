@@ -39,6 +39,8 @@ import com.shippopotamus.bloviate.application.port.ModelStorePort
 import com.shippopotamus.bloviate.application.port.ParakeetModelStorePort
 import com.shippopotamus.bloviate.application.port.RecordingSessionPort
 import com.shippopotamus.bloviate.application.port.StylePreferencePort
+import com.shippopotamus.bloviate.application.port.StyleTelemetryPort
+import com.shippopotamus.bloviate.data.CrashlyticsStyleTelemetry
 import com.shippopotamus.bloviate.domain.port.TextPostProcessor
 import com.shippopotamus.bloviate.application.port.TranscriptionEngine
 import dagger.Binds
@@ -106,6 +108,10 @@ abstract class VoiceModule {
     @Binds
     abstract fun bindStyleFunctionGateway(gateway: FirebaseStyleFunctionGateway): StyleFunctionGateway
 
+    /** Cloud-styling outcome telemetry (BLO-167) behind its application port. */
+    @Binds
+    abstract fun bindStyleTelemetryPort(telemetry: CrashlyticsStyleTelemetry): StyleTelemetryPort
+
     /** The raw custom-styles callable surface (BLO-25 S4) behind its narrow gateway interface. */
     @Binds
     abstract fun bindCustomStyleSyncGateway(gateway: FirebaseCustomStyleSyncGateway): CustomStyleSyncGateway
@@ -133,10 +139,12 @@ abstract class VoiceModule {
         fun provideLlmStylePort(
             gateway: StyleFunctionGateway,
             auth: AuthSessionPort,
+            telemetry: StyleTelemetryPort,
         ): LlmStylePort =
             FirebaseStyleClient(
                 gateway = gateway,
                 auth = auth,
+                telemetry = telemetry,
             )
 
         @Provides

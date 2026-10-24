@@ -49,6 +49,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.functions)
+    implementation(libs.firebase.crashlytics)
 
     // Google Sign-In via Credential Manager (ENC-197): pins mirror
     // Stratum's catalog exactly.
