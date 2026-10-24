@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.apter.robolectric.junit5)
     alias(libs.plugins.google.services)
+    alias(libs.plugins.firebase.crashlytics)
 }
 
 kotlin {
@@ -133,6 +134,7 @@ dependencies {
     // implementation itself stays in :core:data.
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.crashlytics)
 
     // Credential Manager exception types for the sign-in error mapper
     // (ENC-197); the session itself lives in :core:data.
