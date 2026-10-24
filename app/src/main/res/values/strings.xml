@@ -45,6 +45,10 @@
     <string name="bubble_done_capped_description">Dictation transcribed · max length reached</string>
     <string name="bubble_done_silence_description">Dictation transcribed · stopped after 30 seconds of silence</string>
     <string name="bubble_error_description">Dictation failed</string>
+    <string name="bubble_not_styled_subscription">Not styled. Subscription required.</string>
+    <string name="bubble_not_styled_subscription_description">Dictation inserted but not styled. Subscription required.</string>
+    <string name="bubble_not_styled_sign_in">Not styled. Sign in to style.</string>
+    <string name="bubble_not_styled_sign_in_description">Dictation inserted but not styled. Sign in to style.</string>
     <string name="model_card_title">Voice models</string>
     <string name="model_status_downloading_format">Downloading · %1$d%%</string>
     <string name="model_status_failed_format">Download didn’t finish — %1$s</string>
