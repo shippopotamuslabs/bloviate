@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.domain.evaluator
 
 import com.shippopotamus.bloviate.domain.model.FewShot
+import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import javax.inject.Inject
 
@@ -65,6 +66,14 @@ class StylePromptBuilder @Inject constructor() {
             append(SPEAKER_INVARIANT)
             append(" ")
             append(REWRITE_LICENSE)
+            append(" ")
+            append(FACTS_TIER1)
+            append(" ")
+            if (style.category == StyleCategory.SERIOUS) {
+                append(SERIOUS_NO_INVENTION)
+            } else {
+                append(LICENSED_INVENTION)
+            }
             append(" ")
             append(ONLY_TEXT_INSTRUCTION)
         }
@@ -158,6 +167,42 @@ class StylePromptBuilder @Inject constructor() {
                 "sign-offs) are a toolkit, not a template: deploy one where it lands " +
                 "for this text, skip it where it does not, and never force the same " +
                 "closing structure onto every output."
+
+        /**
+         * The two-tier facts rule (BLO-158), tier 1: universal, every
+         * style. Never CHANGE or CONTRADICT a stated fact — names,
+         * numbers, dates, quoted text, who did what. Byte-identical to
+         * the TypeScript twin's FACTS_TIER1 in stylePromptBuilder.ts.
+         */
+        const val FACTS_TIER1: String =
+            "FACTS ARE NOT THE JOKE: Never change or contradict a stated fact — names, " +
+                "numbers, dates, quoted text, who did what. A changed fact is never the joke, " +
+                "it is just a wrong message."
+
+        /**
+         * The two-tier facts rule (BLO-158), tier 2: SERIOUS styles only.
+         * Never ADD facts either — no invented details, connective tissue,
+         * or scene-setting; the transcript is the whole universe.
+         * Byte-identical to the TypeScript twin's SERIOUS_NO_INVENTION.
+         */
+        const val SERIOUS_NO_INVENTION: String =
+            "SERIOUS MEANS SERIOUS: Never add facts either — no invented details, no " +
+                "connective tissue, no scene-setting. The transcript is the whole universe: " +
+                "say only what the speaker said, cleaner."
+
+        /**
+         * The two-tier facts rule (BLO-158), the license branch: every
+         * non-SERIOUS style (CUSTOM included) may add atmospheric texture,
+         * inflated framing, connective tissue, and scene-setting under two
+         * limits — (a) nothing added contradicts a stated fact; (b)
+         * nothing added impersonates one. Byte-identical to the TypeScript
+         * twin's LICENSED_INVENTION.
+         */
+        const val LICENSED_INVENTION: String =
+            "LICENSED INVENTION: Atmospheric texture, inflated framing, connective tissue, " +
+                "and scene-setting may be added under two limits: (a) nothing added contradicts " +
+                "a stated fact; (b) nothing added impersonates a stated fact — no invented numbers, " +
+                "dates, names, or quotes dressed up as the speaker's."
 
         /**
          * The model must return ONLY the transformed text: no quotes, no

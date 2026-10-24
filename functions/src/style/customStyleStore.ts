@@ -338,6 +338,7 @@ export async function fetchCustomStyleDoc(uid: string, styleId: string): Promise
   if (!canonical) return null;
   return {
     id: canonical.id,
+    category: "custom",
     displayName: canonical.displayName,
     description: canonical.description,
     sample: canonical.sample,
