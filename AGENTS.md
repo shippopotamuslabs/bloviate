@@ -27,10 +27,10 @@ Every task maps to one or more binding contracts in `/contracts/`. Read the rele
 | Speech transcription: engine lifecycle, warm context, model integrity, thermal/memory pressure, text cleanup pipeline, processing modes | `TRANSCRIPTION_RULES.md` |
 | Colors, typography, Compose component structure, previews, bubble overlay UI states, accessibility | `UI_DESIGN_SPEC.md` |
 | JUnit 5, Fakes vs Mocks, Robolectric, Turbine, state-based assertions, test coverage | `UNIT_TESTING.md` |
-| **Adding or editing any user-facing copy** — labels, setting descriptions, buttons, empty states, errors, notifications, onboarding, paywall copy, dialog text | `gospel/WOMBO-GOSPEL.md` (in `contracts/gospel/`, the gospels submodule) — read it *before* writing the copy, not as a cleanup pass after |
+| **Adding or editing any user-facing copy** — labels, setting descriptions, buttons, empty states, errors, notifications, onboarding, paywall copy, dialog text | `contracts/gospel/WOMBO-GOSPEL.md` (the gospels submodule) — read it *before* writing the copy, not as a cleanup pass after |
 | Versioning, release prep, Play release notes, Play internal-track upload, the deploy workflow, release tags | `RELEASE.md` — read it *before* any release work; the derived `versionCode` rules and the release-prep PR gate in there bind every release |
 
-The copy row binds app chrome only. Persona style definitions and their output are **exempt by design** (persona output is character work; see `gospel/WOMBO-GOSPEL.md`), so persona tasks do not route through the voice contract — but the screens around the personas do.
+The copy row binds app chrome only. Persona style definitions and their output are **exempt by design** (persona output is character work; see `contracts/gospel/WOMBO-GOSPEL.md`), so persona tasks do not route through the voice contract — but the screens around the personas do.
 
 When a task spans multiple domains, read all relevant contracts.
 
