@@ -13,3 +13,5 @@ extra_instructions = """
 - Persistence is DataStore + app-private files in :core:data (no Room): persisted formats are versioned schema — never suggest new keys/tables for transient UI state (is_listening, is_loading, bubble visibility), and model files are SHA-256-verified after download and before first load and never committed to git.
 - Keep findings evidence-backed and severity-calibrated; skip style and naming nits.
 """
+
+# Verify-loop test marker (BLO-185) — throwaway, do not merge.
