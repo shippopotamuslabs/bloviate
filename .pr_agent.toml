@@ -1,0 +1,15 @@
+# PR-Agent (Qodo open-source, AGPL-3.0) repo config.
+# Canonical source of reviewer guidance: the forge:review CI job fetches this file
+# via the repository files API and injects the [pr_reviewer] extra_instructions as
+# PR_REVIEWER__EXTRA_INSTRUCTIONS, because the review container has no repo checkout.
+[pr_reviewer]
+extra_instructions = """
+- Respect the contracts in /contracts/ and AGENTS.md: never suggest changing files under /contracts/ or AGENTS.md themselves; flag any diff that touches them as needing an explicit Contract Waiver.
+- Clean Architecture per contracts/ARCHITECTURE_RULES.md: dependencies point inward — :core:domain (pure Kotlin/JVM, framework-free, depends on nothing) <- :core:application (use cases + application ports) <- :core:data (port implementations) and :app (presentation/service/di); domain/application public APIs must not leak Android, Compose, Hilt, or whisper-android types — flag violations.
+- The application layer is use cases plus ports: ViewModels depend on use cases only, never on *Repository/*Port or data/ classes directly; presentation models (*UiState/*UiEvent) must not embed domain types — domain models are never passed directly to composables.
+- Tests use JUnit 5 + Turbine with hand-written fakes for Bloviate-owned ports; there is NO :core:testing module yet — shared fakes (Fake<Port>) live in each module's src/test source set today, and a new port ships its fake in the same MR; MockK only at third-party SDK boundaries, never verify/coVerify in ViewModel tests — assert on UiState.
+- Detekt is a hard gate (maxIssues: 0, config/detekt/detekt.yml) and ktlint conventions apply (4-space indent, 120-char lines); do not suggest suppressions to hide layering debt.
+- Transcription is on-device first (whisper.cpp via the vendored whisper-android library behind the TranscriptionEngine seam; Parakeet via sherpa-onnx is the second on-device engine): no audio or transcripts leave the device by default, there is NO on-device LLM cleanup ever — text cleanup is the deterministic TextPostProcessor chain in :core:application (dictionary-aware, style-aware port-chaining processors), and the optional cloud style pass goes through Firebase Functions (functions/, LlmStylePort/FirebaseStyleClient) only as the designed opt-in path; never suggest shipping a provider API key in the APK, editing third_party/whisper-android from this repo, or per-utterance engine init/close (the context stays warm in BubbleOverlayService, calls serialized behind a Mutex).
+- Persistence is DataStore + app-private files in :core:data (no Room): persisted formats are versioned schema — never suggest new keys/tables for transient UI state (is_listening, is_loading, bubble visibility), and model files are SHA-256-verified after download and before first load and never committed to git.
+- Keep findings evidence-backed and severity-calibrated; skip style and naming nits.
+"""
