@@ -15,16 +15,12 @@ import androidx.core.content.ContextCompat
 import com.shippopotamus.bloviate.domain.evaluator.BatteryExemptionIntentPolicy
 import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
 import com.shippopotamus.bloviate.service.BubbleOverlayService
-import com.shippopotamus.whisper.WhisperEngine
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 
 /**
  * Launcher activity hosting the app's root route — the first-run
  * wizard (ENC-67) until its persisted record is finished, the tab
- * shell after. The [WhisperEngine] injection proves the
- * composite-build substitution and the whisper-android-hilt bindings
- * resolve in the app's Hilt graph.
+ * shell after.
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -32,9 +28,6 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val TAG: String = "MainActivity"
     }
-
-    @Inject
-    lateinit var whisperEngine: WhisperEngine
 
     private val viewModel: MainViewModel by viewModels()
 
