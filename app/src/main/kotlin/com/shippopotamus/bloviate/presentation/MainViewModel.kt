@@ -2,25 +2,15 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.shippopotamus.bloviate.domain.model.BubbleAppearance
-import com.shippopotamus.bloviate.domain.model.DictationEngine
-import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
-import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.application.port.AuthState
+import com.shippopotamus.bloviate.application.port.LiveSetupState
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveAuthStateUseCase
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleAppearanceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleServiceRunningUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveParakeetModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveResidentPresenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStopUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
@@ -30,6 +20,9 @@ import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
+import com.shippopotamus.bloviate.domain.model.BubbleAppearance
+import com.shippopotamus.bloviate.domain.model.DictationEngine
+import com.shippopotamus.bloviate.domain.model.ModelState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,33 +36,30 @@ import javax.inject.Inject
 /**
  * Status-screen ViewModel. Depends on use cases only; maps the domain
  * [ModelState] into the presentation-only [MainUiState] so no domain
- * types reach composables. The live field-focus stream is not one of
- * its inputs (ENC-142): the bubble pipeline consumes it directly, and
+ * types reach composables. The durable streams arrive as one
+ * [LiveSetupState] from [ObserveLiveSetupStateUseCase] (BLO-175) —
+ * this ViewModel composes nothing itself; it folds in only its local
+ * transient state: the permission re-reads refreshed on resume and the
+ * sign-in surface state. The live field-focus stream is not one of its
+ * inputs (ENC-142): the bubble pipeline consumes it directly, and
  * Setup no longer renders a focus readout.
  */
 @Suppress("LongParameterList") // One injected use case per capability, per the ViewModel rules.
 @HiltViewModel
 class MainViewModel @Inject constructor(
+    private val observeLiveSetupState: ObserveLiveSetupStateUseCase,
     private val isFieldWatcherEnabled: IsFieldWatcherEnabledUseCase,
     private val isOverlayPermissionGranted: IsOverlayPermissionGrantedUseCase,
-    observeBubbleServiceRunning: ObserveBubbleServiceRunningUseCase,
     private val isMicPermissionGranted: IsMicPermissionGrantedUseCase,
     private val refreshMicPermission: RefreshMicPermissionUseCase,
-    observeModelState: ObserveModelStateUseCase,
     private val ensureModel: EnsureModelUseCase,
-    observeParakeetModelState: ObserveParakeetModelStateUseCase,
     private val ensureParakeetModel: EnsureParakeetModelUseCase,
-    observeEnginePreference: ObserveEnginePreferenceUseCase,
     private val selectEngine: SelectEngineUseCase,
-    private val observeBubbleAppearance: ObserveBubbleAppearanceUseCase,
     private val saveBubbleAppearance: SaveBubbleAppearanceUseCase,
-    observeWatcherConnection: ObserveWatcherConnectionUseCase,
     private val isBatteryOptimizationExempt: IsBatteryOptimizationExemptUseCase,
-    observeResidentPresence: ObserveResidentPresenceUseCase,
     private val setAutoStartEnabled: SetAutoStartEnabledUseCase,
     private val recordBubbleUserStart: RecordBubbleUserStartUseCase,
     private val recordBubbleUserStop: RecordBubbleUserStopUseCase,
-    private val observeAuthState: ObserveAuthStateUseCase,
     private val signInWithGoogle: SignInWithGoogleUseCase,
     private val signOut: SignOutUseCase,
     private val refreshCustomStyles: RefreshCustomStylesUseCase,
@@ -83,8 +73,8 @@ class MainViewModel @Inject constructor(
         // outcome stays in the use case, so a failed refresh never
         // blocks the status screen or the sign-in flow.
         viewModelScope.launch {
-            observeAuthState().collect { state ->
-                if (state is AuthState.Authenticated) {
+            observeLiveSetupState().collect { state ->
+                if (state.authState is AuthState.Authenticated) {
                     refreshCustomStyles()
                 }
             }
@@ -96,104 +86,52 @@ class MainViewModel @Inject constructor(
     private val micPermissionGranted = MutableStateFlow(isMicPermissionGranted())
     private val batteryExempt = MutableStateFlow(isBatteryOptimizationExempt())
 
-    // The watcher's two supervision signals (ENC-129) ride together:
-    // enablement is a settings read refreshed on resume, connection is
-    // the service's own live stream.
-    private val watcherSignals = combine(watcherEnabled, observeWatcherConnection()) { enabled, connected ->
-        enabled to connected
-    }
-
     /**
      * Transient sign-in surface state (ENC-197): in-flight flag plus
      * the last failure's user-facing message. Not persisted — the
-     * auth gate itself is the live [observeAuthState] stream.
+     * auth gate itself is the live [LiveSetupState.authState] stream.
      */
     private val signInUi = MutableStateFlow(SignInUi())
 
     /**
-     * Gate plus its surface state as one stream (ENC-197): folded
-     * together so the screen-wide combines keep five inputs each.
+     * The four permission re-reads as one local slice: settings-posture
+     * reads refreshed on resume (watcher enablement and battery
+     * exemption are settings reads, overlay and microphone are platform
+     * grants re-read the same way). Local transient state, folded into
+     * the observed durable state at the [uiState] combine.
      */
-    private val authAndSignIn = combine(observeAuthState(), signInUi) { authState, signIn ->
-        authState to signIn
-    }
+    private data class PermissionReads(
+        val watcherEnabled: Boolean,
+        val overlayPermissionGranted: Boolean,
+        val micPermissionGranted: Boolean,
+        val batteryExempt: Boolean,
+    )
 
-    private val baseUiState: StateFlow<MainUiState> = combine(
-        watcherSignals,
+    private val permissionReads = combine(
+        watcherEnabled,
         overlayPermissionGranted,
-        observeBubbleServiceRunning(),
         micPermissionGranted,
-        authAndSignIn,
-    ) { watcherOnConnected, overlayGranted, bubbleRunning, micGranted, authStateSignIn ->
-        val (watcherOn, watcherConnected) = watcherOnConnected
-        val (authState, signIn) = authStateSignIn
-        mapToUiState(
-            watcherEnabled = watcherOn,
-            watcherConnected = watcherConnected,
-            overlayPermissionGranted = overlayGranted,
-            bubbleServiceRunning = bubbleRunning,
-            micPermissionGranted = micGranted,
-            auth = authState.toUi(),
-            isSigningIn = signIn.isSigningIn,
-            signInError = signIn.signInError,
-        )
-    }.stateIn(
+        batteryExempt,
+        ::PermissionReads,
+    )
+
+    val uiState: StateFlow<MainUiState> = combine(
+        observeLiveSetupState(),
+        permissionReads,
+        signInUi,
+        ::mapToUiState,
+    ).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
         initialValue = mapToUiState(
-            watcherEnabled = isFieldWatcherEnabled(),
-            watcherConnected = observeWatcherConnection().value,
-            overlayPermissionGranted = isOverlayPermissionGranted(),
-            bubbleServiceRunning = observeBubbleServiceRunning().value,
-            micPermissionGranted = isMicPermissionGranted(),
-            auth = observeAuthState().value.toUi(),
-            isSigningIn = signInUi.value.isSigningIn,
-            signInError = signInUi.value.signInError,
-        ),
-    )
-
-    // Appearance, resident presence, and battery exemption ride
-    // together into the second combine (ENC-129): appearance restyles
-    // the bubble-look card, presence drives the auto-start switch, and
-    // the exemption is a settings read refreshed on resume.
-    private val appearancePresenceBattery = combine(
-        observeBubbleAppearance(),
-        observeResidentPresence(),
-        batteryExempt,
-    ) { appearance, presence, exempt -> Triple(appearance, presence, exempt) }
-
-    val uiState: StateFlow<MainUiState> = combine(
-        baseUiState,
-        observeModelState(),
-        observeParakeetModelState(),
-        observeEnginePreference(),
-        appearancePresenceBattery,
-    ) { baseState, whisperState, parakeetState, engine, appearancePresenceExempt ->
-        val (appearance, presence, exempt) = appearancePresenceExempt
-        baseState.copy(
-            whisperModelStatus = mapModelStatus(whisperState),
-            parakeetModelStatus = mapModelStatus(parakeetState),
-            selectedEngine = mapEngine(engine),
-            engineFallback = mapEngineFallback(engine, whisperState, parakeetState),
-            bubbleAppearance = appearance.toUi(),
-            autoStartEnabled = presence.autoStartEnabled,
-            batteryExempt = exempt,
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-        initialValue = baseUiState.value.copy(
-            whisperModelStatus = mapModelStatus(observeModelState().value),
-            parakeetModelStatus = mapModelStatus(observeParakeetModelState().value),
-            selectedEngine = mapEngine(observeEnginePreference().value),
-            engineFallback = mapEngineFallback(
-                observeEnginePreference().value,
-                observeModelState().value,
-                observeParakeetModelState().value,
+            live = observeLiveSetupState().value,
+            permissions = PermissionReads(
+                watcherEnabled = watcherEnabled.value,
+                overlayPermissionGranted = overlayPermissionGranted.value,
+                micPermissionGranted = micPermissionGranted.value,
+                batteryExempt = batteryExempt.value,
             ),
-            bubbleAppearance = observeBubbleAppearance().value.toUi(),
-            autoStartEnabled = observeResidentPresence().value.autoStartEnabled,
-            batteryExempt = isBatteryOptimizationExempt(),
+            signIn = signInUi.value,
         ),
     )
 
@@ -255,7 +193,7 @@ class MainViewModel @Inject constructor(
      */
     private fun updateBubbleAppearance(transform: (BubbleAppearance) -> BubbleAppearance) {
         viewModelScope.launch {
-            saveBubbleAppearance(transform(observeBubbleAppearance().value))
+            saveBubbleAppearance(transform(observeLiveSetupState().value.bubbleAppearance))
         }
     }
 
@@ -349,24 +287,26 @@ class MainViewModel @Inject constructor(
     }
 
     private fun mapToUiState(
-        watcherEnabled: Boolean,
-        watcherConnected: Boolean,
-        overlayPermissionGranted: Boolean,
-        bubbleServiceRunning: Boolean,
-        micPermissionGranted: Boolean,
-        auth: AuthUi,
-        isSigningIn: Boolean,
-        signInError: String?,
+        live: LiveSetupState,
+        permissions: PermissionReads,
+        signIn: SignInUi,
     ): MainUiState =
         MainUiState(
-            watcherEnabled = watcherEnabled,
-            watcherConnected = watcherConnected,
-            overlayPermissionGranted = overlayPermissionGranted,
-            bubbleServiceRunning = bubbleServiceRunning,
-            micPermissionGranted = micPermissionGranted,
-            auth = auth,
-            isSigningIn = isSigningIn,
-            signInError = signInError,
+            watcherEnabled = permissions.watcherEnabled,
+            watcherConnected = live.watcherConnected,
+            overlayPermissionGranted = permissions.overlayPermissionGranted,
+            bubbleServiceRunning = live.bubbleServiceRunning,
+            micPermissionGranted = permissions.micPermissionGranted,
+            auth = live.authState.toUi(),
+            isSigningIn = signIn.isSigningIn,
+            signInError = signIn.signInError,
+            whisperModelStatus = mapModelStatus(live.whisperModelState),
+            parakeetModelStatus = mapModelStatus(live.parakeetModelState),
+            selectedEngine = mapEngine(live.selectedEngine),
+            engineFallback = mapEngineFallback(live),
+            bubbleAppearance = live.bubbleAppearance.toUi(),
+            autoStartEnabled = live.residentPresence.autoStartEnabled,
+            batteryExempt = permissions.batteryExempt,
         )
 
     private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
@@ -387,18 +327,15 @@ class MainViewModel @Inject constructor(
         }
 
     /**
-     * The fallback note's data, via the shared `EffectiveEngineResolver`:
-     * present only while a fallback engine is actually in use — the
-     * selected engine's model is not Ready but the other engine's is.
+     * The fallback note's data, from the read model's precomputed
+     * effective engine: present only while a fallback engine is
+     * actually in use — the selected engine's model is not Ready but
+     * the other engine's is.
      */
-    private fun mapEngineFallback(
-        selected: DictationEngine,
-        whisperState: ModelState,
-        parakeetState: ModelState,
-    ): EngineFallbackUi? {
-        val effective = EffectiveEngineResolver.resolve(selected, whisperState, parakeetState)
-        return if (effective != null && effective != selected) {
-            EngineFallbackUi(selected = mapEngine(selected), effective = mapEngine(effective))
+    private fun mapEngineFallback(live: LiveSetupState): EngineFallbackUi? {
+        val effective = live.effectiveEngine
+        return if (effective != null && effective != live.selectedEngine) {
+            EngineFallbackUi(selected = mapEngine(live.selectedEngine), effective = mapEngine(effective))
         } else {
             null
         }
