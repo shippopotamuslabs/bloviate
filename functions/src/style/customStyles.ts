@@ -230,8 +230,8 @@ export function createDeleteCustomStyleHandler(deps: CustomStylesDeps) {
 
 const crudOptions = {
   // Same posture as styleText: no secrets needed (CRUD touches Firestore only),
-  // App Check not enforced yet for the same reason (client mints no tokens).
-  enforceAppCheck: false,
+  // App Check enforced (BLO-172).
+  enforceAppCheck: true,
   timeoutSeconds: 30,
   memory: "512MiB" as const,
 };
