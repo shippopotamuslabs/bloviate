@@ -4,36 +4,34 @@
 
 Kotlin and Compose idioms, naming, formatting, and stability rules.
 
+> **GLO-13 (2026-10-25):** the shared code style rules now live in the
+> gospels submodule: `contracts/gospel/CODE-STYLE-GOSPEL.md`. This
+> contract keeps Bloviate's example tables, local rule variants, and
+> enforcement lines; the gospel carries the shared rule text.
+
 ---
 
 ## Strict Boundaries
 
-| Always | Never |
-| :--- | :--- |
-| Use `val` over `var` and immutable collections by default. | Use `!!` (non-null assert) without `requireNotNull()`. |
-| Accept `modifier: Modifier = Modifier` as the **last** parameter. | Apply the passed `modifier` to an inner element instead of the outermost layout. |
-| Use `kotlinx.collections.immutable` in UI state classes. | Scatter `@Stable` or `@Immutable` preemptively without profiling. |
-| Prefer method references (`::onModeChange`) for callbacks. | Create new lambda instances inside `LazyColumn` or `LazyRow` item blocks. |
-| Use `stateIn` with `WhileSubscribed(5_000)` for ViewModel state. | Manually `.collect` and `.update` state inside `viewModelScope.launch`. |
-| Use `collectAsStateWithLifecycle()` in Compose. | Use `collectAsState()`, `GlobalScope`, or `runBlocking`. |
-| Use `derivedStateOf` for state that depends on other state. | Perform heavy calculations or filtering directly in the Composable body. |
-| Prefer Slot APIs (`content: @Composable () -> Unit`) for layout flexibility. | Pass 10+ specific data parameters into a single "God Composable." |
-| Hoist business state to the ViewModel. | Hoist ephemeral UI state (focus, animation) out of Compose unnecessarily. |
-| Use `CompositionLocal` only for truly cross-cutting themes/configs. | Use `CompositionLocal` to pass data that should be explicitly passed via parameters. |
-| Comment the "why" when logic is non-obvious. | Comment the "what" or leave `// TODO` comments in merged code. |
-| Use `state.update { }` to update `MutableStateFlow` | Use `state.value =` |
+The strict-boundaries table (val-over-var, modifier-last, immutable UI
+state, method references over new lambdas, `stateIn` with
+`WhileSubscribed(5_000)`, `collectAsStateWithLifecycle()`,
+`derivedStateOf`, slot APIs, business state in the ViewModel,
+`CompositionLocal` discipline, comment-the-why, `state.update { }`) lives
+in the Code Style Gospel: `contracts/gospel/CODE-STYLE-GOSPEL.md`
+("Strict Boundaries").
 
 ## 1. Kotlin Conventions
 
-- Kotlin 2.x with K2 compiler.
-- Explicit return types on all public functions and properties.
-- `val` over `var`. Immutable collections by default.
-- `when` over `if-else` chains for 3+ branches.
-- No `!!` (non-null assert). Use `requireNotNull()` with a message, or handle nulls explicitly.
-- Extension functions for repeated utility logic; keep them in focused files, not scattered.
-- Named arguments on any call with 3+ parameters or where meaning is ambiguous.
+The Kotlin conventions (Kotlin 2.x / K2, explicit return types on public
+API, `val` over `var`, immutable collections, `when` over long if-else
+chains, no `!!`, extension functions in focused files, named arguments)
+live in the Code Style Gospel: `contracts/gospel/CODE-STYLE-GOSPEL.md` §1.
 
 ## 2. Naming
+
+The naming conventions live in the Code Style Gospel:
+`contracts/gospel/CODE-STYLE-GOSPEL.md` §2. Bloviate's examples:
 
 | Element | Convention | Example |
 |---------|-----------|---------|
@@ -49,10 +47,17 @@ Kotlin and Compose idioms, naming, formatting, and stability rules.
 
 ## 3. File Organization
 
-- One public top-level composable per file.
-- Helper composables and preview composables go below the main public composable as `private`.
+The file organization rules (one public top-level composable per file;
+helper and preview composables below it as `private`) live in the Code
+Style Gospel: `contracts/gospel/CODE-STYLE-GOSPEL.md` §3.
 
 ## 4. Compose-Specific Rules
+
+Shared stability, modifier, state-hoisting, lambda, rigor, and
+composition rules: `contracts/gospel/CODE-STYLE-GOSPEL.md` §4. Bloviate's
+text below is kept in full — its §4.5 Performance Deferral rule is written
+for Bloviate's audio-frame and download state and outranks the gospel's
+generic wording where they differ.
 
 ### 4.1 Stability
 - UI state classes: `data class` (stable by default when all fields are stable types).
@@ -85,21 +90,26 @@ Kotlin and Compose idioms, naming, formatting, and stability rules.
 
 ## 5. Coroutines & Flow
 
-- `viewModelScope.launch` for ViewModel work; an injected, scope-owned `CoroutineScope` for service-layer work (never a scope leaked from a composable).
-- `collectAsStateWithLifecycle()` (not `collectAsState()`) for StateFlow in composables.
-- `LaunchedEffect(Unit)` for one-shot event collection from `Channel`/`Flow`.
-- Never use `GlobalScope`.
-- Never use `runBlocking` in production code.
-- Native/transcription calls are serialized (see `TRANSCRIPTION_RULES.md`); never call the engine concurrently.
+The coroutines and Flow rules (`viewModelScope`, injected scope-owned
+scopes for services, `collectAsStateWithLifecycle()`, `LaunchedEffect`
+one-shot collection, no `GlobalScope`, no `runBlocking` in production)
+live in the Code Style Gospel: `contracts/gospel/CODE-STYLE-GOSPEL.md` §5.
+
+**Bloviate local rule:** native/transcription calls are serialized (see
+`TRANSCRIPTION_RULES.md`); never call the engine concurrently.
 
 ## 6. KDoc & Comments
 
-- KDoc on public classes and non-obvious public functions only.
-- Inline comments only where the "why" is non-obvious. Never comment the "what" when the code is self-explanatory.
-- No `TODO` comments in merged code — use the issue tracker.
-- File-level comments only for contracts or architectural rationale.
+The KDoc and comment rules (KDoc on public classes and non-obvious public
+functions only; inline comments for the "why"; no `TODO` comments in
+merged code — use the issue tracker; file-level comments only for
+contracts or architectural rationale) live in the Code Style Gospel:
+`contracts/gospel/CODE-STYLE-GOSPEL.md` §6.
 
 ## 7. Formatting
+
+Shared formatting rules: `contracts/gospel/CODE-STYLE-GOSPEL.md` §7.
+Bloviate's version below adds the local Detekt line-length allowance.
 
 - 4-space indent (Kotlin standard).
 - Max line length: 120 characters (Detekt allows 140; keep to 120 unless a construct genuinely needs more).

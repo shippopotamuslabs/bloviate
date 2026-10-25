@@ -116,43 +116,20 @@ UI contract for Bloviate's two surfaces: the in-app screens (onboarding, setting
 ## 1. Design Language & Theme
 
 - Material 3; **one fixed dark color scheme for the whole app** — dark-only (v1.1 amendment, ENC-75): no light scheme, no dynamic color, screens never branch on theme internals. Hex values live only in the theme definition.
-- Spacing, shapes, typography, elevation, component defaults, and motion follow the **Compose Gospel**, embedded in full in §6 (v1.3, ENC-86): the `BloviateSpacing` object is the only spacing source in screens and shared components, and the theme carries the gospel type and shape scales. The M3 Expressive motion scheme is **adopted** (ENC-90): the catalog pins material3 1.5.0-beta01, the newest milestone with the Expressive API public, and the theme runs `MotionScheme.expressive()` (see the adoption notes in §6.2 and §6.7).
+- Spacing, shapes, typography, elevation, component defaults, and motion follow the **Compose Gospel** (§6; the gospel text lives in `contracts/gospel/COMPOSE-GOSPEL.md` since GLO-13): the `BloviateSpacing` object is the only spacing source in screens and shared components, and the theme carries the gospel type and shape scales. The M3 Expressive motion scheme is **adopted** (ENC-90): the catalog pins material3 1.5.0-beta01, the newest milestone with the Expressive API public, and the theme runs `MotionScheme.expressive()` (see the adoption notes in §6.2 and §6.7).
 - The bubble overlay wears the same fixed scheme (v1.2, ENC-85): it renders over other apps but no longer follows the system theme — one canonical palette for screens and overlay alike.
 
 ### Canonical palette — the Shippopotamus Palette Gospel (v1.2, ENC-85)
 
-Declared canonical for all Shippopotamus apps by the user, 2026-10-19. Gospel rules: no pure black/white (halation) — canvas #0D0E11 with primary text #EDEEF0 at 15.8:1; elevation by lightness steps, never shadows; accents desaturated (≤60% saturation) so they don't vibrate on dark; secondary text stays WCAG AA.
+The palette gospel text lives in the gospels submodule:
+`contracts/gospel/PALETTE.md` — the token table, the rationale (no pure
+black/white, elevation by lightness steps, desaturated accents, WCAG AA
+secondary text), and the on-accent foreground / container-tint
+computations. It is no longer embedded here (GLO-13). The §1 bullets
+above carry Bloviate's local theme decisions (dark-only; the bubble
+overlay wears the same fixed scheme); hex values live only in the theme
+definition and the gospel.
 
-| Token | Hex | Role |
-|-------|-----|------|
-| bg-base | #0D0E11 | App canvas (M3 `background`, `surfaceContainerLowest`) |
-| bg-subtle | #111216 | Navbar / tab bar (`surfaceContainerLow`, tab bar container) |
-| surface-1 | #181A20 | Cards, sheets (M3 `surface`, `surfaceContainer`) |
-| surface-2 | #1F222A | Elevated / pressed (`surfaceContainerHigh`, `surfaceVariant`) |
-| surface-3 | #272A33 | Hover, modal, popover (`surfaceContainerHighest`) |
-| border-default | #2A2E39 | M3 `outline` |
-| border-strong | #343A48 | Extended token (emphasized borders) |
-| border-subtle | #20222E | M3 `outlineVariant` |
-| text-primary | #EDEEF0 | M3 `onBackground` / `onSurface` |
-| text-high | #C5C7DD | Secondary headings; `onPrimaryContainer` |
-| text-secondary | #A1A5B0 | M3 `onSurfaceVariant` |
-| text-tertiary | #858994 | Captions, metadata (extended token) |
-| text-faint | #6E7280 | Icons, disabled, placeholder (extended token) |
-| accent | #7A7CFF | M3 `primary` |
-| accent-hover | #8D8FFF | M3 `secondary`; hover states |
-| accent-active | #5F62B9 | Pressed/active states (extended token) |
-| accent-border-subtle | #4B4EBF | Extended token |
-| accent-deep | #3B3BAA | M3 `inversePrimary` |
-| accent-muted-bg | accent @ 15% alpha | Tinted accent surfaces |
-| focus-ring | accent @ 40% alpha | Focus indication |
-| success | #7DBE8C | M3 `tertiary`; status POSITIVE; bubble Done |
-| warning | #D9B07A | Status ATTENTION (extended semantic) |
-| danger | #E07A7A | M3 `error`; bubble Error + dismiss treatments |
-| info | #7BB5D6 | Status ACCENT (extended semantic) |
-| bg-scrim | bg-base @ 80% alpha | Bottom-sheet scrim |
-| surface-overlay | #1F222AF2 | Floating surface over content |
-
-Foregrounds on bright gospel surfaces (accent, semantics) are bg-base — computed, it beats white on every one (accent 5.66:1 vs 3.41:1). Container tints for the accent and semantics are exact alpha composites over their base surface (accent @ 30% over bg-base; semantics @ 16% over surface-1), kept opaque so overlay surfaces never turn translucent. The four semantic colors are first-class theme colors (`BloviateSemanticColors`), consumed by the status chips/pills and the bubble's Done/Error states.
 - Unidirectional data flow. Full state hoisting. Minimal recompositions.
 - In-app screens are utility UI in **dashboard form** (v1.1, ENC-75): a screen's verdict fits in a header status pill; state is shown as chips, never as sentences; the control matches the job (switch for on/off, segmented control for a small exclusive choice, radio list for a longer one, the row itself as a settings deep-link); at most one hint line per row; explanations live in one-line footers, not paragraphs. The bubble is still the product's face — screens get clarity, now with polish.
 
@@ -206,94 +183,50 @@ Preview composables must NOT reference Hilt or real ViewModels. Use fake present
 
 ## 6. The Compose Gospel — Canonical UI System (v1.3, ENC-86)
 
-Declared canonical for Bloviate / Stratum / Enclave by the user, 2026-10-19 (Material 3 + M3 Expressive, Android 16 QPR1). Embedded here **in full** under the user's direction (see the v1.3 amendment note): this section plus §1's palette are the complete design law for this repo. Where this section's generic component list mentions a component Bloviate does not use, the spec still stands as the default when that component is introduced.
-
-**Why this works:**
-1. 8dp grid + 4dp micro: consistent spacing per Material; everything aligns, no random 5dp/7dp. Layouts feel calm and scannable.
-2. 48dp touch targets are law: `Modifier.minimumInteractiveComponentSize()` on custom interactives — even if the visible size is smaller, the hit area auto-expands to 48dp. Accessibility + fat-finger research, not preference.
-3. Elevation is tint, not shadow, in dark: shadows become invisible on dark; convey elevation with surface tint — a subtle tonal wash. Inverse rhythm: raised is slightly LIGHTER than base in dark mode.
-4. Shape system = hierarchy: nested radius = outer radius − padding (28dp card with 12dp padding holds 16dp corners). Buttons use capsule (radius = half height); cards use fixed radii. Don't invent radii.
-5. M3 Expressive is the baseline: morphable shapes (squircle, pill, cookie, clover), spring physics as the default motion scheme, emphasized typography with bigger/heavier display. Shipping old 2023 M3 looks dated.
+Declared canonical for Bloviate / Stratum / Enclave by the user, 2026-10-19 (Material 3 + M3 Expressive, Android 16 QPR1). The gospel text now lives in the gospels submodule — `contracts/gospel/COMPOSE-GOSPEL.md`, with §6.8 and §6.9 pointing at their own gospels — and is no longer embedded here (GLO-13, 2026-10-25). Together with §1's palette gospel, it is the complete design law for this repo. Where the gospel's generic component list mentions a component Bloviate does not use, the spec still stands as the default when that component is introduced. This section keeps the §6 numbering: each subsection points at the gospel and carries Bloviate's local adoption notes under it.
 
 ### 6.1 Spacing & layout
 
-- Base unit: 4dp. Major grid: 8dp — all screen margins, section gaps, card padding are multiples of 8. Micro grid: 4dp — internal icon-to-text, chip gaps.
-- Screen margin: 16dp mobile, 24dp tablet. Content max-width: 600dp centered on tablet.
-- Vertical rhythm: 8 / 16 / 24 / 32 / 48 / 64. **Never** use 5, 7, 10, 15, etc.
-- Implementation: the `BloviateSpacing` object (s4, s8, s12, s16, s24, s32, s48, s64) is the ONLY spacing source in app screens and shared dashboard components. Raw `dp` literals for padding/gaps/margins in presentation code are contract violations. Non-spacing geometry (icon glyph sizes, border/stroke widths, the overlay's waveform measurements) is component-local geometry, not spacing, and is exempt — it is documented where it lives.
+The spacing canon (4dp base unit, 8dp major grid, screen margins, content max-width, the 8 / 16 / 24 / 32 / 48 / 64 vertical rhythm — never 5, 7, 10, 15) lives in `contracts/gospel/COMPOSE-GOSPEL.md` ("Spacing & layout").
+
+**Bloviate local rule:** the `BloviateSpacing` object (s4, s8, s12, s16, s24, s32, s48, s64) is the ONLY spacing source in app screens and shared dashboard components. Raw `dp` literals for padding/gaps/margins in presentation code are contract violations. Non-spacing geometry (icon glyph sizes, border/stroke widths, the overlay's waveform measurements) is component-local geometry, not spacing, and is exempt — it is documented where it lives.
 
 ### 6.2 Shapes
 
-| Token | Radius | Use |
-|-------|--------|-----|
-| extraSmall | 4dp | Text field top, chips' small containers, small containers |
-| small | 8dp | Default for cards/menus at low emphasis; status chips |
-| medium | 12dp | Cards, dialogs, sheets at medium emphasis |
-| large | 16dp | Large cards, FAB, medium-emphasis interactive/expandable |
-| extraLarge | 28dp | Bottom sheets, large dialogs, hero containers; the recording bar |
-| full (pill) | 100% | Buttons, FABs, toggle track, active nav indicator, status pill |
+The shape scale (extraSmall 4dp, small 8dp, medium 12dp, large 16dp, extraLarge 28dp, full pill), the nested-radius rule (child radius = parent radius − padding), and the expressive shape vocabulary live in `contracts/gospel/COMPOSE-GOSPEL.md` ("Shapes").
 
-- Nested rule: child radius = parent radius − padding (e.g. 28dp sheet + 12dp padding = 16dp inner card).
-- Expressive shapes (Cookie4Sided, Clover, Squircle, Arch) are for loaders, FAB morph, and button press morph; buttons morph pill → 12dp + scale 0.96 on press with high-stiffness springs (pressed shape per the Button Shape Gospel, §6.8). *Adoption note (ENC-90): adopted. The catalog pins material3 1.5.0-beta01 (Compose BOM 2026.09.00), the milestone line whose Expressive classes are public API; `BloviateTheme` is a `MaterialExpressiveTheme` on `MotionScheme.expressive()`, stock buttons inherit the library's pressed-shape morph under it, and the polygon presets (Cookie4Sided, Clover4Leaf, Arch — plus the design system's own Circle and Pill) are exposed as `BloviateMorphShapes` for the first component whose spec calls for a hand-driven morph; no Bloviate component calls for one yet. (The pinned artifact has no preset literally named Squircle; its Square preset is the square member of the family.) The pin diverges from Enclave's catalog under the user's ENC-90 direction — see the v1.4 amendment.*
+**Bloviate local notes:**
+- Buttons morph pill → 12dp + scale 0.96 on press with high-stiffness springs (pressed shape per the Button Shape Gospel, §6.8).
+- *Adoption note (ENC-90): adopted. The catalog pins material3 1.5.0-beta01 (Compose BOM 2026.09.00), the milestone line whose Expressive classes are public API; `BloviateTheme` is a `MaterialExpressiveTheme` on `MotionScheme.expressive()`, stock buttons inherit the library's pressed-shape morph under it, and the polygon presets (Cookie4Sided, Clover4Leaf, Arch — plus the design system's own Circle and Pill) are exposed as `BloviateMorphShapes` for the first component whose spec calls for a hand-driven morph; no Bloviate component calls for one yet. (The pinned artifact has no preset literally named Squircle; its Square preset is the square member of the family.) The pin diverges from Enclave's catalog under the user's ENC-90 direction — see the v1.4 amendment.*
 
 ### 6.3 Typography
 
-Font: Shipopotamus Sans; fallback Roboto Flex / Google Sans Flex variable. *Adoption note (ENC-86): no Shipopotamus Sans asset exists yet, so the theme leaves the family unset — the platform default sans carries the scale below; the brand font lands in the theme definition only, when it ships.*
+The full M3 type scale (sizes, line heights, weights) lives in `contracts/gospel/COMPOSE-GOSPEL.md` ("Typography"). The dark-mode astigmatism rule stands: **never weight 300 (Light) on dark** — body is 400–500, emphasis 600.
 
-| Style | Size / line height | Weight | Notes |
-|-------|--------------------|--------|-------|
-| displayLarge | 57sp / 64sp | 400 | Hero only; letter-spacing −0.25 |
-| displayMedium | 45sp / 52sp | 400 | |
-| displaySmall | 36sp / 44sp | 400 | |
-| headlineLarge | 32sp / 40sp | 400 | |
-| headlineMedium | 28sp / 36sp | 400 | |
-| headlineSmall | 24sp / 32sp | 400 | |
-| titleLarge | 22sp / 28sp | 500 SemiBold (600) | Card titles, top bar; emphasized in Expressive |
-| titleMedium | 16sp / 24sp | 500 Medium | List titles, buttons |
-| titleSmall | 14sp / 20sp | 500 Medium | |
-| labelLarge | 14sp / 20sp | 500 Medium | **Button labels — all buttons use labelLarge** |
-| labelMedium | 12sp / 16sp | 500 Medium | |
-| labelSmall | 11sp / 16sp | 500 Medium | |
-| bodyLarge | 16sp / 24sp | 400 | Main reading |
-| bodyMedium | 14sp / 20sp | 400 | Secondary reading; default text-field input |
-| bodySmall | 12sp / 16sp | 400 | Captions, supporting text; letter-spacing +0.15 |
-
-- Dark-mode astigmatism rule: **never weight 300 (Light) on dark**. Body is 400–500, emphasis 600.
+**Bloviate local notes:**
+- Font: Shipopotamus Sans; fallback Roboto Flex / Google Sans Flex variable. *Adoption note (ENC-86): no Shipopotamus Sans asset exists yet, so the theme leaves the family unset — the platform default sans carries the gospel scale; the brand font lands in the theme definition only, when it ships.*
 - The full scale is pinned in the theme (`BloviateTypography`) and asserted by unit tests; components consume `MaterialTheme.typography`, never ad-hoc `TextStyle`s.
 
 ### 6.4 Elevation (dark)
 
-Do NOT use drop shadows in dark. Tonal elevation, mapped to the palette's surface ladder (§1):
+Do NOT use drop shadows in dark. The tonal elevation ladder (surface + tint at 0/1/3/6dp, mapped to the §1 palette ladder) lives in `contracts/gospel/COMPOSE-GOSPEL.md` ("Elevation (dark)"). Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` tokens; `surfaceTint` = accent.
 
-| Elevation | Surface | Tint |
-|-----------|---------|------|
-| 0dp | bg-base #0D0E11 | no tint |
-| 1dp | surface-1 #181A20 | 5% primary tint overlay |
-| 3dp | surface-2 #1F222A | 8% tint — cards on hover/focus |
-| 6dp | surface-3 #272A33 | 11% tint — bottom sheets, dialogs |
-
-Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` tokens; `surfaceTint` = accent. (The bubble overlay's `Surface` elevation is window treatment over other apps, governed by §3, not by this table.)
+**Bloviate local note:** the bubble overlay's `Surface` elevation is window treatment over other apps, governed by §3, not by the gospel's elevation table.
 
 ### 6.5 Component specs (the defaults)
 
-- **Buttons** — Height 40dp; shape full pill; label = labelLarge; padding 24dp text-only / 16dp with icon leading; icon 18dp; gap 8dp. Emphasis order high→low: Filled → Tonal → Elevated → Outlined → Text. Filled: container accent (#7A7CFF) with the bg-base foreground (ENC-85's computed higher contrast: 5.66:1 vs white's 3.41:1); primary CTA uses the Large 56dp height. Tonal: container accent-muted (accent @ 15%), foreground text-primary. Elevated: surface-1 + 1dp tonal elevation. Outlined: 1dp border-default, no fill. Text: 12dp horizontal padding, no container. Icon button: 40×40 + 8dp padding, icon 24dp. Segmented / ToggleButton: height 40dp, padding 24dp, selected uses the tonal container. Press state: corner morph 50% → 12dp + scale 0.96 + ripple, on springs. Button shape language per §6.8: full pill by default; the square variant (12dp medium / 16dp large) only for toolbar/secondary/dense contexts — never mixed randomly in the same row; one screen = one button shape language.
-- **FAB** — Small 40dp, medium 56dp, large 96dp (Expressive). Shape large 16dp or full for extended. Container accent, icon 24dp. Extended FAB: height 56dp, labelLarge + 16dp icon gap.
-- **Text fields** — Default container height 56dp; padding 8dp vertical, 16dp horizontal without icons / 12dp with icons; icon-to-text gap 16dp; supporting-text top gap 4dp; counter gap 16dp. Filled: container surface-2, shape extraSmall top only (4dp top radius, 0 bottom), active indicator 2dp accent, inactive 1dp border. Outlined: container transparent, outline 1dp border-default, focused 2dp accent, shape extraSmall 4dp all corners, label padding 4dp left/right. Input text bodyLarge; label floats bodySmall → labelSmall; supporting text bodySmall. Never pure-white label — text-secondary. (Stock M3 fields already enforce the 56dp container, the indicator widths, and the bodyLarge input style; the theme's type scale supplies the rest.)
-- **Cards** — Elevated: surface-1 + 1dp tonal elevation. Filled: surface-2 flat. Outlined: transparent + 1dp border-default. Shape medium 12dp default, large 16dp for hero cards. Content padding 16dp. On click: ripple + elevate to 3dp. Nested content: inner radius = 12dp − 8dp padding = 4dp.
-- **Chips** — All 32dp height, label labelLarge, padding horizontal 16dp, icon gap 8dp. Assist: shape small 8dp, outline 1dp. Filter: shape small, check icon 18dp, selected = tonal container. Input: avatar 24dp + label + close 18dp. Suggestion: tonal container.
-- **Switch / toggle** — Track 32dp high × 52dp wide, shape full pill; thumb 24dp; inactive track = border-default color; active track = accent; touch target auto-expands to 48dp. (Stock M3 `Switch` implements this geometry, including the 24dp checked thumb.) Colors are **theme-owned** (`bloviateSwitchColors()`, ENC-88) — stock M3 switch colors on this scheme are banned: they paired an outline-colored thumb with a surfaceVariant track at 1.17:1 and the OFF knob vanished. The gospel pairings: OFF = text-primary thumb (11.7:1 on the track) on the border-default track, rimmed text-tertiary (≥5:1 against both the card surface and bg-base); ON = accent track with the bg-base thumb (5.66:1, the §1 on-accent decision).
-- **Checkbox / radio** — 20dp visible, 48dp touch target auto-expanded. Shape small 4dp for checkbox, full for radio. Active = accent.
-- **Slider** — Track 4dp height; active track accent; inactive border-default; thumb 20dp; halo 40dp on press; touch target 48dp height.
-- **Bottom sheet / dialog** — Bottom sheet: shape extraLarge 28dp top only, container surface-3 at 6dp elevation + 11% tint, drag handle 32×4dp in text-faint, scrim = the palette's bg-scrim. (A Haze sheet instead follows §6.9: `hazeChild` + `ShippopotamusHazeSheet` + surface-3 tint, no opaque scrim.) Dialog: shape extraLarge 28dp, container surface-3, padding 24dp, button-row gap 8dp, title titleLarge.
-- **Navigation** — Navigation bar (mobile): height 80dp, 3–5 items, active indicator 32dp height, full pill shape, icon 24dp, label labelMedium. Container = glass per §6.9 (always glass, never solid — supersedes the earlier solid bg-subtle container). TopAppBar: transparent at rest, glass when scrolled, per §6.9. Navigation rail (tablet): width 80dp, same active indicator. TopAppBar small: 64dp height, titleLarge; medium 112dp; large 152dp (Expressive uses bigger, heavier display type for large).
-- **List item** — One-line 56dp, two-line 72dp, three-line 88dp. Leading icon 24dp, padding 16dp, gap 16dp. Title titleMedium; subtitle bodyMedium in text-secondary.
+The component defaults — buttons, FAB, text fields, cards, chips, switch/toggle, checkbox/radio, slider, bottom sheet/dialog, navigation, list items — live in `contracts/gospel/COMPOSE-GOSPEL.md` ("Component specs (defaults)"). Button shape language is governed by §6.8; bars and sheets by §6.9 where they disagree with the component specs.
+
+**Bloviate local notes:**
+- **Switch colors (ENC-88):** Colors are **theme-owned** (`bloviateSwitchColors()`, ENC-88) — stock M3 switch colors on this scheme are banned: they paired an outline-colored thumb with a surfaceVariant track at 1.17:1 and the OFF knob vanished. The gospel pairings: OFF = text-primary thumb (11.7:1 on the track) on the border-default track, rimmed text-tertiary (≥5:1 against both the card surface and bg-base); ON = accent track with the bg-base thumb (5.66:1, the §1 on-accent decision).
 
 ### 6.6 Accessibility & motion (non-negotiable)
 
-- Touch: 48×48dp minimum for EVERY interactive element. Use `Modifier.minimumInteractiveComponentSize()` on custom interactives (e.g. dashboard rows); radio/checkbox hit areas expand to 48×48 even when the visible control is smaller. This is Material behavior parity.
-- Text: mobile default bodyLarge 16sp is the readable floor with the weights above.
-- Motion: the M3 Expressive motion scheme (`MotionScheme.expressive()`) is the theme default — spring physics, not FastOutSlowIn. Standard easing: emphasized for hero, standard for containers, 300–500ms. Shape morphing is a first-class interaction primitive. Keep motion functional (the Strict Boundaries table still bans decorative/cinematic motion — Expressive springs serve press feedback and state transitions, not decoration). *Adoption status: adopted (ENC-90) — the theme provides `MotionScheme.expressive()` via `MaterialExpressiveTheme` (material3 1.5.0-beta01; see the §6.2 adoption note). Stock components that read the theme's motion scheme inherit it; any component the library has not yet migrated to the scheme keeps its built-in springs, and no custom motion language is invented locally. The bubble overlay's former per-transition springs (ENC-93) are retired (ENC-167, §3): the overlay root runs no size animation and is not replaced by the scheme.*
-- Haptics: light click on toggle/switch, medium on FAB press, via `HapticFeedback`.
+The accessibility and motion canon (48×48dp minimum touch target for every interactive element via `minimumInteractiveComponentSize()`, the readable text floor, the M3 Expressive spring motion scheme, haptics) lives in `contracts/gospel/COMPOSE-GOSPEL.md` ("Accessibility & motion"). §5 of this contract carries the repo-level accessibility rules alongside it.
+
+**Bloviate local notes:**
+- Motion stays functional only (the Strict Boundaries table bans decorative/cinematic motion): Expressive springs serve press feedback and state transitions, not decoration.
+- *Adoption status: adopted (ENC-90) — the theme provides `MotionScheme.expressive()` via `MaterialExpressiveTheme` (material3 1.5.0-beta01; see the §6.2 adoption note). Stock components that read the theme's motion scheme inherit it; any component the library has not yet migrated to the scheme keeps its built-in springs, and no custom motion language is invented locally. The bubble overlay's former per-transition springs (ENC-93) are retired (ENC-167, §3): the overlay root runs no size animation and is not replaced by the scheme.*
 
 ### 6.7 Theme wiring (how §6 reaches code)
 
@@ -303,178 +236,12 @@ Use `surfaceContainer` / `surfaceContainerHigh` / `surfaceContainerHighest` toke
 
 ### 6.8 Button Shape Gospel — Canonical (v1.5, 2026-10-20)
 
-Declared canonical by the user, 2026-10-20, for Bloviate / Stratum / Enclave and all future Shippopotamus apps. Embedded here **in full** under the user's direction, like §1 and §6: this contract is self-contained. This section governs button shape specifically and supersedes §6.2/§6.5 wherever they disagree on button shape or button press morph.
+Declared canonical by the user, 2026-10-20, for Bloviate / Stratum / Enclave and all future Shippopotamus apps. The gospel text lives in the gospels submodule: `contracts/gospel/BUTTON-SHAPE-GOSPEL.md` — the FULL PILL default (`CircleShape`), the allowed SQUARE variant (12dp medium / 16dp large), the one-shape-language-per-screen rule, and the shared 12dp pressed shape with its Compose implementation. It is no longer embedded here (GLO-13). This section governs button shape specifically and supersedes §6.2/§6.5 wherever they disagree on button shape or button press morph.
 
-**Default for Bloviate / consumer: FULL PILL**
-
-- Shape: `CircleShape` / 9999px / full token (`ShippopotamusButtonShape`).
-- Why: empirically friendliest, highest tap recognition, matches Google Phone, Gboard, etc. More rounded corners + pill buttons are the M3 signature.
-
-**Allowed variant for toolbars / secondary / dense enterprise: SQUARE**
-
-- Shape: `RoundedCornerShape(12.dp)` for medium buttons, `RoundedCornerShape(16.dp)` for large (`ShippopotamusButtonShapeSquare`).
-- When to use: inside a card that already has 12dp radius — use an 8dp inner button (nested radius = outer − padding); data-dense toolbar, filter bar, table actions; when you want the Linear/Raycast serious vibe vs. bubbly consumer.
-
-**Rules (non-negotiable)**
-
-- Never mix randomly in the same row. One screen = one button shape language.
-- If you use the square variant, it still morphs on press to the same pressed shape as the pill variant: `ShippopotamusPressedShape = RoundedCornerShape(12.dp)`.
-
-**Compose implementation**
-
-```kotlin
-val ShippopotamusButtonShape = CircleShape // DEFAULT PILL
-val ShippopotamusButtonShapeSquare = RoundedCornerShape(12.dp) // ALLOWED VARIANT (medium; 16.dp for large)
-val ShippopotamusPressedShape = RoundedCornerShape(12.dp) // Both morph to this on press
-
-Button(
-  shape = ShippopotamusButtonShape,
-  modifier = Modifier.minimumInteractiveComponentSize() // 48dp enforced
-) { Text("Primary", style = MaterialTheme.typography.labelLarge) }
-
-// Expressive press morph
-val corner by animateDpAsState(if (pressed) 12.dp else 100.dp, spring(StiffnessHigh))
-val scale by animateFloatAsState(if (pressed) 0.96f else 1f)
-```
-
-*Adoption note for this repo:* Bloviate's stock buttons already inherit the pill default from the theme (`BloviateShapes.Pill = CircleShape`, §6.7), so the default needs no code change. The tokens above name the contract-level shapes; wiring them as named theme tokens, and any square-variant use, is implementation work under a future ticket — this amendment changes the contract, not shipped screens.
+*Adoption note for this repo:* Bloviate's stock buttons already inherit the pill default from the theme (`BloviateShapes.Pill = CircleShape`, §6.7), so the default needs no code change. The gospel tokens name the contract-level shapes; wiring them as named theme tokens, and any square-variant use, is implementation work under a future ticket — this amendment changes the contract, not shipped screens.
 
 ### 6.9 Glass Bars Gospel — Top + Bottom + Haze (v1.6, 2026-10-20)
 
-Declared canonical by the user, 2026-10-20, for Bloviate / Stratum / Enclave and all future Shippopotamus apps. Uses **Haze 2.0** (Chris Banes); Android 15+ edge-to-edge enforced. Embedded here **in full** under the user's direction, like §6.8: this contract is self-contained. This section governs bars, sheets, and overlay glass, and supersedes §6.5 wherever they disagree on those surfaces.
-
-**Dependency**
-
-```kotlin
-implementation("dev.chrisbanes.haze:haze:2.0.1") // core blur
-implementation("dev.chrisbanes.haze:haze-glass:2.0.1") // refraction Glass (optional, for hero)
-```
-
-Haze provides hardware-accelerated visual effects — blur, refraction-driven Glass, and custom effects with reusable config.
-
-**Foundation — edge-to-edge (required for glass to work)**
-
-- Activity: `enableEdgeToEdge()` — status + gesture nav are transparent, content draws behind.
-- Scaffold: `contentWindowInsets = WindowInsets(0,0,0,0)` — insets are handled manually.
-- Main body: `Modifier.hazeSource(state)` + `.windowInsetsPadding` + `.consumeWindowInsets`.
-
-**Reusable styles — one `HazeState` per screen, shared; don't inline magic numbers**
-
-```kotlin
-val hazeState = rememberHazeState()
-
-val ShippopotamusHazeTopBar = HazeStyle.Unspecified.copy(
-  blurRadius = 24.dp, // 20–28dp for top bar — enough to read title over photos
-  tint = Color(0xFF0D0E11).copy(alpha = 0.65f), // bg-base #0D0E11 at 65%
-  noiseFactor = 0.5f, // micro-texture prevents banding on OLED
-)
-
-val ShippopotamusHazeBottomBar = HazeStyle.Unspecified.copy(
-  blurRadius = 20.dp,
-  tint = Color(0xFF181A20).copy(alpha = 0.75f), // surface-1 #181A20 at 75%
-  noiseFactor = 0.5f
-)
-
-val ShippopotamusHazeSheet = HazeStyle.Thick // preset: heavy blur for bottom sheets
-```
-
-Usage pattern: background scrollable = `hazeSource`; bars = `hazeChild`; **never put haze behind body text directly — behind containers only.**
-
-**Top bar (TopAppBar)** — Height small 64dp (default), medium 112dp, large 152dp for hero. Container TRANSPARENT when at top (scroll offset 0), becomes glass when scrolled. Shape: none — full width, no rounded corners. Content: title `titleLarge`, icons 24dp, padding 16dp. Border: none — blur provides separation. When scrolled: glass + subtle 1dp bottom hairline #2A2E39 at 40%, or borderless for pure glass. Content scrolls underneath, blurred — movement is visible but the title stays readable.
-
-```kotlin
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ShippopotamusTopBar(
-  title: String,
-  hazeState: HazeState,
-  scrollBehavior: TopAppBarScrollBehavior
-) {
-  val isScrolled = scrollBehavior.state.overlappedFraction > 0.01f
-
-  TopAppBar(
-    title = { Text(title, style = MaterialTheme.typography.titleLarge) },
-    navigationIcon = { IconButton({}) { Icon(Icons.Default.Menu, null) } },
-    actions = { IconButton({}) { Icon(Icons.Default.Search, null) } },
-    scrollBehavior = scrollBehavior,
-    colors = TopAppBarDefaults.topAppBarColors(
-      containerColor = Color.Transparent, // transparent when not scrolled
-      scrolledContainerColor = Color.Transparent // we handle via haze
-    ),
-    modifier = Modifier
-      .hazeChild(
-        state = hazeState,
-        style = if (isScrolled) ShippopotamusHazeTopBar else HazeStyle.Unspecified.copy(blurRadius = 0.dp)
-      )
-      .then(
-        if (isScrolled) Modifier.drawWithContent {
-          drawContent()
-          drawLine(Color(0xFF2A2E39).copy(0.4f), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
-        } else Modifier
-      )
-  )
-}
-
-// In screen:
-val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior() // or enterAlwaysScrollBehavior()
-Scaffold(
-  modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-  topBar = { ShippopotamusTopBar("Bloviate", hazeState, scrollBehavior) },
-  containerColor = Color(0xFF0D0E11),
-  contentWindowInsets = WindowInsets(0,0,0,0)
-) { padding ->
-  LazyColumn(
-    Modifier
-      .fillMaxSize()
-      .hazeSource(state = hazeState, zIndex = 0f) // zIndex 0 = source
-      .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
-      .padding(padding)
-  ) { /* main body passes underneath top bar */ }
-}
-```
-
-**Bottom bar (NavigationBar)** — Height 80dp (68dp tighter is allowed, 80dp is canonical). Container ALWAYS glass — never solid; translucent tint + blur so content scrolls under. Shape: none for the bar; active indicator = full pill 32dp height, accent #7A7CFF at 15% fill. Icons 24dp, label `labelMedium`. Inactive #858994; active #EDEEF0 + accent indicator. Border: 100% borderless — blur is the separation. Gesture nav: `windowInsetsPadding(WindowInsets.navigationBars)` + `navigationBarsPadding` on content so the last item is not hidden behind the system pill. The bottom bar shares the screen's `hazeState` with the top bar so both blur the same source.
-
-```kotlin
-@Composable
-fun ShippopotamusBottomBar(hazeState: HazeState) {
-  var selected by remember { mutableStateOf(0) }
-
-  NavigationBar(
-    containerColor = Color.Transparent, // haze handles color
-    tonalElevation = 0.dp,
-    modifier = Modifier
-      .hazeChild(
-        state = hazeState,
-        style = ShippopotamusHazeBottomBar
-      )
-      .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-  ) {
-    listOf("Home", "Search", "Library").forEachIndexed { i, label ->
-      NavigationBarItem(
-        selected = i == selected,
-        onClick = { selected = i },
-        icon = { Icon(Icons.Default.Home, null) },
-        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-        colors = NavigationBarItemDefaults.colors(
-          selectedIconColor = Color(0xFFEDEEF0),
-          selectedTextColor = Color(0xFFEDEEF0),
-          indicatorColor = Color(0xFF7A7CFF).copy(alpha = 0.15f), // accent-muted
-          unselectedIconColor = Color(0xFF858994),
-          unselectedTextColor = Color(0xFF858994)
-        )
-      )
-    }
-  }
-}
-```
-
-**Where else to use Haze**
-
-1. Bottom sheet: sheet container = `hazeChild` with `ShippopotamusHazeSheet` + surface-3 #272A33 tint. Content underneath stays visible blurred — elevated without an opaque scrim.
-2. FAB over feed: extended FAB that blurs the feed behind it — small blur, 12dp.
-3. Image overlays: hero image with a glass chip (e.g. a "Live" badge) — haze-glass with refraction for liquid glass.
-
-**Performance:** Haze 2.0 adaptive rendering quality automatically drops quality on a low-end GPU. Keep `blurRadius <= 28dp`; avoid stacking more than 2 `hazeChild`s in the same frame.
+Declared canonical by the user, 2026-10-20, for Bloviate / Stratum / Enclave and all future Shippopotamus apps. Uses **Haze 2.0** (Chris Banes); Android 15+ edge-to-edge enforced. The gospel text lives in the gospels submodule: `contracts/gospel/GLASS-BARS-GOSPEL.md` — the Haze 2.0.1 dependency pins, the edge-to-edge foundation, the reusable Haze styles, and the top bar / bottom bar / sheet specs (the bottom navigation bar is always glass, never solid). It is no longer embedded here (GLO-13). This section governs bars, sheets, and overlay glass, and supersedes §6.5 wherever they disagree on those surfaces.
 
 *Adoption note for this repo:* Bloviate has **no Haze dependency yet** and its in-app screens are dashboard-form utility UI (§1/§2); the bubble overlay is not a Haze surface. Adding the dependency, the edge-to-edge foundation, and glass bars is implementation work under a future ticket — this amendment changes the contract, not shipped screens. The top-bar title consumes `MaterialTheme.typography.titleLarge` (theme-owned, §6.3 SemiBold); the user's pasted spec line saying "Medium" is superseded by the theme scale.
