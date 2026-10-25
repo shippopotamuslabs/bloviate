@@ -2,25 +2,20 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.shippopotamus.bloviate.domain.model.DictationEngine
-import com.shippopotamus.bloviate.domain.model.EffectiveEngineResolver
-import com.shippopotamus.bloviate.domain.model.ModelState
-import com.shippopotamus.bloviate.domain.model.OnboardingProgress
+import com.shippopotamus.bloviate.application.port.LiveSetupState
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleServiceRunningUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveOnboardingProgressUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveParakeetModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.domain.model.DictationEngine
+import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,27 +32,25 @@ import javax.inject.Inject
  * The wizard is a flow over the SAME live state the Setup screen
  * reads — watcher, overlay, microphone, both model stores, the engine
  * preference, the bubble's running state — plus one persisted record,
- * the user's place in the walk. Navigation (continue/back/skip/
- * finish/re-run) only ever writes that record; the shell shows the
- * wizard whenever the record is unfinished, so progress, resume, and
- * re-runs are the same mechanism.
+ * the user's place in the walk. That shared state arrives as one
+ * [LiveSetupState] from [ObserveLiveSetupStateUseCase] (BLO-175); this
+ * ViewModel folds in only its local transient state: the permission
+ * re-reads refreshed on resume and the test field's text. Navigation
+ * (continue/back/skip/finish/re-run) only ever writes that record; the
+ * shell shows the wizard whenever the record is unfinished, so
+ * progress, resume, and re-runs are the same mechanism.
  */
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
-    observeOnboardingProgress: ObserveOnboardingProgressUseCase,
+    private val observeLiveSetupState: ObserveLiveSetupStateUseCase,
     private val saveOnboardingProgress: SaveOnboardingProgressUseCase,
     private val isFieldWatcherEnabled: IsFieldWatcherEnabledUseCase,
     private val isOverlayPermissionGranted: IsOverlayPermissionGrantedUseCase,
     private val isMicPermissionGranted: IsMicPermissionGrantedUseCase,
     private val refreshMicPermission: RefreshMicPermissionUseCase,
-    observeBubbleServiceRunning: ObserveBubbleServiceRunningUseCase,
-    observeModelState: ObserveModelStateUseCase,
     private val ensureModel: EnsureModelUseCase,
-    observeParakeetModelState: ObserveParakeetModelStateUseCase,
     private val ensureParakeetModel: EnsureParakeetModelUseCase,
-    observeEnginePreference: ObserveEnginePreferenceUseCase,
     private val selectEngine: SelectEngineUseCase,
-    observeWatcherConnection: ObserveWatcherConnectionUseCase,
     private val isBatteryOptimizationExempt: IsBatteryOptimizationExemptUseCase,
 ) : ViewModel() {
     private val watcherEnabled = MutableStateFlow(isFieldWatcherEnabled())
@@ -67,90 +60,58 @@ class OnboardingViewModel @Inject constructor(
     private val testFieldText = MutableStateFlow("")
 
     /**
-     * The wizard's source of truth: navigation reads its current value
-     * directly instead of the derived [uiState], whose `WhileSubscribed`
-     * sharing only stays live while a surface collects it.
+     * The wizard's current place, read straight from the observed
+     * state's latest value: navigation reads it directly instead of the
+     * derived [uiState], whose `WhileSubscribed` sharing only stays
+     * live while a surface collects it. The observed state is shared
+     * eagerly at app scope, so its value is always the live record.
      */
-    private val onboardingProgress: StateFlow<OnboardingProgress> = observeOnboardingProgress()
+    private val currentProgress: OnboardingProgress
+        get() = observeLiveSetupState().value.onboardingProgress
 
-    // The watcher's supervision signals (ENC-129) ride together, as on
-    // the Setup screen: enablement refreshed on resume, connection live.
-    private val watcherSignals = combine(watcherEnabled, observeWatcherConnection()) { enabled, connected ->
-        enabled to connected
-    }
+    /**
+     * The four permission re-reads as one local slice: settings-posture
+     * reads refreshed on resume, folded into the observed durable state
+     * at the [uiState] combine.
+     */
+    private data class PermissionReads(
+        val watcherEnabled: Boolean,
+        val overlayPermissionGranted: Boolean,
+        val micPermissionGranted: Boolean,
+        val batteryExempt: Boolean,
+    )
 
-    // Overlay and battery exemption ride together for the same reason:
-    // both are settings reads refreshed on resume (ENC-129).
-    private val permissionSignals = combine(overlayPermissionGranted, batteryExempt) { overlay, exempt ->
-        overlay to exempt
-    }
-
-    private val baseUiState: StateFlow<OnboardingUiState> = combine(
-        onboardingProgress,
-        watcherSignals,
-        permissionSignals,
+    private val permissionReads = combine(
+        watcherEnabled,
+        overlayPermissionGranted,
         micPermissionGranted,
-        observeBubbleServiceRunning(),
-    ) { progress, (watcherOn, watcherConnected), (overlayGranted, exempt), micGranted, bubbleRunning ->
-        OnboardingUiState(
-            showWizard = !progress.finished,
-            step = progress.step.toUi(),
-            watcherEnabled = watcherOn,
-            watcherConnected = watcherConnected,
-            overlayPermissionGranted = overlayGranted,
-            micPermissionGranted = micGranted,
-            batteryExempt = exempt,
-            bubbleServiceRunning = bubbleRunning,
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-        initialValue = with(onboardingProgress.value) {
-            OnboardingUiState(
-                showWizard = !finished,
-                step = step.toUi(),
-                watcherEnabled = isFieldWatcherEnabled(),
-                watcherConnected = observeWatcherConnection().value,
-                overlayPermissionGranted = isOverlayPermissionGranted(),
-                micPermissionGranted = isMicPermissionGranted(),
-                batteryExempt = isBatteryOptimizationExempt(),
-                bubbleServiceRunning = observeBubbleServiceRunning().value,
-            )
-        },
+        batteryExempt,
+        ::PermissionReads,
     )
 
     val uiState: StateFlow<OnboardingUiState> = combine(
-        baseUiState,
-        observeModelState(),
-        observeParakeetModelState(),
-        observeEnginePreference(),
+        observeLiveSetupState(),
+        permissionReads,
         testFieldText,
-    ) { baseState, whisperState, parakeetState, engine, testText ->
-        baseState.copy(
-            whisperModelStatus = mapModelStatus(whisperState),
-            parakeetModelStatus = mapModelStatus(parakeetState),
-            selectedEngine = mapEngine(engine),
-            engineFallback = mapEngineFallback(engine, whisperState, parakeetState),
-            testFieldText = testText,
-        )
-    }.stateIn(
+        ::mapToUiState,
+    ).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STATE_SHARING_TIMEOUT_MS),
-        initialValue = baseUiState.value.copy(
-            whisperModelStatus = mapModelStatus(observeModelState().value),
-            parakeetModelStatus = mapModelStatus(observeParakeetModelState().value),
-            selectedEngine = mapEngine(observeEnginePreference().value),
-            engineFallback = mapEngineFallback(
-                observeEnginePreference().value,
-                observeModelState().value,
-                observeParakeetModelState().value,
+        initialValue = mapToUiState(
+            live = observeLiveSetupState().value,
+            permissions = PermissionReads(
+                watcherEnabled = watcherEnabled.value,
+                overlayPermissionGranted = overlayPermissionGranted.value,
+                micPermissionGranted = micPermissionGranted.value,
+                batteryExempt = batteryExempt.value,
             ),
+            testText = testFieldText.value,
         ),
     )
 
     /** Continue: advance one step and persist the new resume point; on the test step, finish. */
     fun onContinue() {
-        val current = onboardingProgress.value.step
+        val current = currentProgress.step
         val next = current.next()
         if (next == null) {
             onFinish()
@@ -161,7 +122,7 @@ class OnboardingViewModel @Inject constructor(
 
     /** Back: return one step and persist it; a no-op on the welcome step. */
     fun onBack() {
-        val previous = onboardingProgress.value.step.previous() ?: return
+        val previous = currentProgress.step.previous() ?: return
         persist(OnboardingProgress(step = previous, finished = false))
     }
 
@@ -169,7 +130,7 @@ class OnboardingViewModel @Inject constructor(
     fun onSkip() {
         persist(
             OnboardingProgress(
-                step = onboardingProgress.value.step,
+                step = currentProgress.step,
                 finished = true,
             ),
         )
@@ -179,7 +140,7 @@ class OnboardingViewModel @Inject constructor(
     fun onFinish() {
         persist(
             OnboardingProgress(
-                step = onboardingProgress.value.step,
+                step = currentProgress.step,
                 finished = true,
             ),
         )
@@ -245,6 +206,27 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
+    private fun mapToUiState(
+        live: LiveSetupState,
+        permissions: PermissionReads,
+        testText: String,
+    ): OnboardingUiState =
+        OnboardingUiState(
+            showWizard = !live.onboardingProgress.finished,
+            step = live.onboardingProgress.step.toUi(),
+            watcherEnabled = permissions.watcherEnabled,
+            watcherConnected = live.watcherConnected,
+            overlayPermissionGranted = permissions.overlayPermissionGranted,
+            micPermissionGranted = permissions.micPermissionGranted,
+            batteryExempt = permissions.batteryExempt,
+            bubbleServiceRunning = live.bubbleServiceRunning,
+            whisperModelStatus = mapModelStatus(live.whisperModelState),
+            parakeetModelStatus = mapModelStatus(live.parakeetModelState),
+            selectedEngine = mapEngine(live.selectedEngine),
+            engineFallback = mapEngineFallback(live),
+            testFieldText = testText,
+        )
+
     private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
         when (modelState) {
             ModelState.Absent -> ModelUiStatus.Absent
@@ -262,15 +244,11 @@ class OnboardingViewModel @Inject constructor(
             DictationEngine.PARAKEET -> DictationEngineUi.PARAKEET
         }
 
-    /** The fallback note's data, via the shared resolver — same rule as the Setup screen. */
-    private fun mapEngineFallback(
-        selected: DictationEngine,
-        whisperState: ModelState,
-        parakeetState: ModelState,
-    ): EngineFallbackUi? {
-        val effective = EffectiveEngineResolver.resolve(selected, whisperState, parakeetState)
-        return if (effective != null && effective != selected) {
-            EngineFallbackUi(selected = mapEngine(selected), effective = mapEngine(effective))
+    /** The fallback note's data, from the read model's precomputed effective engine — same rule as Setup. */
+    private fun mapEngineFallback(live: LiveSetupState): EngineFallbackUi? {
+        val effective = live.effectiveEngine
+        return if (effective != null && effective != live.selectedEngine) {
+            EngineFallbackUi(selected = mapEngine(live.selectedEngine), effective = mapEngine(effective))
         } else {
             null
         }

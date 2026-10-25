@@ -8,6 +8,7 @@ import com.shippopotamus.bloviate.domain.model.BubbleTint
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.ResidentPresenceState
+import com.shippopotamus.bloviate.application.evaluator.LiveSetupStateResolver
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
@@ -17,14 +18,7 @@ import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGranted
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.application.port.UserProfile
-import com.shippopotamus.bloviate.application.usecase.ObserveAuthStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleAppearanceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleServiceRunningUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveParakeetModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveResidentPresenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStopUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
@@ -44,12 +38,14 @@ import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
 import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
+import com.shippopotamus.bloviate.testing.FakeOnboardingPort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
 import com.shippopotamus.bloviate.testing.FakeResidentPresencePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.FakeWatcherConnectionPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
@@ -78,6 +74,9 @@ class MainViewModelTest {
     private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
     private val fakeResidentPresencePort = FakeResidentPresencePort()
     private val fakeAuthSession = FakeAuthSession()
+    private val fakeOnboardingPort = FakeOnboardingPort()
+
+    private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
     private val fakeCustoms = FakeCustomStyleStorePort()
     private val fakeSync = FakeCustomStyleSyncPort()
     private lateinit var viewModel: MainViewModel
@@ -89,26 +88,32 @@ class MainViewModelTest {
 
     private fun buildViewModel(auth: FakeAuthSession): MainViewModel =
         MainViewModel(
+            observeLiveSetupState = ObserveLiveSetupStateUseCase(
+                LiveSetupStateResolver(
+                    watcherConnection = fakeWatcherConnectionPort,
+                    bubbleServiceState = fakeBubbleServiceStatePort,
+                    whisperStore = fakeModelStorePort,
+                    parakeetStore = fakeParakeetModelStorePort,
+                    enginePreference = fakeEnginePreferencePort,
+                    bubbleAppearance = fakeBubbleAppearancePort,
+                    residentPresence = fakeResidentPresencePort,
+                    authSession = auth,
+                    onboarding = fakeOnboardingPort,
+                    scope = resolverScope,
+                ),
+            ),
             isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
             isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
-            observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
             isMicPermissionGranted = IsMicPermissionGrantedUseCase(fakeMicPermissionPort),
             refreshMicPermission = RefreshMicPermissionUseCase(fakeMicPermissionPort),
-            observeModelState = ObserveModelStateUseCase(fakeModelStorePort),
             ensureModel = EnsureModelUseCase(fakeModelStorePort),
-            observeParakeetModelState = ObserveParakeetModelStateUseCase(fakeParakeetModelStorePort),
             ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
-            observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
             selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
-            observeBubbleAppearance = ObserveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
             saveBubbleAppearance = SaveBubbleAppearanceUseCase(fakeBubbleAppearancePort),
-            observeWatcherConnection = ObserveWatcherConnectionUseCase(fakeWatcherConnectionPort),
             isBatteryOptimizationExempt = IsBatteryOptimizationExemptUseCase(fakeBatteryExemptionPort),
-            observeResidentPresence = ObserveResidentPresenceUseCase(fakeResidentPresencePort),
             setAutoStartEnabled = SetAutoStartEnabledUseCase(fakeResidentPresencePort),
             recordBubbleUserStart = RecordBubbleUserStartUseCase(fakeResidentPresencePort),
             recordBubbleUserStop = RecordBubbleUserStopUseCase(fakeResidentPresencePort),
-            observeAuthState = ObserveAuthStateUseCase(auth),
             signInWithGoogle = SignInWithGoogleUseCase(auth),
             signOut = SignOutUseCase(auth),
             refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
@@ -412,6 +417,10 @@ class MainViewModelTest {
             fakeBubbleAppearancePort.publish(
                 BubbleAppearance(size = BubbleSize.LARGE, shape = BubbleShape.COOKIE, tint = BubbleTint.INFO),
             )
+            // BLO-175: the current appearance reaches the save path through
+            // the combined live state now, which settles asynchronously —
+            // let it land before the click reads it.
+            advanceUntilIdle()
 
             viewModel.onBubbleOpacityChange(0.5f)
             advanceUntilIdle()

@@ -5,22 +5,21 @@ import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.ModelState
 import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import com.shippopotamus.bloviate.domain.model.OnboardingStep
+import com.shippopotamus.bloviate.application.evaluator.LiveSetupStateResolver
+import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveBubbleServiceRunningUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveEnginePreferenceUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveOnboardingProgressUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveParakeetModelStateUseCase
-import com.shippopotamus.bloviate.application.usecase.ObserveWatcherConnectionUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveOnboardingProgressUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.testing.FakeAuthSession
 import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
+import com.shippopotamus.bloviate.testing.FakeBubbleAppearancePort
 import com.shippopotamus.bloviate.testing.FakeBubbleOverlayAccessPort
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStatePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
@@ -28,9 +27,11 @@ import com.shippopotamus.bloviate.testing.FakeMicPermissionPort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeOnboardingPort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
+import com.shippopotamus.bloviate.testing.FakeResidentPresencePort
 import com.shippopotamus.bloviate.testing.FakeWatcherAccessPort
 import com.shippopotamus.bloviate.testing.FakeWatcherConnectionPort
 import com.shippopotamus.bloviate.testing.MainDispatcherExtension
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -55,23 +56,36 @@ class OnboardingViewModelTest {
     private val fakeEnginePreferencePort = FakeEnginePreferencePort()
     private val fakeWatcherConnectionPort = FakeWatcherConnectionPort()
     private val fakeBatteryExemptionPort = FakeBatteryExemptionPort()
+    private val fakeBubbleAppearancePort = FakeBubbleAppearancePort()
+    private val fakeResidentPresencePort = FakeResidentPresencePort()
+    private val fakeAuthSession = FakeAuthSession(initialState = AuthState.Unauthenticated)
+
+    private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
 
     /** Builds the ViewModel over the current fake state; configure fakes first. */
     private fun buildViewModel(): OnboardingViewModel = OnboardingViewModel(
-        observeOnboardingProgress = ObserveOnboardingProgressUseCase(fakeOnboardingPort),
+        observeLiveSetupState = ObserveLiveSetupStateUseCase(
+            LiveSetupStateResolver(
+                watcherConnection = fakeWatcherConnectionPort,
+                bubbleServiceState = fakeBubbleServiceStatePort,
+                whisperStore = fakeModelStorePort,
+                parakeetStore = fakeParakeetModelStorePort,
+                enginePreference = fakeEnginePreferencePort,
+                bubbleAppearance = fakeBubbleAppearancePort,
+                residentPresence = fakeResidentPresencePort,
+                authSession = fakeAuthSession,
+                onboarding = fakeOnboardingPort,
+                scope = resolverScope,
+            ),
+        ),
         saveOnboardingProgress = SaveOnboardingProgressUseCase(fakeOnboardingPort),
         isFieldWatcherEnabled = IsFieldWatcherEnabledUseCase(fakeWatcherAccessPort),
         isOverlayPermissionGranted = IsOverlayPermissionGrantedUseCase(fakeBubbleOverlayAccessPort),
         isMicPermissionGranted = IsMicPermissionGrantedUseCase(fakeMicPermissionPort),
         refreshMicPermission = RefreshMicPermissionUseCase(fakeMicPermissionPort),
-        observeBubbleServiceRunning = ObserveBubbleServiceRunningUseCase(fakeBubbleServiceStatePort),
-        observeModelState = ObserveModelStateUseCase(fakeModelStorePort),
         ensureModel = EnsureModelUseCase(fakeModelStorePort),
-        observeParakeetModelState = ObserveParakeetModelStateUseCase(fakeParakeetModelStorePort),
         ensureParakeetModel = EnsureParakeetModelUseCase(fakeParakeetModelStorePort),
-        observeEnginePreference = ObserveEnginePreferenceUseCase(fakeEnginePreferencePort),
         selectEngine = SelectEngineUseCase(fakeEnginePreferencePort),
-        observeWatcherConnection = ObserveWatcherConnectionUseCase(fakeWatcherConnectionPort),
         isBatteryOptimizationExempt = IsBatteryOptimizationExemptUseCase(fakeBatteryExemptionPort),
     )
 
