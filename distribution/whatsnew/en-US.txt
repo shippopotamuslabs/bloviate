@@ -1,0 +1,5 @@
+First release.
+Talk into the bubble and your words land at the cursor. Transcription runs on your phone, and your audio stays on your phone.
+Pick a style and your dictation gets rewritten in that voice on the way in. Your facts, names, and numbers stay as you said them.
+Two dictation engines ship in the app: Parakeet by default, Whisper as the fallback.
+Your personal dictionary teaches it the words you use.

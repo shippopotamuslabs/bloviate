@@ -28,6 +28,7 @@ Every task maps to one or more binding contracts in `/contracts/`. Read the rele
 | Colors, typography, Compose component structure, previews, bubble overlay UI states, accessibility | `UI_DESIGN_SPEC.md` |
 | JUnit 5, Fakes vs Mocks, Robolectric, Turbine, state-based assertions, test coverage | `UNIT_TESTING.md` |
 | **Adding or editing any user-facing copy** — labels, setting descriptions, buttons, empty states, errors, notifications, onboarding, paywall copy, dialog text | `VOICE_RULES.md` — read it *before* writing the copy, not as a cleanup pass after |
+| Versioning, release prep, Play release notes, Play internal-track upload, the deploy workflow, release tags | `RELEASE.md` — read it *before* any release work; the derived `versionCode` rules and the release-prep PR gate in there bind every release |
 
 The copy row binds app chrome only. Persona style definitions and their output are **exempt by design** (persona output is character work; see `VOICE_RULES.md`), so persona tasks do not route through the voice contract — but the screens around the personas do.
 
@@ -113,13 +114,14 @@ Whenever production code is added or modified (new classes, public functions, lo
 - **No on-device LLM cleanup, in any phase** (user decision, 2026-10-17: too slow at the stop→text moment). Cleanup is the deterministic rule-based `TextPostProcessor` (`contracts/TRANSCRIPTION_RULES.md`).
 - Cloud processing, if ever built, is opt-in, off by default, API-based (no self-hosted GPU), and goes behind the `TranscriptionEngine` / `TextPostProcessor` seams. **Never ship a provider API key in the APK**; the key-distribution design must be solved and approved before any cloud code lands.
 
-### 3.6 Distribution Scope — Sideload First, Play Decision Deferred
+### 3.6 Distribution Scope — Sideload First, Play per the Release Contract
 
-Bloviate is a personal project distributed by sideload. Whether it is ever published on Google Play is the user's deferred decision (the plan's business case exists, but packaging is explicitly undecided).
+Bloviate was distributed by sideload while the Play decision was deferred. That decision is now taken up as a planned project (P-BLO-9, the Play launch sequence), and the release machinery for it landed in BLO-173.
 
-- Do **not** add Play Console, Play App Signing, bundle-for-Play, or store-release automation unasked.
-- If Play publication is ever taken up, expect heavy policy scrutiny of the AccessibilityService + overlay combination; that is a planned project, not a drive-by change.
-- Linear `Deployed` / `Released` states (§3.7) therefore mean manual sideload milestones on the **parent issue only**.
+- Play work follows `contracts/RELEASE.md`: derived `versionCode`, the release-prep PR gate, and a `workflow_dispatch`-only internal-track deploy that never writes to `main`. Read that contract before touching versioning, release notes, or the deploy workflow.
+- Do **not** add Play Console, Play App Signing, bundle-for-Play, or store-release automation beyond that contract unasked.
+- Play publication still carries heavy policy scrutiny of the AccessibilityService + overlay combination; that is the launch project's problem (BLO-151), not a drive-by change.
+- Linear `Deployed` / `Released` states (§3.7) therefore mean manual milestones on the **parent issue only**.
 
 ### 3.7 Linear Issue Tracking — Chunk-Based Trunk Workflow
 

@@ -176,11 +176,11 @@ Eight test files cover the style chain, the prompt builder, the output guard, en
 
 CI runs on GitHub Actions. Detekt and lint, the unit test suite in parallel legs, and the functions tests gate each pull request. Merges to main build the release.
 
-Distribution today is Firebase App Distribution. Every merge to main ships the release-signed APK to the Internal tester group. The Play Store listing is in preparation. Sideloading the debug or release APK works for anyone who builds it.
+Distribution today is Firebase App Distribution. Every merge to main ships the release-signed APK to the Internal tester group. The Play Store listing is in preparation, and the Play internal-track deploy machinery is in place (`.github/workflows/deploy-internal.yml`, rules in `contracts/RELEASE.md`); its first live dispatch rides the Play launch sequence. Sideloading the debug or release APK works for anyone who builds it.
 
 ## Status
 
-Version 1.0, versionCode 1. The app is in daily use by its author and a small internal group. The code is public so the work can be read, built, and forked. The production Firebase project, the signing key, and the model provider accounts stay private, and the subscription is a live product: forks get the full client and function source and bring their own backend.
+Version 1.0. The versionCode is not a stored number: it derives from the first-parent commit count of the checkout being built (see `contracts/RELEASE.md`). The app is in daily use by its author and a small internal group. The code is public so the work can be read, built, and forked. The production Firebase project, the signing key, and the model provider accounts stay private, and the subscription is a live product: forks get the full client and function source and bring their own backend.
 
 ## License
 

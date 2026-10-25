@@ -1,0 +1,144 @@
+# Bloviate Play deploy — internal track only (contracts/RELEASE.md).
+#
+# This workflow is the whole Play deploy path:
+#   - workflow_dispatch ONLY. It never runs on a push, a pull request, or
+#     a schedule. Dispatching it from main is the deploy order.
+#   - assemble-release builds the signed AAB from the dispatched main SHA
+#     (full-history checkout: the derived versionCode in
+#     app/build.gradle.kts is the first-parent commit count of HEAD, and
+#     a shallow checkout would read it as 1 — see contracts/RELEASE.md).
+#   - deploy-internal uploads that AAB to the Play internal track with
+#     scripts/play-upload-internal.py, which attaches the checked-in
+#     distribution/whatsnew/en-US.txt as the release notes and verifies
+#     the release by Play API read-back. After a verified upload this
+#     job tags the deployed SHA v<versionName> and pushes the tag.
+#   - No step commits to a branch and no step pushes to main. The tag is
+#     the only ref this workflow writes.
+#
+# The first live dispatch rides the Play launch sequence (P-BLO-9 /
+# BLO-151); this workflow landing does not deploy anything by itself.
+name: Deploy Internal
+
+"on":
+  workflow_dispatch:
+
+# A deploy is not a gate run: never cancel one mid-upload, and never let
+# two deploy runs race the same track.
+concurrency:
+  group: deploy-internal-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Same values as ci.yml. GRADLE_USER_HOME stays in-tree so the cache
+  # step below captures it, exactly as in the CI workflow.
+  GRADLE_USER_HOME: ${{ github.workspace }}/.ci-gradle-home
+  ANDROID_USER_HOME: ${{ github.workspace }}/../ci-home/android-home
+  GRADLE_OPTS: "-Dorg.gradle.caching=true"
+
+jobs:
+  assemble-release:
+    name: assemble-release
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # Full history: the versionCode derives from the first-parent
+          # commit count (contracts/RELEASE.md section 1).
+          fetch-depth: 0
+      - uses: ./.github/actions/android-setup
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-gradle-home/caches/modules-2
+            .ci-gradle-home/wrapper
+          key: ${{ runner.os }}-gradle-deps-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-deps-
+      - name: Keystore bootstrap (strict — this lane must be signed)
+        uses: ./.github/actions/keystore-setup
+        with:
+          keystore-base64: ${{ secrets.KEYSTORE_BASE64 }}
+          store-password: ${{ secrets.STORE_PASSWORD }}
+          key-alias: ${{ secrets.KEY_ALIAS }}
+          key-password: ${{ secrets.KEY_PASSWORD }}
+          strict: "true"
+      - name: Print version for this checkout
+        run: ./gradlew :app:printVersion
+      - name: Build signed release bundle and APK
+        run: ./gradlew :app:bundleRelease :app:assembleRelease
+      - name: Upload release bundle and APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            app/build/outputs/bundle/release/*.aab
+            app/build/outputs/apk/release/*.apk
+            .keystore-signed-flag
+          # .keystore-signed-flag is a dotfile: upload-artifact v4 skips
+          # hidden files unless told otherwise. deploy-internal
+          # hard-fails without this flag, exactly as distribute-internal
+          # does with the release APK in ci.yml.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy-internal:
+    name: deploy-internal
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [assemble-release]
+    # Writing the release tag is the only write this workflow makes.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history for the tag step's existing-tag check, and so
+          # the checkout carries the checked-in whatsnew file the upload
+          # script reads.
+          fetch-depth: 0
+      - name: Download signed release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+      - name: Materialize Play publisher credentials
+        env:
+          PLAY_PUBLISHER_JSON: ${{ secrets.PLAY_PUBLISHER_JSON }}
+        run: |
+          test -n "$PLAY_PUBLISHER_JSON" || (echo "Missing PLAY_PUBLISHER_JSON secret" && exit 1)
+          printf '%s' "$PLAY_PUBLISHER_JSON" > "$RUNNER_TEMP/play-publisher.json"
+          echo "PLAY_PUBLISHER_JSON=$RUNNER_TEMP/play-publisher.json" >> "$GITHUB_ENV"
+      - name: Upload AAB to Play internal track
+        run: |
+          test -f .keystore-signed-flag || (echo "Bundle was not signed — keystore secrets missing in assemble-release" && exit 1)
+          shopt -s nullglob
+          AAB_FILES=(app/build/outputs/bundle/release/*.aab)
+          shopt -u nullglob
+          if [ ${#AAB_FILES[@]} -eq 0 ]; then echo "No AAB found" && exit 1; fi
+          if [ ${#AAB_FILES[@]} -gt 1 ]; then echo "Multiple AABs found: ${AAB_FILES[*]}" && exit 1; fi
+          python3 -m venv /tmp/play-env
+          /tmp/play-env/bin/pip install --quiet google-api-python-client google-auth
+          /tmp/play-env/bin/python scripts/play-upload-internal.py "${AAB_FILES[0]}"
+      - name: Tag the deployed SHA
+        run: |
+          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          test -n "$VERSION_NAME" || (echo "Could not read versionName from app/build.gradle.kts" && exit 1)
+          TAG="v$VERSION_NAME"
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            EXISTING=$(git rev-list -n 1 "$TAG")
+            if [ "$EXISTING" = "$GITHUB_SHA" ]; then
+              echo "Tag $TAG already points at the deployed SHA — nothing to do"
+              exit 0
+            fi
+            echo "Tag $TAG already exists at $EXISTING, not the deployed SHA $GITHUB_SHA. Tags are never moved under contracts/RELEASE.md — stop and report."
+            exit 1
+          fi
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "Tagged $GITHUB_SHA as $TAG"

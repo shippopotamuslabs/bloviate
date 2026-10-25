@@ -28,6 +28,27 @@ val gitShortSha: String = try {
     "dev"
 }
 
+// Derived versionCode (BLO-173; the rules live in contracts/RELEASE.md):
+// the code is the first-parent commit count of HEAD, read through the
+// exec provider so it stays configuration-cache compatible, the same
+// pattern as gitShortSha above. Nobody hand-bumps this number. A build
+// with no usable git history (a source export, a failed git call, an
+// unparsable count) falls back to the committed fallback below. Note a
+// shallow checkout still answers git, with a count of 1: release builds
+// must run from a full-history checkout (the deploy workflow fetches
+// with fetch-depth 0), and a code of 1 on a release build means the
+// checkout was shallow, not that the fallback fired.
+val fallbackVersionCode = 1
+val derivedVersionCode: Int = try {
+    providers.exec {
+        commandLine("git", "rev-list", "--first-parent", "--count", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().toIntOrNull()
+        ?.takeIf { it > 0 } ?: fallbackVersionCode
+} catch (exception: Exception) {
+    fallbackVersionCode
+}
+
 // Release signing: gitignored root `keystore.properties` (see keystore.properties.example).
 // Without it, release builds fall back to the debug signing config.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -46,7 +67,7 @@ android {
         applicationId = "com.shippopotamus.bloviate"
         minSdk = 34
         targetSdk = 36
-        versionCode = 1
+        versionCode = derivedVersionCode
         versionName = "1.0"
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
@@ -170,4 +191,31 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// Release verification (contracts/RELEASE.md): prints the version a
+// build from this checkout would carry, so a release prep can check the
+// derived code against `git rev-list --first-parent --count HEAD`
+// without assembling anything.
+// `./gradlew :app:printVersion` -> "versionName=1.0 versionCode=124"
+// A typed task with @Input properties: a doLast closure over script
+// values does not survive this project's configuration cache.
+abstract class PrintVersionTask : DefaultTask() {
+    @get:Input
+    abstract val versionName: Property<String>
+
+    @get:Input
+    abstract val versionCode: Property<Int>
+
+    @TaskAction
+    fun printVersion() {
+        println("versionName=${versionName.get()} versionCode=${versionCode.get()}")
+    }
+}
+
+tasks.register<PrintVersionTask>("printVersion") {
+    group = "verification"
+    description = "Prints the versionName and derived versionCode for this checkout."
+    versionName.set(android.defaultConfig.versionName)
+    versionCode.set(derivedVersionCode)
 }
