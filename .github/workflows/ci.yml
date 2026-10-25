@@ -23,6 +23,10 @@
 #                        lane consumed the debug APK artifact.
 #   assemble-release  -> assemble-release (retiered off PRs, see above).
 #   distribute-internal -> distribute-internal (push to main only).
+#   deploy-internal     -> NOT in this file: the Play internal-track
+#                        deploy lives in deploy-internal.yml
+#                        (workflow_dispatch only; BLO-173,
+#                        contracts/RELEASE.md).
 #   functions-tests   -> NEW. The functions suite (125 node:test cases)
 #                        existed but was never wired into GitLab CI; here
 #                        it is path-gated to functions/** on PRs and always
@@ -37,8 +41,9 @@
 #     (../whisper-android) and the gitlink records the rewritten-history
 #     equivalent of the old GitLab commit (identical tree).
 #   - No OSV jobs: this repo has none of Stratum's SBOM/osv tooling.
-#   - No screenshot tests exist in this repo. No Play deploy lane exists:
-#     distribution is Firebase App Distribution only.
+#   - No screenshot tests exist in this repo. Distribution on push is
+#     Firebase App Distribution; the Play internal-track deploy lane is
+#     the separate deploy-internal.yml workflow (BLO-173).
 #
 # GitLab `workflow:rules` equivalence:
 #   - merge_request_event && target == default branch -> pull_request: [main]
@@ -293,6 +298,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Full history: the versionCode derives from the first-parent
+          # commit count of HEAD (BLO-173, contracts/RELEASE.md), and a
+          # shallow checkout would read it as 1. This is the one CI job
+          # whose build ships anywhere, so it is the one that pays for
+          # the full fetch; the PR gate jobs stay shallow and fast.
+          fetch-depth: 0
       - uses: ./.github/actions/android-setup
       - name: Restore Gradle dependency cache
         uses: actions/cache@v4
