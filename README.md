@@ -181,3 +181,7 @@ Distribution today is Firebase App Distribution. Every merge to main ships the r
 ## Status
 
 Version 1.0, versionCode 1. The app is in daily use by its author and a small internal group. The code is public so the work can be read, built, and forked. The production Firebase project, the signing key, and the model provider accounts stay private, and the subscription is a live product: forks get the full client and function source and bring their own backend.
+
+## License
+
+0BSD license. Do whatever you want with the code. Just don't expect it to work or sue me.
