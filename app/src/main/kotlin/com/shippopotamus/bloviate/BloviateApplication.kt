@@ -24,6 +24,11 @@ class BloviateApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // App Check first (BLO-172): the provider factory must be
+        // installed before any Firebase service mints or sends a token.
+        // The variant source sets pick the factory (Play Integrity in
+        // release, debug provider in debug).
+        AppCheckInstaller.install(this)
         registerActivityLifecycleCallbacks(SignInHostCallbacks(signInHostContext))
     }
 
