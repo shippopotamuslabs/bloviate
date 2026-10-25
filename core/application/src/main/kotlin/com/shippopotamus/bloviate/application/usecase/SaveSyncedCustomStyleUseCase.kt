@@ -1,14 +1,16 @@
 package com.shippopotamus.bloviate.application.usecase
 
+import com.shippopotamus.bloviate.application.port.CustomStyleDraft
 import com.shippopotamus.bloviate.application.port.CustomStyleRecord
 import com.shippopotamus.bloviate.application.port.CustomStyleStorePort
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncOutcome
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncPort
 import com.shippopotamus.bloviate.application.port.StylePreferencePort
+import com.shippopotamus.bloviate.application.port.forCustomStyleValidation
+import com.shippopotamus.bloviate.application.port.toDefinition
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleValidator
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleViolation
-import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import javax.inject.Inject
 
 /**
@@ -21,7 +23,7 @@ sealed interface SaveSyncedCustomStyleOutcome {
     /** The server saved the style; the cache and (on create) the selection already reflect it. */
     data class Saved(val record: CustomStyleRecord) : SaveSyncedCustomStyleOutcome
 
-    /** [SaveCustomStyleUseCase]'s validation rejected the definition; nothing was sent or stored. */
+    /** Validation rejected the draft; nothing was sent or stored. */
     data class Invalid(val violations: List<CustomStyleViolation>) : SaveSyncedCustomStyleOutcome
 
     /** The server call failed; the cache is untouched. */
@@ -30,16 +32,19 @@ sealed interface SaveSyncedCustomStyleOutcome {
 
 /**
  * Saves a custom style through the server first, then the account cache
- * (BLO-25 S4). Validation keeps S1's semantics exactly
- * ([CustomStyleValidator]; a blank id reads as a create and validates
- * against a placeholder, since the server allocates the id). The server
- * write lands before any cache write, and the cache write is a
- * [CustomStyleStorePort.replaceSnapshot] of the current snapshot plus
- * the returned record — never [CustomStyleStorePort.save], which is a
- * no-op on a cache the sign-in has not claimed yet (S2 owner semantics).
- * That same replace claims the cache, so the first save after a fresh
- * sign-in sticks. A create also selects the new style; an update never
- * changes the selection.
+ * (BLO-25 S4). The caller passes the plain [CustomStyleDraft] (BLO-176);
+ * the draft-to-definition construction and validation live here and in
+ * [ValidateCustomStyleDraftUseCase], sharing one construction and one
+ * placeholder rule ([forCustomStyleValidation]). Validation keeps S1's
+ * semantics exactly ([CustomStyleValidator]; a blank id reads as a
+ * create and validates against a placeholder, since the server
+ * allocates the id). The server write lands before any cache write, and
+ * the cache write is a [CustomStyleStorePort.replaceSnapshot] of the
+ * current snapshot plus the returned record — never
+ * [CustomStyleStorePort.save], which is a no-op on a cache the sign-in
+ * has not claimed yet (S2 owner semantics). That same replace claims
+ * the cache, so the first save after a fresh sign-in sticks. A create
+ * also selects the new style; an update never changes the selection.
  */
 class SaveSyncedCustomStyleUseCase @Inject constructor(
     private val sync: CustomStyleSyncPort,
@@ -49,15 +54,19 @@ class SaveSyncedCustomStyleUseCase @Inject constructor(
 ) {
 
     /**
-     * Validates [definition], saves it on the server ([expectedRevision]
-     * null for a create, the known revision for an update), then merges
-     * the returned record into the cache and selects it on create.
+     * Validates [draft] (built under [styleId]; null is a create, whose
+     * id the server allocates), saves it on the server
+     * ([expectedRevision] null for a create, the known revision for an
+     * update), then merges the returned record into the cache and
+     * selects it on create.
      */
     suspend operator fun invoke(
-        definition: StyleDefinition,
+        draft: CustomStyleDraft,
+        styleId: String?,
         expectedRevision: Long?,
     ): SaveSyncedCustomStyleOutcome {
-        val violations = validator.validate(definition.forValidation())
+        val definition = draft.toDefinition(styleId)
+        val violations = validator.validate(definition.forCustomStyleValidation())
         if (violations.isNotEmpty()) {
             return SaveSyncedCustomStyleOutcome.Invalid(violations)
         }
@@ -75,17 +84,5 @@ class SaveSyncedCustomStyleUseCase @Inject constructor(
             is CustomStyleSyncOutcome.Failed ->
                 SaveSyncedCustomStyleOutcome.Failed(outcome.failure)
         }
-    }
-
-    /**
-     * A create carries no id yet (the server allocates one), but the S1
-     * validator requires the `custom-` prefix — so a blank id validates
-     * against a placeholder and every other field validates as given.
-     */
-    private fun StyleDefinition.forValidation(): StyleDefinition =
-        if (id.isBlank()) copy(id = CREATE_ID_PLACEHOLDER) else this
-
-    private companion object {
-        const val CREATE_ID_PLACEHOLDER: String = "custom-pending"
     }
 }
