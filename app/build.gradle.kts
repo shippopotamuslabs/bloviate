@@ -157,6 +157,12 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.crashlytics)
 
+    // App Check (BLO-172): release builds attest with Play Integrity;
+    // the debug provider ships in debug builds only (debugImplementation)
+    // and is never on the release classpath.
+    implementation(libs.firebase.appcheck.playintegrity)
+    debugImplementation(libs.firebase.appcheck.debug)
+
     // Glass Bars Gospel (BLO-2; UI_DESIGN_SPEC.md §6.9): Haze 2.0.1
     // for the glass top/bottom bars — core (source/effect) plus the
     // blur effect artifact (the `haze` umbrella does not include it).
