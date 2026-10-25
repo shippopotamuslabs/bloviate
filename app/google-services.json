@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "74044613867-09a8mnjlej8ptfd4510npdmbu7j5upgh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.shippopotamus.bloviate",
+            "certificate_hash": "9776cc82e684b91c40f4e07084d5c418ff546df7"
+          }
+        },
+        {
           "client_id": "74044613867-8mlovrcs3vutbagcejc2t789045q3mri.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
