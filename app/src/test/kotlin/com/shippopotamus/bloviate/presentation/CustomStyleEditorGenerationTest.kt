@@ -6,6 +6,7 @@ import com.shippopotamus.bloviate.application.port.GeneratedStyleDraft
 import com.shippopotamus.bloviate.application.usecase.GenerateCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.ValidateCustomStyleDraftUseCase
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleValidator
 import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.testing.FakeCustomStyleGenerationPort
@@ -48,7 +49,7 @@ class CustomStyleEditorGenerationTest {
                 validator = CustomStyleValidator(),
             ),
             generate = GenerateCustomStyleUseCase(fakeGeneration),
-            validator = CustomStyleValidator(),
+            validateDraft = ValidateCustomStyleDraftUseCase(CustomStyleValidator()),
         )
     }
 

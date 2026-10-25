@@ -8,6 +8,7 @@ import com.shippopotamus.bloviate.application.port.CustomStyleSyncOutcome
 import com.shippopotamus.bloviate.application.usecase.GenerateCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.ValidateCustomStyleDraftUseCase
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleValidator
 import com.shippopotamus.bloviate.domain.model.FewShot
 import com.shippopotamus.bloviate.domain.model.StyleCategory
@@ -53,7 +54,7 @@ class CustomStyleEditorViewModelTest {
                 validator = CustomStyleValidator(),
             ),
             generate = GenerateCustomStyleUseCase(fakeGeneration),
-            validator = CustomStyleValidator(),
+            validateDraft = ValidateCustomStyleDraftUseCase(CustomStyleValidator()),
         )
     }
 

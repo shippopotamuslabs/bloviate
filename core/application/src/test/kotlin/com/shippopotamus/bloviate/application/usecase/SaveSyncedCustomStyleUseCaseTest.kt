@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.application.usecase
 
+import com.shippopotamus.bloviate.application.port.CustomStyleDraft
 import com.shippopotamus.bloviate.application.port.CustomStyleRecord
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncOutcome
@@ -31,13 +32,14 @@ class SaveSyncedCustomStyleUseCaseTest {
     )
 
     @Test
-    fun `an invalid definition never reaches the server or the cache`() = runTest {
-        val definition = validDefinition().copy(kind = StyleKind.MECHANICAL, displayName = "")
-
-        val outcome = useCase(definition, expectedRevision = null)
+    fun `an invalid draft never reaches the server or the cache`() = runTest {
+        val outcome = useCase(
+            validDraft().copy(displayName = ""),
+            styleId = "custom-mine",
+            expectedRevision = null,
+        )
 
         val invalid = outcome as SaveSyncedCustomStyleOutcome.Invalid
-        assertTrue(invalid.violations.contains(CustomStyleViolation.KIND_NOT_LLM))
         assertTrue(invalid.violations.contains(CustomStyleViolation.DISPLAY_NAME_BLANK))
         assertTrue(fakeSync.savedInputs.isEmpty())
         assertTrue(fakeStore.state.value.styles.isEmpty())
@@ -50,7 +52,7 @@ class SaveSyncedCustomStyleUseCaseTest {
         fakeSync.saveHandler = { _, _ -> CustomStyleSyncOutcome.Ok(serverRecord) }
         fakeStore.replaceSnapshot(listOf(record(id = "custom-existing")))
 
-        val outcome = useCase(validDefinition().copy(id = ""), expectedRevision = null)
+        val outcome = useCase(validDraft(), styleId = null, expectedRevision = null)
 
         assertEquals(SaveSyncedCustomStyleOutcome.Saved(serverRecord), outcome)
         assertEquals(
@@ -59,6 +61,8 @@ class SaveSyncedCustomStyleUseCaseTest {
         )
         assertEquals("custom-server-id", fakeSelection.selectedStyleId.value)
         assertEquals(1, fakeSync.savedInputs.size)
+        // The create sends the blank id: the server allocates the real one.
+        assertEquals("", fakeSync.savedInputs.single().first.id)
     }
 
     @Test
@@ -66,7 +70,7 @@ class SaveSyncedCustomStyleUseCaseTest {
         fakeStore.replaceSnapshot(listOf(record(id = "custom-mine", revision = 1L), record(id = "custom-other")))
         fakeSelection.setSelected("custom-other")
 
-        val outcome = useCase(validDefinition(), expectedRevision = 1L)
+        val outcome = useCase(validDraft(), styleId = "custom-mine", expectedRevision = 1L)
 
         val saved = outcome as SaveSyncedCustomStyleOutcome.Saved
         assertEquals(2L, saved.record.revision)
@@ -84,7 +88,7 @@ class SaveSyncedCustomStyleUseCaseTest {
         fakeStore.replaceSnapshot(listOf(record(id = "custom-mine", revision = 1L)))
         fakeSync.saveHandler = { _, _ -> CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Conflict) }
 
-        val outcome = useCase(validDefinition(), expectedRevision = 1L)
+        val outcome = useCase(validDraft(), styleId = "custom-mine", expectedRevision = 1L)
 
         assertEquals(SaveSyncedCustomStyleOutcome.Failed(CustomStyleSyncFailure.Conflict), outcome)
         assertEquals(1L, fakeStore.state.value.styles.single().revision)
@@ -101,12 +105,25 @@ class SaveSyncedCustomStyleUseCaseTest {
         val serverRecord = record(id = "custom-first", revision = 1L)
         fakeSync.saveHandler = { _, _ -> CustomStyleSyncOutcome.Ok(serverRecord) }
 
-        val outcome = useCase(validDefinition().copy(id = ""), expectedRevision = null)
+        val outcome = useCase(validDraft(), styleId = null, expectedRevision = null)
 
         assertEquals(SaveSyncedCustomStyleOutcome.Saved(serverRecord), outcome)
         assertEquals(listOf(serverRecord), fakeStore.state.value.styles)
         assertEquals("custom-first", fakeSelection.selectedStyleId.value)
     }
+
+    /** The draft whose construction under id "custom-mine" is [validDefinition]. */
+    private fun validDraft(): CustomStyleDraft =
+        CustomStyleDraft(
+            displayName = "Mine",
+            description = "A custom style.",
+            sample = "Yeah, tomorrow.",
+            systemInstructions = "My voice. NEVER change facts.",
+            fewShotPairs = listOf(
+                "hear this" to "Hear this.",
+                "try again" to "Try again.",
+            ),
+        )
 
     private fun validDefinition(): StyleDefinition =
         StyleDefinition(

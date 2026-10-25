@@ -3,6 +3,7 @@ package com.shippopotamus.bloviate.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.R
+import com.shippopotamus.bloviate.application.port.CustomStyleDraft
 import com.shippopotamus.bloviate.application.port.CustomStyleGenerationOutcome
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncFailure
 import com.shippopotamus.bloviate.application.port.GeneratedStyleDraft
@@ -10,12 +11,9 @@ import com.shippopotamus.bloviate.application.usecase.GenerateCustomStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleOutcome
 import com.shippopotamus.bloviate.application.usecase.SaveSyncedCustomStyleUseCase
-import com.shippopotamus.bloviate.domain.evaluator.CustomStyleValidator
+import com.shippopotamus.bloviate.application.usecase.ValidateCustomStyleDraftUseCase
 import com.shippopotamus.bloviate.domain.evaluator.CustomStyleViolation
-import com.shippopotamus.bloviate.domain.model.FewShot
-import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
-import com.shippopotamus.bloviate.domain.model.StyleKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -31,9 +29,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Character caps mirrored from [CustomStyleValidator] for hints and
- * per-pair error attribution only — validation itself always runs through
- * the validator, so these can never loosen what saves.
+ * Character caps mirrored from the domain custom-style validator for
+ * hints and per-pair error attribution only — validation itself always
+ * runs through [ValidateCustomStyleDraftUseCase], so these can never
+ * loosen what saves.
  */
 internal const val MAX_CUSTOM_STYLE_NAME_CHARS: Int = 40
 internal const val MAX_CUSTOM_STYLE_DESCRIPTION_CHARS: Int = 240
@@ -45,9 +44,9 @@ internal const val MAX_CUSTOM_STYLE_FEWSHOT_SIDE_CHARS: Int = 1500
  * Manual custom-style editor ViewModel (BLO-25 S5). Depends on use cases
  * only: the source record streams from [ObserveCustomStylesUseCase], saves
  * go through [SaveSyncedCustomStyleUseCase], and every keystroke
- * re-validates through the domain [CustomStyleValidator]. The draft is
- * plain strings — no domain types — and the save button stays disabled
- * until the draft validates.
+ * re-validates through [ValidateCustomStyleDraftUseCase] (BLO-176). The
+ * draft is plain strings — no domain types — and the save button stays
+ * disabled until the draft validates.
  *
  * A create carries no id (the server allocates it): validation runs
  * against a temporary placeholder id that is never sent — the write path
@@ -66,7 +65,7 @@ class CustomStyleEditorViewModel @Inject constructor(
     private val observeCustoms: ObserveCustomStylesUseCase,
     private val saveSynced: SaveSyncedCustomStyleUseCase,
     private val generate: GenerateCustomStyleUseCase,
-    private val validator: CustomStyleValidator,
+    private val validateDraft: ValidateCustomStyleDraftUseCase,
 ) : ViewModel() {
 
     /** The loaded save target: null ids are a create, which has no revision and no original. */
@@ -398,15 +397,13 @@ class CustomStyleEditorViewModel @Inject constructor(
     fun onSaveClick() {
         val target = loaded.value ?: return
         val snapshot = draft.value
-        val violations = validator.validate(
-            snapshot.toDefinition(target.styleId).forValidation(target.styleId),
-        )
+        val violations = validateDraft(snapshot.toCustomStyleDraft(), target.styleId)
         if (saving.value || regenerating.value || violations.isNotEmpty()) {
             return
         }
         viewModelScope.launch {
             saving.update { true }
-            val outcome = saveSynced(snapshot.toDefinition(target.styleId), target.revision)
+            val outcome = saveSynced(snapshot.toCustomStyleDraft(), target.styleId, target.revision)
             saving.update { false }
             when (outcome) {
                 is SaveSyncedCustomStyleOutcome.Saved -> {
@@ -452,7 +449,7 @@ class CustomStyleEditorViewModel @Inject constructor(
             return CustomStyleEditorUiState(isSaving = base.saving)
         }
         val draft = base.draft
-        val violations = validator.validate(draft.toDefinition(target?.styleId).forValidation(target?.styleId))
+        val violations = validateDraft(draft.toCustomStyleDraft(), target?.styleId)
         return CustomStyleEditorUiState(
             isCreate = target?.styleId == null,
             displayName = draft.displayName,
@@ -475,24 +472,18 @@ class CustomStyleEditorViewModel @Inject constructor(
         )
     }
 
-    private fun Draft.toDefinition(styleId: String?): StyleDefinition = StyleDefinition(
-        id = styleId.orEmpty(),
+    /**
+     * The plain application-layer draft the validate and save use cases
+     * take (BLO-176): the draft-to-domain construction lives behind
+     * them, so this ViewModel passes strings and pairs only.
+     */
+    private fun Draft.toCustomStyleDraft(): CustomStyleDraft = CustomStyleDraft(
         displayName = displayName,
         description = description,
         sample = sample,
         systemInstructions = systemInstructions,
-        fewShots = pairs.map { pair -> FewShot(raw = pair.first, styled = pair.second) },
-        kind = StyleKind.LLM,
-        category = StyleCategory.CUSTOM,
+        fewShotPairs = pairs,
     )
-
-    /**
-     * A create carries no id yet but the validator requires the `custom-`
-     * prefix, so validation alone runs against a temporary placeholder —
-     * the write path ([onSaveClick]) always sends the blank id, never this.
-     */
-    private fun StyleDefinition.forValidation(styleId: String?): StyleDefinition =
-        if (styleId == null) copy(id = CREATE_ID_PLACEHOLDER) else this
 
     private fun List<CustomStyleViolation>.toFieldErrors(): Map<CustomStyleEditorField, Int> =
         buildMap {
@@ -563,8 +554,5 @@ class CustomStyleEditorViewModel @Inject constructor(
         const val STATE_SHARING_TIMEOUT_MS: Long = 5_000L
         const val MIN_FEWSHOT_PAIRS: Int = 2
         const val MAX_FEWSHOT_PAIRS: Int = 5
-
-        /** Temporary validation-only id for creates; never sent to the server (see [forValidation]). */
-        const val CREATE_ID_PLACEHOLDER: String = "custom-draft"
     }
 }
