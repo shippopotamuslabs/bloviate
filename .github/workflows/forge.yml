@@ -1,4 +1,4 @@
-# Forge Review — automated PR review via the forge-reviewer reusable workflow (v1.1.4).
+# Forge Review — automated PR review via the forge-reviewer reusable workflow (v1.1.5).
 # Supply-chain note: both pins below move together, always to a release tag, never
 # a branch. Only declared secrets are passed, never `secrets: inherit`.
 name: Forge Review
@@ -10,9 +10,9 @@ permissions:
   pull-requests: read
 jobs:
   forge-review:
-    uses: shippopotamuslabs/forge-reviewer/.github/workflows/forge-review.yml@v1.1.4
+    uses: shippopotamuslabs/forge-reviewer/.github/workflows/forge-review.yml@v1.1.5
     with:
-      forge_ref: v1.1.4
+      forge_ref: v1.1.5
     secrets:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       FORGE_APP_PRIVATE_KEY: ${{ secrets.FORGE_APP_PRIVATE_KEY }}
