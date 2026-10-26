@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -83,20 +82,6 @@ fun MainRoute(
         return
     }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // Desired-state convergence (BLO-189): if the shell is showing —
-    // the auth and wizard early-returns above mean setup is finished,
-    // so this reads the same eagerly-loaded resident record the boot
-    // path gates on — and the bubble is wanted, allowed to start on
-    // its own, but not running, re-issue the user start. onStartBubble
-    // records the start and issues ACTION_USER_START, the in-app start
-    // the platform always allows. The gate never resurrects an
-    // explicit Stop (bubbleEnabled false) or an opted-out posture
-    // (autoStartEnabled false); a start the platform refuses stays
-    // NOT_RUNNING for the manual refresh in Setup.
-    val reArmDue = uiState.bubbleAutoStartDue()
-    LaunchedEffect(reArmDue) {
-        if (reArmDue) onStartBubble()
-    }
     AppShell(
         setupContent = {
             SetupScreen(

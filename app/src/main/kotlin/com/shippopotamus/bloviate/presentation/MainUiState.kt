@@ -1,7 +1,6 @@
 package com.shippopotamus.bloviate.presentation
 
 import com.shippopotamus.bloviate.application.port.AuthState
-import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
@@ -106,9 +105,9 @@ sealed interface SetupStatusUi {
  * spots nothing either, ENC-129), the overlay permission (without it
  * the bubble cannot draw), the microphone, a downloaded model (either
  * engine counts — dictation works on whichever is ready), and finally
- * the bubble itself, which is a tap rather than a setup errand: wanted
+ * the bubble itself, a projection of [bubbleServiceStatus]: wanted
  * but down reads [SetupBlocker.BUBBLE_NOT_RUNNING], switched off reads
- * [SetupBlocker.BUBBLE] (BLO-189).
+ * [SetupBlocker.BUBBLE], running reads [SetupStatusUi.Ready] (BLO-189).
  */
 fun MainUiState.setupStatus(): SetupStatusUi =
     when {
@@ -119,11 +118,12 @@ fun MainUiState.setupStatus(): SetupStatusUi =
         whisperModelStatus !is ModelUiStatus.Ready &&
             parakeetModelStatus !is ModelUiStatus.Ready ->
             SetupStatusUi.Blocked(SetupBlocker.MODEL)
-        !bubbleServiceRunning ->
-            SetupStatusUi.Blocked(
-                if (bubbleEnabled) SetupBlocker.BUBBLE_NOT_RUNNING else SetupBlocker.BUBBLE,
-            )
-        else -> SetupStatusUi.Ready
+        else ->
+            when (bubbleServiceStatus()) {
+                BubbleStatusUi.RUNNING -> SetupStatusUi.Ready
+                BubbleStatusUi.NOT_RUNNING -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE_NOT_RUNNING)
+                BubbleStatusUi.OFF -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE)
+            }
     }
 
 /**
@@ -148,16 +148,6 @@ fun MainUiState.bubbleServiceStatus(): BubbleStatusUi =
         bubbleEnabled -> BubbleStatusUi.NOT_RUNNING
         else -> BubbleStatusUi.OFF
     }
-
-/**
- * Whether the shell should re-issue the user start on entry (BLO-189):
- * the bubble is wanted, allowed to start on its own, and not running.
- * The shell implies setup is finished — the wizard would own the
- * screen otherwise — so this mirrors
- * [BubbleServiceStartPolicy.shouldAutoStart] minus that gate.
- */
-fun MainUiState.bubbleAutoStartDue(): Boolean =
-    bubbleEnabled && autoStartEnabled && !bubbleServiceRunning
 
 /** Presentation-only mapping of the bubble size steps (ENC-68). */
 enum class BubbleSizeUi {

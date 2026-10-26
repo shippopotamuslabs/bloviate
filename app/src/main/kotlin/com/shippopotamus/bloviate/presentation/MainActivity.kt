@@ -12,9 +12,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.shippopotamus.bloviate.application.port.BubbleServiceStarterPort
+import com.shippopotamus.bloviate.application.port.BubbleStartRequest
 import com.shippopotamus.bloviate.domain.evaluator.BatteryExemptionIntentPolicy
 import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
-import com.shippopotamus.bloviate.domain.model.BubbleServiceStartOrigin
 import com.shippopotamus.bloviate.service.BubbleOverlayService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -166,7 +166,7 @@ class MainActivity : ComponentActivity() {
         // resident-presence record (ENC-129) and tags the start as a
         // user start, the origin always eligible for the microphone type.
         viewModel.onBubbleStartRequested()
-        bubbleServiceStarter.startBubble(BubbleServiceStartOrigin.USER)
+        bubbleServiceStarter.startBubble(BubbleStartRequest.USER)
     }
 
     private fun stopBubbleService() {

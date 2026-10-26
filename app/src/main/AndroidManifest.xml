@@ -82,7 +82,7 @@
           opens it again.
         -->
         <receiver
-            android:name=".service.BootStartReceiver"
+            android:name=".service.BubbleAutoStartReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

@@ -17,6 +17,7 @@ import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseC
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.shippopotamus.bloviate.application.port.AuthState
+import com.shippopotamus.bloviate.application.port.BubbleStartRequest
 import com.shippopotamus.bloviate.application.port.UserProfile
 import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
@@ -28,7 +29,11 @@ import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
+import com.shippopotamus.bloviate.application.usecase.StartBubbleIfPresenceAllowsUseCase
+import com.shippopotamus.bloviate.domain.model.OnboardingProgress
+import com.shippopotamus.bloviate.domain.model.OnboardingStep
 import com.shippopotamus.bloviate.testing.FakeAuthSession
+import com.shippopotamus.bloviate.testing.FakeBubbleServiceStarterPort
 import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleSyncPort
@@ -75,6 +80,7 @@ class MainViewModelTest {
     private val fakeResidentPresencePort = FakeResidentPresencePort()
     private val fakeAuthSession = FakeAuthSession()
     private val fakeOnboardingPort = FakeOnboardingPort()
+    private val fakeBubbleStarter = FakeBubbleServiceStarterPort()
 
     private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
     private val fakeCustoms = FakeCustomStyleStorePort()
@@ -117,6 +123,11 @@ class MainViewModelTest {
             signInWithGoogle = SignInWithGoogleUseCase(auth),
             signOut = SignOutUseCase(auth),
             refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
+            startBubbleIfPresenceAllows = StartBubbleIfPresenceAllowsUseCase(
+                onboarding = fakeOnboardingPort,
+                residentPresence = fakeResidentPresencePort,
+                bubbleStarter = fakeBubbleStarter,
+            ),
         )
 
     @Test
@@ -729,5 +740,86 @@ class MainViewModelTest {
             advanceUntilIdle()
 
             assertEquals(1, fakeAuthSession.signOutCallCount)
+        }
+
+    // BLO-189: the in-app convergence trigger — one USER attempt per
+    // entry into the due state, asserted on the starter fake (never
+    // verify).
+
+    private fun publishSignedIn() {
+        fakeAuthSession.publish(
+            AuthState.Authenticated(
+                UserProfile(uid = "uid-1", displayName = null, email = null, photoUrl = null),
+            ),
+        )
+    }
+
+    private fun publishSetupFinished() {
+        fakeOnboardingPort.publish(OnboardingProgress(step = OnboardingStep.TEST, finished = true))
+    }
+
+    @Test
+    fun `signed-in finished setup with presence allowing and service down issues one user start`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            publishSetupFinished()
+            publishSignedIn()
+            advanceUntilIdle()
+
+            assertEquals(listOf(BubbleStartRequest.USER), fakeBubbleStarter.requestedRequests)
+
+            // An unrelated live change while still due must not fire a
+            // second attempt: the trigger fires once per entry into the
+            // due state.
+            fakeWatcherConnectionPort.publishConnected(true)
+            advanceUntilIdle()
+
+            assertEquals(listOf(BubbleStartRequest.USER), fakeBubbleStarter.requestedRequests)
+        }
+
+    @Test
+    fun `an explicit user stop issues no convergence start`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            publishSetupFinished()
+            publishSignedIn()
+            fakeResidentPresencePort.publish(
+                ResidentPresenceState(autoStartEnabled = true, userStopped = true),
+            )
+            advanceUntilIdle()
+
+            assertTrue(fakeBubbleStarter.requestedRequests.isEmpty())
+        }
+
+    @Test
+    fun `unfinished onboarding issues no convergence start`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            publishSignedIn()
+            advanceUntilIdle()
+
+            assertTrue(fakeBubbleStarter.requestedRequests.isEmpty())
+        }
+
+    @Test
+    fun `signed-out or loading auth issues no convergence start`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            publishSetupFinished()
+            advanceUntilIdle()
+
+            assertTrue(fakeBubbleStarter.requestedRequests.isEmpty())
+
+            fakeAuthSession.publish(AuthState.Loading)
+            advanceUntilIdle()
+
+            assertTrue(fakeBubbleStarter.requestedRequests.isEmpty())
+        }
+
+    @Test
+    fun `an already-running service issues no convergence start`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            publishSetupFinished()
+            publishSignedIn()
+            fakeBubbleServiceStatePort.publishServiceRunning(true)
+            advanceUntilIdle()
+
+            assertTrue(fakeBubbleStarter.requestedRequests.isEmpty())
         }
 }

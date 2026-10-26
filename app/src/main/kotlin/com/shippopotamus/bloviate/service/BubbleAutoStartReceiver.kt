@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.shippopotamus.bloviate.application.port.BubbleStartRequest
 import com.shippopotamus.bloviate.application.usecase.BubbleAutoStartResult
 import com.shippopotamus.bloviate.application.usecase.StartBubbleIfPresenceAllowsUseCase
 import dagger.hilt.android.AndroidEntryPoint
@@ -34,7 +35,7 @@ import javax.inject.Inject
  * stopped app stays stopped until the user opens it again.
  */
 @AndroidEntryPoint
-class BootStartReceiver : BroadcastReceiver() {
+class BubbleAutoStartReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var startBubbleIfPresenceAllows: StartBubbleIfPresenceAllowsUseCase
@@ -51,7 +52,7 @@ class BootStartReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         appScope.launch {
             try {
-                when (startBubbleIfPresenceAllows()) {
+                when (startBubbleIfPresenceAllows(BubbleStartRequest.BOOT)) {
                     BubbleAutoStartResult.Started ->
                         Log.d(TAG, "Auto start ($action): bubble service requested")
                     BubbleAutoStartResult.NotAllowed ->
@@ -66,4 +67,4 @@ class BootStartReceiver : BroadcastReceiver() {
     }
 }
 
-private const val TAG: String = "BootStartReceiver"
+private const val TAG: String = "BubbleAutoStartReceiver"

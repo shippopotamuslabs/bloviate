@@ -1,15 +1,13 @@
 package com.shippopotamus.bloviate.presentation
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
  * The bubble's presentation states (BLO-189): [MainUiState] carries
  * the user's gate ([MainUiState.bubbleEnabled]) apart from the
  * service's liveness ([MainUiState.bubbleServiceRunning]), and the
- * three pure derivations below read exactly that split.
+ * pure derivation below reads exactly that split.
  */
 class BubbleServiceStatusTest {
 
@@ -38,27 +36,5 @@ class BubbleServiceStatusTest {
     @Test
     fun `switched-off reads OFF`() {
         assertEquals(BubbleStatusUi.OFF, state(enabled = false, running = false).bubbleServiceStatus())
-    }
-
-    @Test
-    fun `re-arm is due while wanted, allowed, and down`() {
-        assertTrue(state(enabled = true, running = false).copy(autoStartEnabled = true).bubbleAutoStartDue())
-    }
-
-    @Test
-    fun `re-arm is not due while running`() {
-        assertFalse(state(enabled = true, running = true).bubbleAutoStartDue())
-    }
-
-    @Test
-    fun `re-arm is not due after an explicit stop`() {
-        assertFalse(state(enabled = false, running = false).bubbleAutoStartDue())
-    }
-
-    @Test
-    fun `re-arm is not due while auto-start is off`() {
-        assertFalse(
-            state(enabled = true, running = false).copy(autoStartEnabled = false).bubbleAutoStartDue(),
-        )
     }
 }
