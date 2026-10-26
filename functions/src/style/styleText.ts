@@ -180,13 +180,12 @@ export const styleText = onCall(
     secrets: ["OPENROUTER_API_KEY"],
     timeoutSeconds: 120,
     memory: "512MiB",
-    // App Check is NOT enforced yet: the client does not mint App Check tokens
-    // (no Play Integrity / debug provider wiring), so enforcing it here rejects
-    // every legitimate call as UNAUTHENTICATED. Auth + entitlement still gate
-    // every call. ENC-151's remainder (with ENC-150 abuse controls) wires App
-    // Check into the client and re-enables enforcement. Handler tests exercise
-    // the factory, not this wrapper.
-    enforceAppCheck: false,
+    // App Check enforced (BLO-172): the client mints tokens via Play
+    // Integrity (release) or the debug provider (debug), and only the
+    // genuine Play-distributed binary gets release tokens. Auth +
+    // entitlement still gate every call on top of attestation. Handler
+    // tests exercise the factory, not this wrapper.
+    enforceAppCheck: true,
   },
   async (request) => {
     let cachedComplete: CompletionFn | undefined;

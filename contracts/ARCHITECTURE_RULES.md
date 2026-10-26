@@ -15,19 +15,17 @@ Non-negotiable architectural rules. Always enforce together with relevant compan
 
 **Clean Architecture Supremacy Rule (ZERO TOLERANCE – HIGHEST PRIORITY)**
 
-This project follows Clean Architecture / ports-and-adapters. Dependencies point
-inward toward the domain layer; data, service, and presentation code adapts
-framework, storage, platform, and UI concerns around domain ports.
-
-**The agent MUST NEVER:**
-- Write, propose, or allow any code that violates the dependency rule.
-- Leak Android, Compose, Hilt, accessibility-framework, or `whisper-android` implementation types through `domain/` public APIs.
-- Bypass layer boundaries, forbidden imports, or layer responsibilities.
-- Use any other architectural pattern (MVVM-only, monolithic, etc.).
-
-**Violation = immediate contract breach.**
-Reply with exactly: "Contract violation detected in [file]. Request explicit 'Contract Waiver' from user."
-Then stop. Do not generate code until waived.
+The supremacy rule text lives in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §0 — Clean Architecture /
+ports-and-adapters, dependencies pointing inward toward the domain layer,
+the agent MUST NEVER list (no dependency-rule violations; no Android,
+Compose, Hilt, accessibility-framework, or `whisper-android`
+implementation types through `domain/` public APIs; no bypassing layer
+boundaries, forbidden imports, or layer responsibilities; no other
+architectural pattern), and the violation response: reply with exactly
+"Contract violation detected in [file]. Request explicit 'Contract Waiver'
+from user." and stop. It binds here unchanged; it is no longer embedded in
+this contract (GLO-13).
 
 All rules below are non-negotiable implementations of Clean Architecture.
 
@@ -35,16 +33,16 @@ All rules below are non-negotiable implementations of Clean Architecture.
 
 ## Strict Boundaries Expansion
 
+The shared strict-boundaries table lives in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` ("Strict Boundaries") — the
+WorkManager progress/policy/resumption rows, navigation callbacks,
+single `StateFlow<UiState>`, per-screen `Scaffold`, `Channel` one-shot
+events, stable Lazy keys, and the no-imports-into-`domain/` row.
+
+**Bloviate local rows** (from the former local table; they stay binding here):
+
 | Always | Never |
 |--------|-------|
-| Route background progress via `WorkManager.setProgress`. | Use singleton callbacks or static listeners for background-to-UI updates. |
-| Use `ExistingWorkPolicy.KEEP` or `REPLACE` for unique work. | Scatter multiple unmanaged `OneTimeWorkRequests` for the same task. |
-| Implement byte-offset resumption for IO tasks (model downloads). | Assume a background task will run to completion in a single session. |
-| Route navigation via pure callbacks hoisted to the route level. | Pass `NavController` into Composables. |
-| Expose a single `StateFlow<UiState>` from ViewModels. | Expose mutable flows or Android framework types from ViewModels. |
-| Ensure each screen owns its own `Scaffold` and `TopAppBar`. | Thread `paddingValues` down the UI tree from a root-level Scaffold. |
-| Consume one-shot events via `Channel<Event>` and `LaunchedEffect`. | Use `SharedFlow` for one-shot UI events (can cause dropped events). |
-| Use stable keys on all `LazyColumn` and `LazyRow` items. | Import `data/`, `service/`, `presentation/`, or library-implementation code into `domain/`. |
 | Recycle every `AccessibilityNodeInfo` obtained from the accessibility framework. | Hold node references across events. |
 | Keep the overlay window `FLAG_NOT_FOCUSABLE` (see §5.2). | Let the bubble window take focus — it steals the host field's caret and the bubble hides itself. |
 
@@ -75,6 +73,10 @@ service/evaluator stays in `:core:domain`. See
 
 ### 1.1 Dependency Direction (Strict)
 
+The dependency-direction principles live in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §1. Bloviate's exact module
+graph — binding verbatim (see `AGENTS.md` §3.1):
+
 ```text
 :core:application → :core:domain
 :core:data     → application, domain   (implements application ports)
@@ -97,6 +99,10 @@ No reverse dependencies into `domain/` are allowed.
 
 ### 1.2 Forbidden Imports
 
+The forbidden-imports principles live in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §2. Bloviate's concrete
+forbidden-import map:
+
 | Package | Must NOT import |
 |--------|-----------------|
 | `domain/` (`:core:domain`) | `application/`, `data/`, `service/`, `presentation/`, Compose, Hilt annotations on domain types, Android framework types in public APIs, `com.shippopotamus.whisper` implementation classes |
@@ -110,6 +116,10 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 
 ## 2. Layer Responsibilities
 
+The general layer-responsibility rules (and the §3.1 domain model policy:
+rich aggregates, honest projections) live in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §3. Bloviate's own layers:
+
 - **`domain/` (`:core:domain`)** — Domain models, evaluators/policies, diagnostics, and domain-only ports. Keep domain APIs free of Android/UI/storage/native implementation types. Owns the `TextPostProcessor` seam and `ProcessingMode` (see `TRANSCRIPTION_RULES.md`); `TranscriptionEngine` is an application port.
 - **`application/` (`:core:application`)** — Use cases, application ports (ports consumed by use cases or services), and port-chaining processors (`StylingTextPostProcessor`, `StyleAwareTextPostProcessor`, `DictionaryAwareTextPostProcessor`). Depends only on `:core:domain`.
 - **`data/` (`:core:data`)** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports. Android library module; the vendored sherpa-onnx AAR lives in its `libs/`. No Compose UI.
@@ -122,25 +132,31 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 ## 3. Presentation State Contract
 
 ### 3.1 UI State
-- Immutable `data class`. All updates via `copy()`.
-- No mutable fields. No Android types inside UI state.
-- One `StateFlow<UiState>` per ViewModel.
+The UI state rules (immutable `data class`, updates via `copy()`, no
+mutable fields, no Android types, one `StateFlow<UiState>` per ViewModel)
+live in the Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md`
+§4.1.
 
 ### 3.2 One-Shot Events
-- Use `Channel<Event>(Channel.BUFFERED)` exposed as `Flow<Event>` via `receiveAsFlow()`.
-- Consumed in `LaunchedEffect(Unit)` at the screen level.
+The one-shot event rules (`Channel<Event>(Channel.BUFFERED)` exposed via
+`receiveAsFlow()`, consumed in `LaunchedEffect(Unit)` at the screen level)
+live in the Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md`
+§4.2.
 
 ### 3.3 Model Mapping
-- Domain models MUST NOT be passed directly to composables. ViewModel maps domain → presentation.
-- Presentation models (`*UiState`, `*UiEvent`, drafts) MUST NOT embed domain types; map at the ViewModel/mapper boundary.
-- No repository calls inside composables.
+The model mapping rules (domain models never passed directly to
+composables; presentation models never embed domain types; no repository
+calls inside composables) live in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §4.3.
 
 ### 3.4 ViewModel Dependencies & Flow Composition
-- **ViewModels depend on use cases, not repository or port interfaces.** A ViewModel constructor injects `*UseCase` classes from `application/` (`:core:application`); it must not inject a `*Repository`/`*Port` interface or any `data/` type directly. Ports are consumed by use cases.
-- **Mappers must not accept use-case parameters.** Mappers are pure domain → presentation transforms; ViewModels invoke use cases and pass derived values into mappers.
-- **Use cases own multi-source `Flow` composition.** When a screen needs more than one source, add an application use case that combines the streams into one domain read model; the ViewModel observes that single use case.
-- **Only transient/presentation state lives in the ViewModel** (unsaved drafts, reveal-errors flags, one-shot events). Durable facts are read through use cases.
-- **Write paths go through use cases too** — never `repository.save(...)` from a ViewModel.
+The ViewModel dependency and Flow composition rules (ViewModels depend on
+use cases only; mappers take no use-case parameters; use cases own
+multi-source `Flow` composition; only transient/presentation state lives
+in the ViewModel; write paths go through use cases) live in the
+Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §4.4.
+
+**Bloviate local enforcement note:**
 - These rules are now **compiler-backed at the module boundary** (ENC-159): `:core:domain`/`:core:application` cannot import `:app` code, so a use case can never reach a `data/` class and domain can never reach application. Inside the single `:app` module, ViewModel → use-case-only remains agent-enforced (Enclave enforces the twin rule there with a custom Detekt rule set; if Bloviate grows one, this section is its spec). Do not add suppressions to hide layering debt — file a BLO sub-issue instead.
 
 ### 3.5 Linear Ticketing
@@ -150,21 +166,11 @@ All implementation work follows `AGENTS.md` §3.7 (Linear team `BLO`, project Bl
 
 ## 4. Navigation & Scaffold Architecture
 
-Each screen owns its own `Scaffold`, `TopAppBar`, and `ViewModel`. There is no global/root `Scaffold`.
-
-```kotlin
-// SettingsRoute.kt — wires ViewModel to Screen
-@Composable
-fun SettingsRoute(onBack: () -> Unit) {
-    val viewModel: SettingsViewModel = hiltViewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsScreen(uiState = uiState, onBack = onBack)
-}
-```
-- **No `DynamicTopBar`.** Each screen composes its own TopAppBar.
-- **No `paddingValues` threading.** Each Scaffold consumes its own inner padding locally.
-
----
+The navigation and Scaffold pattern (each screen owns its own `Scaffold`,
+`TopAppBar`, and `ViewModel`; no global/root `Scaffold`; no
+`DynamicTopBar`; no `paddingValues` threading; route composables wire the
+ViewModel to the screen) lives in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §5.
 
 ## 5. Platform Services Architecture (Bloviate-specific)
 
@@ -231,23 +237,21 @@ fun SettingsScreen(uiState: SettingsUiState, onBack: () -> Unit) {
 
 ## 7. Accessibility
 
-- All interactive elements must have `contentDescription` + appropriate semantic `role`.
-- Use `sp` units for text. System font scaling must be respected.
-- TalkBack must work across all custom components — including a usable non-bubble path through every Bloviate screen.
-
----
+The accessibility rules (a `contentDescription` and semantic `role` for
+every interactive element, `sp` text units with system font scaling
+respected, TalkBack across all custom components) live in the Architecture
+Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §6. Bloviate adds one
+local requirement: the non-bubble path must be usable through every
+Bloviate screen (see also `UI_DESIGN_SPEC.md` §5).
 
 ## 8. Preview Requirements
 
-Every composable file MUST include previews for:
-- Light + Dark themes
-- Empty state (where applicable)
-- Populated / long content
-- Loading state (where applicable)
-
-*Constraint:* Preview composables must NOT reference Hilt or real ViewModels. Use fake presentation models.
-
----
+The preview requirements live in the Architecture Gospel:
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §7 — every composable file
+includes previews for Light + Dark themes, empty state, populated/long
+content, and loading state, and preview composables never reference Hilt
+or real ViewModels (use fake presentation models).
+`UI_DESIGN_SPEC.md` §4 narrows this for Bloviate's dark-only app.
 
 ## 9. Performance & Targets
 

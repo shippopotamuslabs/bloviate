@@ -365,8 +365,8 @@ export const generateCustomStyle = onCall(
     secrets: ["OPENROUTER_API_KEY"],
     timeoutSeconds: 120,
     memory: "512MiB",
-    // Same posture as styleText: the client mints no App Check tokens yet.
-    enforceAppCheck: false,
+    // Same posture as styleText: App Check enforced (BLO-172).
+    enforceAppCheck: true,
   },
   async (request) => {
     let cachedComplete: CompletionFn | undefined;
