@@ -105,12 +105,7 @@ Bloviate's version below adds the local Detekt line-length allowance.
 
 ### 8.1 Test Coverage Discipline (Agent Mandate)
 
-- Whenever the task **adds** new production code (new classes, public functions, significant logic in `domain/`, `data/`, `service/`, ViewModels, repositories, mappers, use cases, etc.) **or modifies** existing code, the agent **MUST**:
-  - Write new unit tests (or extend existing ones) in the matching `src/test/kotlin` source set that cover the new/modified behavior, main paths, edge cases, and error conditions.
-  - Use JUnit 5 + Turbine (for `StateFlow`/`Flow`) + fakes as defined above and in `UNIT_TESTING.md`.
-- For pure UI/Compose changes that affect behavior or interactions: also add or update Compose UI tests using `createComposeRule()` and semantic matchers.
-- Trivial styling-only or preview-only changes are exempt from new tests, but the full test suite must still pass.
-- Before declaring `TASK_STATUS: COMPLETE`, the agent must have written/updated the tests **and** executed them successfully.
+Canon: `contracts/gospel/CODE-STYLE-GOSPEL.md` §8.1 (also `contracts/gospel/TESTING-GOSPEL.md` §6.5).
 
 ---
 
