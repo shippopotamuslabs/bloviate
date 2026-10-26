@@ -43,7 +43,7 @@ The naming conventions live in the Code Style Gospel:
 | Constant | UPPER_SNAKE_CASE | `MAX_DICTATION_SECONDS` |
 | Private backing flow | `_uiState` pattern | `private val _uiState = MutableStateFlow(...)` |
 | Resource IDs | snake_case | `R.drawable.ic_mic`, `R.string.model_base_en` |
-| Domain Ports | Port suffix on the interface | `TranscriptionPort`, `ModelStorePort` |
+| Application Ports | Port suffix on the interface | `TranscriptionPort`, `ModelStorePort` |
 
 ## 3. File Organization
 

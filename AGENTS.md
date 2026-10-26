@@ -47,9 +47,9 @@ Bloviate is a **multi-module** Android app with strict layering (see
 `contracts/ARCHITECTURE_RULES.md` for the binding layering rules): `:app` plus
 the `:core` library modules below, packages mapping to modules one-to-one.
 
-- `core/domain/`: `:core:domain` — domain models, evaluators, domain-only ports, diagnostics. Pure Kotlin/JVM, framework-free, depends on nothing (ENC-159).
+- `core/domain/`: `:core:domain` — domain models, evaluators, domain services/policies (never ports), diagnostics. Pure Kotlin/JVM, framework-free, depends on nothing (ENC-159).
 - `core/application/`: `:core:application` — use cases, application ports, port-chaining processors. Pure Kotlin/JVM, depends on `:core:domain` only (ENC-159).
-- `core/data/`: `:core:data` — implementations of application ports (persistence, downloads, platform adapters, transcription engines). Android library, depends on `:core:domain` + `:core:application` (ENC-169).
+- `core/data/`: `:core:data` — implementations of application ports (persistence, downloads, platform adapters, transcription engines). Android library, depends on `:core:domain` + `:core:application` (ENC-169). Legacy name for the infrastructure layer (canon: `:core:infrastructure` — see `contracts/gospel/ARCHITECTURE-GOSPEL.md` §6).
 - `app/`: the application — shell, DI wiring, launcher activity, app resources.
   Packages under `com.shippopotamus.bloviate`:
   - `presentation/` — Compose UI, ViewModels, presentation models.
@@ -69,7 +69,7 @@ Compose / Hilt, CMake/Android NDK via the `whisper-android` library only.
 
 ### 3.1 Clean Architecture — Zero Tolerance
 
-- Ports-and-adapters: `domain/` contains models, ports (`*Port` interfaces), and use cases, and stays free of Android framework, Compose, Hilt, and library-implementation types in its public APIs.
+- Ports-and-adapters: `application/` contains use cases and the outbound ports (`*Port` interfaces); `domain/` contains models, evaluators, and domain services/policies (never ports), and stays free of Android framework, Compose, Hilt, and library-implementation types in its public APIs.
 - Dependency direction is inward toward `domain/`. `data/`, `service/`, and `presentation/` may depend on `domain/`; `domain/` must not depend on them.
 - Domain models are **never** passed directly to composables. ViewModels map domain → presentation. Presentation models (`*UiState`, `*UiEvent`) must not embed domain types.
 - No `NavController` passed into composables. Navigation via pure callbacks hoisted to the route level.

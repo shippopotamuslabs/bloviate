@@ -52,8 +52,10 @@ Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split;
 `:core:data` added by ENC-169):
 
 ```text
-:core:domain       domain.model, domain.evaluator, domain.port (domain-only
-                   ports only — today just TextPostProcessor), domain.diagnostics
+:core:domain       domain.model, domain.evaluator, domain.port (domain
+                   services/policies only — today just TextPostProcessor; a
+                   domain interface implemented inside Domain is a domain
+                   service, never a port), domain.diagnostics
                    — pure Kotlin/JVM, framework-free, depends on nothing in the app
 :core:application  application.usecase, application.port, application.evaluator
                    (port-chaining processors) — pure Kotlin/JVM, -> :core:domain
@@ -66,9 +68,10 @@ Bloviate layers are **Gradle modules plus packages** (ENC-158/ENC-159 split;
  └─ di/            Hilt wiring (the only place ports meet implementations)
 ```
 
-Ports belong to the layer that consumes them: use-case- and service-consumed
-ports live in `:core:application`; a port consumed only by a domain
-service/evaluator stays in `:core:domain`. See
+Outbound ports live in `:core:application`, full stop (Architecture
+Gospel §4): use-case- and service-consumed ports live there. An interface
+implemented inside Domain and consumed only by a domain service/evaluator
+is a domain service/policy, not a port. See
 `docs/architecture/application-layer-inventory.md` for the per-file ruling.
 
 ### 1.1 Dependency Direction (Strict)
@@ -81,7 +84,7 @@ graph — binding verbatim (see `AGENTS.md` §3.1):
 :core:application → :core:domain
 :core:data     → application, domain   (implements application ports)
 presentation/  → application, domain   (ViewModels call use cases; UI renders UiState)
-service/       → application, domain   (services drive use cases / ports)
+service/       → application, domain   (services drive use cases only)
 di/            → domain, application, data, service   (composition root)
 domain/        → nothing else in the app; no Android framework types in public APIs
 whisper-android (library) → consumed behind an application port; its types do not leak
@@ -108,7 +111,7 @@ forbidden-import map:
 | `domain/` (`:core:domain`) | `application/`, `data/`, `service/`, `presentation/`, Compose, Hilt annotations on domain types, Android framework types in public APIs, `com.shippopotamus.whisper` implementation classes |
 | `application/` (`:core:application`) | `data/`, `service/`, `presentation/`, Compose, Android framework types, `com.shippopotamus.whisper` implementation classes |
 | `data/` (`:core:data`) | Compose UI, `service/`, `presentation/`, `di/` (anything in `:app`) |
-| `presentation/` | `data/` classes, `com.shippopotamus.whisper` types (go through application ports/use cases) |
+| `presentation/` | `data/` classes, `com.shippopotamus.whisper` types (go through use cases) |
 
 Reusable UI code lives with the presentation layer; screens are wired by the app shell.
 
@@ -116,13 +119,13 @@ Reusable UI code lives with the presentation layer; screens are wired by the app
 
 ## 2. Layer Responsibilities
 
-The general layer-responsibility rules (and the §3.1 domain model policy:
+The general layer-responsibility rules (and the §3.7 domain model policy:
 rich aggregates, honest projections) live in the Architecture Gospel:
 `contracts/gospel/ARCHITECTURE-GOSPEL.md` §3. Bloviate's own layers:
 
-- **`domain/` (`:core:domain`)** — Domain models, evaluators/policies, diagnostics, and domain-only ports. Keep domain APIs free of Android/UI/storage/native implementation types. Owns the `TextPostProcessor` seam and `ProcessingMode` (see `TRANSCRIPTION_RULES.md`); `TranscriptionEngine` is an application port.
+- **`domain/` (`:core:domain`)** — Domain models, evaluators/policies, diagnostics, and domain services (never ports). Keep domain APIs free of Android/UI/storage/native implementation types. Owns the `TextPostProcessor` seam and `ProcessingMode` (see `TRANSCRIPTION_RULES.md`); `TranscriptionEngine` is an application port.
 - **`application/` (`:core:application`)** — Use cases, application ports (ports consumed by use cases or services), and port-chaining processors (`StylingTextPostProcessor`, `StyleAwareTextPostProcessor`, `DictionaryAwareTextPostProcessor`). Depends only on `:core:domain`.
-- **`data/` (`:core:data`)** — Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports. Android library module; the vendored sherpa-onnx AAR lives in its `libs/`. No Compose UI.
+- **`data/` (`:core:data`)** — The infrastructure layer in this repo: `:core:data` is the legacy name for it (canon: `:core:infrastructure`, Architecture Gospel §6; persistence is a package inside infrastructure). Implements persistence (DataStore, files), model downloads (WorkManager), and platform adapters behind application ports — translation only. Android library module; the vendored sherpa-onnx AAR lives in its `libs/`. No Compose UI.
 - **`service/`** — The two long-lived platform services (accessibility watcher, bubble overlay) and text insertion. Services are thin: they translate platform events into use-case calls and render bubble state.
 - **`presentation/`** — Compose UI and presentation logic (settings, onboarding, model manager). ViewModels map domain → presentation models.
 - **`:app` shell / `di/`** — Application class, navigation wiring, DI composition, app resources, platform entrypoints.
@@ -135,26 +138,26 @@ rich aggregates, honest projections) live in the Architecture Gospel:
 The UI state rules (immutable `data class`, updates via `copy()`, no
 mutable fields, no Android types, one `StateFlow<UiState>` per ViewModel)
 live in the Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md`
-§4.1.
+§12.1.
 
 ### 3.2 One-Shot Events
 The one-shot event rules (`Channel<Event>(Channel.BUFFERED)` exposed via
 `receiveAsFlow()`, consumed in `LaunchedEffect(Unit)` at the screen level)
 live in the Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md`
-§4.2.
+§12.2.
 
 ### 3.3 Model Mapping
 The model mapping rules (domain models never passed directly to
 composables; presentation models never embed domain types; no repository
 calls inside composables) live in the Architecture Gospel:
-`contracts/gospel/ARCHITECTURE-GOSPEL.md` §4.3.
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §12.3.
 
 ### 3.4 ViewModel Dependencies & Flow Composition
 The ViewModel dependency and Flow composition rules (ViewModels depend on
 use cases only; mappers take no use-case parameters; use cases own
 multi-source `Flow` composition; only transient/presentation state lives
 in the ViewModel; write paths go through use cases) live in the
-Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §4.4.
+Architecture Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §12.4.
 
 **Bloviate local enforcement note:**
 - These rules are now **compiler-backed at the module boundary** (ENC-159): `:core:domain`/`:core:application` cannot import `:app` code, so a use case can never reach a `data/` class and domain can never reach application. Inside the single `:app` module, ViewModel → use-case-only remains agent-enforced (Enclave enforces the twin rule there with a custom Detekt rule set; if Bloviate grows one, this section is its spec). Do not add suppressions to hide layering debt — file a BLO sub-issue instead.
@@ -170,7 +173,7 @@ The navigation and Scaffold pattern (each screen owns its own `Scaffold`,
 `TopAppBar`, and `ViewModel`; no global/root `Scaffold`; no
 `DynamicTopBar`; no `paddingValues` threading; route composables wire the
 ViewModel to the screen) lives in the Architecture Gospel:
-`contracts/gospel/ARCHITECTURE-GOSPEL.md` §5.
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §13.
 
 ## 5. Platform Services Architecture (Bloviate-specific)
 
@@ -182,7 +185,7 @@ Android offers exactly one API that can tell whether an editable field in *anoth
 - On each event: `findFocus(FOCUS_INPUT)`; treat the field as editable if `isEditable` **or** the class name contains `EditText` (WebView/legacy inputs lie about `isEditable`).
 - Show the bubble when the keyboard is visible **and** an editable, **non-password** field is focused (ENC-125); dismissing the keyboard hides the bubble even if the field keeps focus. Password/secure fields: **never** show, never inspect content. An in-progress recording/processing bar is exempt from keyboard-driven hide — a keyboard dismissal while the bar is up defers and lands when the bar settles to Idle; a password-field hide is never deferred and cancels the recording immediately. Keyboard visibility is derived from the input-method window's presence in the same accessibility window stream (window type only — no content is ever read, and no new permissions are involved).
 - Recycle every `AccessibilityNodeInfo`. No node state survives an event.
-- The service reports field focus through a domain port; it contains no transcription or insertion logic of its own.
+- The service reports field focus through an application port; it contains no transcription or insertion logic of its own.
 
 ### 5.2 BubbleOverlayService (Foreground Service + WindowManager)
 
@@ -240,14 +243,14 @@ fun SettingsScreen(uiState: SettingsUiState, onBack: () -> Unit) {
 The accessibility rules (a `contentDescription` and semantic `role` for
 every interactive element, `sp` text units with system font scaling
 respected, TalkBack across all custom components) live in the Architecture
-Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §6. Bloviate adds one
+Gospel: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §14. Bloviate adds one
 local requirement: the non-bubble path must be usable through every
 Bloviate screen (see also `UI_DESIGN_SPEC.md` §5).
 
 ## 8. Preview Requirements
 
 The preview requirements live in the Architecture Gospel:
-`contracts/gospel/ARCHITECTURE-GOSPEL.md` §7 — every composable file
+`contracts/gospel/ARCHITECTURE-GOSPEL.md` §14 — every composable file
 includes previews for Light + Dark themes, empty state, populated/long
 content, and loading state, and preview composables never reference Hilt
 or real ViewModels (use fake presentation models).
