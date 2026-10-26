@@ -54,39 +54,15 @@ Style Gospel: `contracts/gospel/CODE-STYLE-GOSPEL.md` §3.
 ## 4. Compose-Specific Rules
 
 Shared stability, modifier, state-hoisting, lambda, rigor, and
-composition rules: `contracts/gospel/CODE-STYLE-GOSPEL.md` §4. Bloviate's
-text below is kept in full — its §4.5 Performance Deferral rule is written
-for Bloviate's audio-frame and download state and outranks the gospel's
-generic wording where they differ.
-
-### 4.1 Stability
-- UI state classes: `data class` (stable by default when all fields are stable types).
-- If a class contains `List`, `Map`, or other mutable collection types, either:
-  - Use `kotlinx.collections.immutable` (`ImmutableList`, `PersistentList`), OR
-  - Annotate with `@Immutable` / `@Stable` if you guarantee no mutation.
-- **Do not scatter `@Stable` annotations preemptively.** Only add when profiling confirms unnecessary recomposition from that specific type.
-
-### 4.2 Modifier Conventions
-- Every composable that emits layout accepts `modifier: Modifier = Modifier` as its **last** parameter.
-- Apply `modifier` to the outermost layout element.
-- Modifier order matters: `padding` before `background` clips differently than the reverse. Follow the logical layering.
-
-### 4.3 State Hoisting
-- Composables that manage text input: accept `value: String` + `onValueChange: (String) -> Unit`.
-- Internal ephemeral state (`remember { mutableStateOf(...) }`) is fine for dropdown expanded, focus, animation state.
-- Business state always hoisted to ViewModel.
-
-### 4.4 Lambdas
-- Prefer method references (`viewModel::onModeChange`) over inline lambdas when passing to child composables.
-- Avoid creating new lambda instances in Lazy item blocks (causes recomposition). Extract to `remember` or use stable references.
+composition rules: `contracts/gospel/CODE-STYLE-GOSPEL.md` §4 (§§4.1–4.4
+and §4.6 live there only). Bloviate's §4.5 below is kept in full — its
+Performance Deferral rule is written for Bloviate's audio-frame and
+download state and outranks the gospel's generic wording where they
+differ.
 
 ### 4.5 Rigor Protocols
 - **Performance Deferral:** High-frequency state (live RMS volume, waveform samples, download progress percentages) must be passed to leaf composables as a lambda `() -> Float`. This ensures the root screen/bubble does not recompose on every audio frame or byte update.
 - **Visual Purity (Canvas):** If a progress indicator artifact appears, use explicit overrides like `drawStopIndicator = {}` and `gapSize = 0.dp`. Use `StrokeCap.Butt` with a parent `Modifier.clip` to ensure seamless rounding.
-
-### 4.6 Plausible Composition
-- All `LazyColumn` and `LazyRow` components must use stable keys.
-- Ensure state reads are deferred using lambda-based modifiers (e.g., `Modifier.offset { ... }` or `drawBehind`) to minimize recomposition.
 
 ## 5. Coroutines & Flow
 
@@ -147,6 +123,8 @@ Bloviate's version below adds the local Detekt line-length allowance.
 ## 10. 2026 Exception & Notification Discipline
 
 ### 10.1 Worker Exception Handling
+Canon: `contracts/gospel/CODE-STYLE-GOSPEL.md` §9. Bloviate's table:
+
 | Always | Never |
 |--------|-------|
 | Explicitly catch and rethrow `CancellationException`. | Catch `Exception` generically without re-throwing cancellation. |

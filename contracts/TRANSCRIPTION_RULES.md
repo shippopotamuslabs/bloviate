@@ -31,9 +31,9 @@ Non-negotiable rules for everything that turns audio into inserted text: the whi
 2. **No auto-stop on pauses.** Stop is user-driven (tap / hold-release). Thinking pauses never cut a dictation: short silences are speech cadence, and the session rides through them. (Do **not** port Enclave's 10-second silence finalization — it is right for chat, wrong for dictation.)
 3. **Inactivity auto-finish (ENC-160).** Thirty seconds of consecutive dead air — every 10 ms frame below `SilenceTrimmer.SILENCE_RMS_THRESHOLD`, the same definition of "speech" the trim uses — finishes the recording exactly like a stop. Thirty seconds is an order of magnitude beyond any thinking pause: it means the mic was left on or the thought is finished. The finish reason rides the stop result so Done can name it.
 4. **Absolute safety backstop (10 minutes).** A recording still going after ten minutes of continuous speech finishes exactly like a stop. Almost unreachable (dead air fires first); it bounds only a truly runaway buffer (~38 MB worst case) and a pathological one-pass decode.
-3. Stop → trim leading/trailing silence (energy threshold; Enclave's 0.015 amplitude / 0.02 RMS values are the starting point) → transcribe the whole buffered utterance in **one pass**. (Chunked/streaming transcription into the final text is forbidden: Whisper's 30-second-window architecture makes chunked output markedly worse. Provisional re-transcription for *display only* is a future option, never the inserted text.)
-4. Transcript → `TextPostProcessor` (§5) → insertion (paste-first, `ARCHITECTURE_RULES.md` §5.3).
-5. Failure at any step leaves existing text untouched and keeps the audio buffer long enough for one retry tap.
+5. Stop → trim leading/trailing silence (energy threshold; Enclave's 0.015 amplitude / 0.02 RMS values are the starting point) → transcribe the whole buffered utterance in **one pass**. (Chunked/streaming transcription into the final text is forbidden: Whisper's 30-second-window architecture makes chunked output markedly worse. Provisional re-transcription for *display only* is a future option, never the inserted text.)
+6. Transcript → `TextPostProcessor` (§5) → insertion (splice-first, `ARCHITECTURE_RULES.md` §5.3).
+7. Failure at any step leaves existing text untouched and keeps the audio buffer long enough for one retry tap.
 
 ## 3. Engine Lifecycle
 

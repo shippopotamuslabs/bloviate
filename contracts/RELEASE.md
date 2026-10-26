@@ -15,7 +15,8 @@ Scope facts, checked 2026-10-25 (BLO-173):
 - Nothing had been uploaded to Play when this contract landed, so no
   versionCodes were consumed before the derived scheme below.
 
-Copy in release notes follows `contracts/VOICE_RULES.md`. Read it before
+Copy in release notes follows `contracts/gospel/WUMBO-GOSPEL.md` via
+`contracts/VOICE_RULES.md` (pointer stub). Read it before
 drafting notes, the same as any other user-facing copy.
 
 ---
@@ -123,7 +124,8 @@ Where the facts come from:
   number, or a behavior the PRs do not support.
 - Nothing gets invented to fill space. A two-line whatsnew that covers
   the range beats a full 500 characters with padding in it.
-- Voice: `contracts/VOICE_RULES.md` binds store copy. State what the
+- Voice: `contracts/gospel/WUMBO-GOSPEL.md` via `contracts/VOICE_RULES.md`
+  (pointer stub) binds store copy. State what the
   thing does. Short lines, real specifics, no hype words, no pivots.
 - Check the cap before opening the prep PR:
   `wc -m distribution/whatsnew/en-US.txt` (subtract one for the trailing

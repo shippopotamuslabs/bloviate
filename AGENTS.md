@@ -21,12 +21,12 @@ Every task maps to one or more binding contracts in `/contracts/`. Read the rele
 
 | Task type | Contract to read |
 |-----------|-----------------|
-| Module/package structure, dependency direction, layer responsibilities, navigation, Scaffold, accessibility service, overlay window, foreground service, `WorkManager`, background tasks | `ARCHITECTURE_RULES.md` |
-| Kotlin style, naming, Compose stability, modifier conventions, state hoisting, Flow/coroutines, testing conventions, test coverage mandate | `CODE_STYLE_RULES.md` |
+| Architecture, dependency direction, layers, presentation contract, navigation/Scaffold, accessibility/previews | `contracts/gospel/ARCHITECTURE-GOSPEL.md`; Bloviate module graph, platform services, IME: `contracts/ARCHITECTURE_RULES.md` |
+| Kotlin/Compose style, naming, stability, coroutines | `contracts/gospel/CODE-STYLE-GOSPEL.md`; Bloviate examples, Detekt/validation gates: `contracts/CODE_STYLE_RULES.md` |
 | Persistence (DataStore, model files, dictionary, history), persisted-format versioning, threading | `DATA_LAYER_RULES.md` |
 | Speech transcription: engine lifecycle, warm context, model integrity, thermal/memory pressure, text cleanup pipeline, processing modes | `TRANSCRIPTION_RULES.md` |
-| Colors, typography, Compose component structure, previews, bubble overlay UI states, accessibility | `UI_DESIGN_SPEC.md` |
-| JUnit 5, Fakes vs Mocks, Robolectric, Turbine, state-based assertions, test coverage | `UNIT_TESTING.md` |
+| Color, spacing, shapes, typography, components, buttons, glass bars | `contracts/gospel/PALETTE.md` + `contracts/gospel/COMPOSE-GOSPEL.md` + `contracts/gospel/BUTTON-SHAPE-GOSPEL.md` + `contracts/gospel/GLASS-BARS-GOSPEL.md`; Bloviate dark-only theme, screens, bubble: `contracts/UI_DESIGN_SPEC.md` |
+| Testing pyramid, fakes/mocks, stack | `contracts/gospel/TESTING-GOSPEL.md`; Bloviate worked examples and gates: `contracts/UNIT_TESTING.md` |
 | **Adding or editing any user-facing copy** — labels, setting descriptions, buttons, empty states, errors, notifications, onboarding, paywall copy, dialog text | `contracts/gospel/WUMBO-GOSPEL.md` (the gospels submodule) — read it *before* writing the copy, not as a cleanup pass after |
 | Versioning, release prep, Play release notes, Play internal-track upload, the deploy workflow, release tags | `RELEASE.md` — read it *before* any release work; the derived `versionCode` rules and the release-prep PR gate in there bind every release |
 
@@ -69,14 +69,7 @@ Compose / Hilt, CMake/Android NDK via the `whisper-android` library only.
 
 ### 3.1 Clean Architecture — Zero Tolerance
 
-- Ports-and-adapters: `application/` contains use cases and the outbound ports (`*Port` interfaces); `domain/` contains models, evaluators, and domain services/policies (never ports), and stays free of Android framework, Compose, Hilt, and library-implementation types in its public APIs.
-- Dependency direction is inward toward `domain/`. `data/`, `service/`, and `presentation/` may depend on `domain/`; `domain/` must not depend on them.
-- Domain models are **never** passed directly to composables. ViewModels map domain → presentation. Presentation models (`*UiState`, `*UiEvent`) must not embed domain types.
-- No `NavController` passed into composables. Navigation via pure callbacks hoisted to the route level.
-- **ViewModels depend on use cases only** — never on `*Repository`/`*Port` interfaces or `data/` classes directly. Multi-source `Flow` composition lives in a domain use case; write paths go through use cases. (Agent-enforced; Enclave enforces the twin rules with a custom Detekt rule set that Bloviate does not have yet — do not weaken the rule because it is not machine-checked here.)
-- The modules are split out of `:app` (`:core:domain`/`:core:application` in ENC-159, `:core:data` in ENC-169); the dependency graph in `contracts/ARCHITECTURE_RULES.md` §1 is binding verbatim.
-
-**Violation response:** Reply with exactly: `"Contract violation detected in [file]. Request explicit 'Contract Waiver' from user."` Then stop. Do not generate code.
+Canon: `contracts/gospel/ARCHITECTURE-GOSPEL.md` §0, §1, §4, §12, §13. Bloviate binding graph: `contracts/ARCHITECTURE_RULES.md` §1 (verbatim). Violation response: `"Contract violation detected in [file]. Request explicit 'Contract Waiver' from user."` Then stop.
 
 ### 3.2 Android Code — AndroJack Level 3 Protocol
 
@@ -97,12 +90,7 @@ For every Kotlin, XML, or Gradle code block generated:
 
 ### 3.3 Test Coverage — Mandatory
 
-Whenever production code is added or modified (new classes, public functions, logic in `domain/`, `data/`, `service/`, ViewModels, repositories, mappers, use cases):
-
-- Write or extend unit tests in the matching `src/test/kotlin` source set using JUnit 5 + Turbine (for Flow) + **hand-written fakes** for Bloviate-owned ports. Bloviate has no shared `:core:testing` module yet: fakes live in the module's test source set; when a shared testing module is created, a new port's fake moves there in the same MR as the port.
-- MockK is allowed only for third-party SDK boundaries with an explicit `@Suppress` and one-line justification. Never `verify`/`coVerify` in ViewModel tests — assert on `UiState` (see `contracts/UNIT_TESTING.md`).
-- Tests must pass before `TASK_STATUS: COMPLETE`.
-- Trivial styling-only or preview-only changes are exempt (theme/preview matrix changes are not exempt — see `contracts/UI_DESIGN_SPEC.md`).
+Canon: `contracts/gospel/TESTING-GOSPEL.md` §6 and `contracts/gospel/CODE-STYLE-GOSPEL.md` §8.1. Local: fakes live in the module `src/test` source set (no `:core:testing` yet); see `contracts/UNIT_TESTING.md` §§2, 5.
 
 ### 3.4 Schema Lock
 
