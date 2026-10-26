@@ -61,31 +61,19 @@ class BubbleServiceStartPolicyTest {
     }
 
     @Test
-    fun `boot start runs when setup is finished and presence is untouched`() {
+    fun `auto start runs when presence is untouched`() {
         assertTrue(
             BubbleServiceStartPolicy.shouldAutoStart(
-                setupFinished = true,
-                presence = ResidentPresenceState(autoStartEnabled = true, userStopped = false),
+                ResidentPresenceState(autoStartEnabled = true, userStopped = false),
             ),
         )
     }
 
     @Test
-    fun `boot start waits for setup to finish`() {
+    fun `the setup off switch blocks auto start`() {
         assertFalse(
             BubbleServiceStartPolicy.shouldAutoStart(
-                setupFinished = false,
-                presence = ResidentPresenceState(),
-            ),
-        )
-    }
-
-    @Test
-    fun `the setup off switch blocks boot start`() {
-        assertFalse(
-            BubbleServiceStartPolicy.shouldAutoStart(
-                setupFinished = true,
-                presence = ResidentPresenceState(autoStartEnabled = false),
+                ResidentPresenceState(autoStartEnabled = false),
             ),
         )
     }
@@ -94,8 +82,7 @@ class BubbleServiceStartPolicyTest {
     fun `a user stop is honored across reboots until the next in-app start`() {
         assertFalse(
             BubbleServiceStartPolicy.shouldAutoStart(
-                setupFinished = true,
-                presence = ResidentPresenceState(autoStartEnabled = true, userStopped = true),
+                ResidentPresenceState(autoStartEnabled = true, userStopped = true),
             ),
         )
     }

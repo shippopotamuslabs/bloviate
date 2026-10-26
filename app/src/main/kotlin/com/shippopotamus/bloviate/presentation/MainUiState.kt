@@ -1,6 +1,7 @@
 package com.shippopotamus.bloviate.presentation
 
 import com.shippopotamus.bloviate.application.port.AuthState
+import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
 import com.shippopotamus.bloviate.domain.model.BubbleSize
@@ -78,6 +79,9 @@ enum class SetupBlocker {
     MICROPHONE,
     MODEL,
     BUBBLE,
+
+    /** The bubble is wanted but not running — a tap away, not a settings errand (BLO-189). */
+    BUBBLE_NOT_RUNNING,
 }
 
 /**
@@ -102,7 +106,9 @@ sealed interface SetupStatusUi {
  * spots nothing either, ENC-129), the overlay permission (without it
  * the bubble cannot draw), the microphone, a downloaded model (either
  * engine counts — dictation works on whichever is ready), and finally
- * the bubble switch itself, which is a tap rather than a setup errand.
+ * the bubble itself, which is a tap rather than a setup errand: wanted
+ * but down reads [SetupBlocker.BUBBLE_NOT_RUNNING], switched off reads
+ * [SetupBlocker.BUBBLE] (BLO-189).
  */
 fun MainUiState.setupStatus(): SetupStatusUi =
     when {
@@ -113,9 +119,45 @@ fun MainUiState.setupStatus(): SetupStatusUi =
         whisperModelStatus !is ModelUiStatus.Ready &&
             parakeetModelStatus !is ModelUiStatus.Ready ->
             SetupStatusUi.Blocked(SetupBlocker.MODEL)
-        !bubbleServiceRunning -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE)
+        !bubbleServiceRunning ->
+            SetupStatusUi.Blocked(
+                if (bubbleEnabled) SetupBlocker.BUBBLE_NOT_RUNNING else SetupBlocker.BUBBLE,
+            )
         else -> SetupStatusUi.Ready
     }
+
+/**
+ * The bubble's steady states for the Setup rows (BLO-189): running,
+ * wanted but down, or switched off by the user.
+ */
+enum class BubbleStatusUi {
+    RUNNING,
+    NOT_RUNNING,
+    OFF,
+}
+
+/**
+ * The bubble row's status: [BubbleStatusUi.RUNNING] while the service
+ * runs — even while a stop is in flight — else
+ * [BubbleStatusUi.NOT_RUNNING] while the bubble is wanted, else
+ * [BubbleStatusUi.OFF].
+ */
+fun MainUiState.bubbleServiceStatus(): BubbleStatusUi =
+    when {
+        bubbleServiceRunning -> BubbleStatusUi.RUNNING
+        bubbleEnabled -> BubbleStatusUi.NOT_RUNNING
+        else -> BubbleStatusUi.OFF
+    }
+
+/**
+ * Whether the shell should re-issue the user start on entry (BLO-189):
+ * the bubble is wanted, allowed to start on its own, and not running.
+ * The shell implies setup is finished — the wizard would own the
+ * screen otherwise — so this mirrors
+ * [BubbleServiceStartPolicy.shouldAutoStart] minus that gate.
+ */
+fun MainUiState.bubbleAutoStartDue(): Boolean =
+    bubbleEnabled && autoStartEnabled && !bubbleServiceRunning
 
 /** Presentation-only mapping of the bubble size steps (ENC-68). */
 enum class BubbleSizeUi {
@@ -230,6 +272,13 @@ data class MainUiState(
     val watcherConnected: Boolean = false,
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
+
+    /**
+     * Whether the user wants the bubble (BLO-189): mirrors
+     * `!ResidentPresenceState.userStopped`. The switch in Permissions
+     * writes it; the Dictation row only reports it.
+     */
+    val bubbleEnabled: Boolean = true,
 
     /** Whether battery optimization leaves Bloviate alone (ENC-129). */
     val batteryExempt: Boolean = false,

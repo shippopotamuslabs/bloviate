@@ -528,6 +528,40 @@ class MainViewModelTest {
         }
 
     @Test
+    fun `bubble gate starts wanted and follows the user stop flag`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertTrue(awaitItem().bubbleEnabled)
+
+                fakeResidentPresencePort.publish(
+                    ResidentPresenceState(autoStartEnabled = true, userStopped = true),
+                )
+                assertFalse(awaitItem().bubbleEnabled)
+
+                fakeResidentPresencePort.publish(
+                    ResidentPresenceState(autoStartEnabled = true, userStopped = false),
+                )
+                assertTrue(awaitItem().bubbleEnabled)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `bubble gate stays wanted while the service itself stops`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            viewModel.uiState.test {
+                assertTrue(awaitItem().bubbleEnabled)
+
+                fakeBubbleServiceStatePort.publishServiceRunning(true)
+                assertTrue(awaitItem().bubbleEnabled)
+
+                fakeBubbleServiceStatePort.publishServiceRunning(false)
+                assertTrue(awaitItem().bubbleEnabled)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
     fun `bubble stop request records the stop, start request lifts it`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             viewModel.onBubbleStopRequested()

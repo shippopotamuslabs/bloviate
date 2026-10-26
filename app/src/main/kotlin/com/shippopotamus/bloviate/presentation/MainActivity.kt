@@ -11,11 +11,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.core.content.ContextCompat
+import com.shippopotamus.bloviate.application.port.BubbleServiceStarterPort
 import com.shippopotamus.bloviate.domain.evaluator.BatteryExemptionIntentPolicy
 import com.shippopotamus.bloviate.domain.model.BatteryExemptionAttempt
+import com.shippopotamus.bloviate.domain.model.BubbleServiceStartOrigin
 import com.shippopotamus.bloviate.service.BubbleOverlayService
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Launcher activity hosting the app's root route — the first-run
@@ -30,6 +32,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val viewModel: MainViewModel by viewModels()
+
+    @Inject
+    lateinit var bubbleServiceStarter: BubbleServiceStarterPort
 
     /**
      * The wizard's ViewModel (ENC-67): the same activity-scoped
@@ -161,11 +166,7 @@ class MainActivity : ComponentActivity() {
         // resident-presence record (ENC-129) and tags the start as a
         // user start, the origin always eligible for the microphone type.
         viewModel.onBubbleStartRequested()
-        ContextCompat.startForegroundService(
-            this,
-            Intent(this, BubbleOverlayService::class.java)
-                .setAction(BubbleOverlayService.ACTION_USER_START),
-        )
+        bubbleServiceStarter.startBubble(BubbleServiceStartOrigin.USER)
     }
 
     private fun stopBubbleService() {

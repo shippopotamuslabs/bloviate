@@ -305,6 +305,7 @@ class MainViewModel @Inject constructor(
             selectedEngine = mapEngine(live.selectedEngine),
             engineFallback = mapEngineFallback(live),
             bubbleAppearance = live.bubbleAppearance.toUi(),
+            bubbleEnabled = !live.residentPresence.userStopped,
             autoStartEnabled = live.residentPresence.autoStartEnabled,
             batteryExempt = permissions.batteryExempt,
         )
