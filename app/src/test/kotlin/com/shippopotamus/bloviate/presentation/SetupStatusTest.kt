@@ -101,8 +101,20 @@ class SetupStatusTest {
     }
 
     @Test
-    fun `bubble off is the last blocker`() {
-        val state = readyState().copy(bubbleServiceRunning = false)
+    fun `wanted-but-down bubble blocks as not running, after the model gate`() {
+        val state = readyState().copy(bubbleEnabled = true, bubbleServiceRunning = false)
+        assertEquals(SetupStatusUi.Blocked(SetupBlocker.BUBBLE_NOT_RUNNING), state.setupStatus())
+    }
+
+    @Test
+    fun `switched-off bubble is the last blocker`() {
+        val state = readyState().copy(bubbleEnabled = false, bubbleServiceRunning = false)
         assertEquals(SetupStatusUi.Blocked(SetupBlocker.BUBBLE), state.setupStatus())
+    }
+
+    @Test
+    fun `running bubble with the gate on is ready`() {
+        val state = readyState().copy(bubbleEnabled = true, bubbleServiceRunning = true)
+        assertEquals(SetupStatusUi.Ready, state.setupStatus())
     }
 }

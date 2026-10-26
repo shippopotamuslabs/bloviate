@@ -49,16 +49,14 @@ object BubbleServiceStartPolicy {
         }
 
     /**
-     * Whether the boot receiver may start the service: setup finished
-     * (a fresh install must meet the wizard first), resident presence
-     * switched on, and the user has not explicitly stopped the bubble —
-     * a stop is honored across reboots until the next in-app start.
+     * Whether the presence record allows an automatic start: the
+     * resident-presence invariant only — switched on, and the user
+     * has not explicitly stopped the bubble (a stop is honored
+     * across reboots until the next in-app start). The setup-finished
+     * precondition is the calling use case's, not this policy's.
      */
-    fun shouldAutoStart(
-        setupFinished: Boolean,
-        presence: ResidentPresenceState,
-    ): Boolean =
-        setupFinished && presence.autoStartEnabled && !presence.userStopped
+    fun shouldAutoStart(presence: ResidentPresenceState): Boolean =
+        presence.autoStartEnabled && !presence.userStopped
 
     /**
      * Whether a start asks the system to restart the service after a

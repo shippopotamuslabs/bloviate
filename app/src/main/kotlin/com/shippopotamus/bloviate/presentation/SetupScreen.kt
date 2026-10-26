@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
@@ -33,6 +34,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -147,6 +150,8 @@ fun SetupScreen(
                 onOpenOverlaySettings = onOpenOverlaySettings,
                 onOpenBatterySettings = onOpenBatterySettings,
                 onRequestMicPermission = onRequestMicPermission,
+                onStartBubble = onStartBubble,
+                onStopBubble = onStopBubble,
             )
             DashboardSectionHeader(
                 text = stringResource(R.string.setup_section_dictation),
@@ -154,7 +159,6 @@ fun SetupScreen(
             DictationCard(
                 uiState = uiState,
                 onStartBubble = onStartBubble,
-                onStopBubble = onStopBubble,
                 onAutoStartEnabledChange = onAutoStartEnabledChange,
             )
             DashboardSectionHeader(
@@ -213,6 +217,7 @@ private fun SetupStatusPill(
                     SetupBlocker.MICROPHONE -> R.string.setup_status_mic
                     SetupBlocker.MODEL -> R.string.setup_status_model
                     SetupBlocker.BUBBLE -> R.string.setup_status_bubble
+                    SetupBlocker.BUBBLE_NOT_RUNNING -> R.string.setup_status_bubble_not_running
                 },
             ),
             tone = StatusTone.ATTENTION,
@@ -234,7 +239,9 @@ private fun SetupStatusPill(
  * Setup is only ever viewed from inside Bloviate, where no other
  * app's field can be focused). An enabled-but-disconnected watcher
  * (ENC-129 supervision) reads "Not connected" here instead of a
- * misleading On, with the connection-lost sub-line to match.
+ * misleading On, with the connection-lost sub-line to match. The last
+ * row (BLO-189) is the bubble's user-side gate: not a system grant
+ * but the user's own on/off, alone in taking no Settings deep-link.
  */
 @Composable
 private fun PermissionsCard(
@@ -243,6 +250,8 @@ private fun PermissionsCard(
     onOpenOverlaySettings: () -> Unit,
     onOpenBatterySettings: () -> Unit,
     onRequestMicPermission: () -> Unit,
+    onStartBubble: () -> Unit,
+    onStopBubble: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     DashboardCard(modifier = modifier) {
@@ -330,38 +339,79 @@ private fun PermissionsCard(
                 )
             },
         )
-    }
-}
-
-/**
- * The dictation card (ENC-75): the bubble is a switch — the control
- * that matches an on/off job. The switch is live regardless of the
- * overlay permission, exactly as the old start/stop buttons were: the
- * service is the thing that runs, the permission gate is its own row.
- * Below it, the resident-presence switch (ENC-129): whether the bubble
- * starts on its own after a reboot and comes back after a system stop.
- */
-@Composable
-private fun DictationCard(
-    uiState: MainUiState,
-    onStartBubble: () -> Unit,
-    onStopBubble: () -> Unit,
-    onAutoStartEnabledChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    DashboardCard(modifier = modifier) {
         DashboardRow(
             label = stringResource(R.string.bubble_row_label),
             icon = Icons.Filled.ChatBubbleOutline,
-            sub = stringResource(R.string.bubble_row_sub),
+            sub = stringResource(R.string.bubble_row_permission_sub),
+            dividerAbove = true,
             trailing = {
                 Switch(
-                    checked = uiState.bubbleServiceRunning,
+                    checked = uiState.bubbleEnabled,
                     onCheckedChange = { turnOn ->
                         if (turnOn) onStartBubble() else onStopBubble()
                     },
                     colors = bloviateSwitchColors(),
                 )
+            },
+        )
+    }
+}
+
+/**
+ * The dictation card (ENC-75; status row per BLO-189): the bubble row
+ * reports instead of switching — a chip for the steady state plus a
+ * refresh button while wanted-but-down that re-issues the user start.
+ * The on/off switch lives in [PermissionsCard], the row alone owning
+ * the user's gate. The service stays live regardless of the overlay
+ * permission, exactly as before: the service is the thing that runs,
+ * the permission gate is its own row. Below it, the
+ * resident-presence switch (ENC-129): whether the bubble starts on
+ * its own after a reboot and comes back after a system stop.
+ */
+@Composable
+private fun DictationCard(
+    uiState: MainUiState,
+    onStartBubble: () -> Unit,
+    onAutoStartEnabledChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bubbleStatus = uiState.bubbleServiceStatus()
+    DashboardCard(modifier = modifier) {
+        DashboardRow(
+            label = stringResource(R.string.bubble_status_row_label),
+            icon = Icons.Filled.ChatBubbleOutline,
+            sub = stringResource(R.string.bubble_row_sub),
+            trailing = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+                ) {
+                    if (bubbleStatus == BubbleStatusUi.NOT_RUNNING) {
+                        IconButton(
+                            onClick = onStartBubble,
+                            shapes = IconButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.bubble_refresh_description),
+                            )
+                        }
+                    }
+                    StatusChip(
+                        text = stringResource(
+                            when (bubbleStatus) {
+                                BubbleStatusUi.RUNNING -> R.string.chip_on
+                                BubbleStatusUi.NOT_RUNNING -> R.string.chip_not_running
+                                BubbleStatusUi.OFF -> R.string.chip_off
+                            },
+                        ),
+                        tone = when (bubbleStatus) {
+                            BubbleStatusUi.RUNNING -> StatusTone.POSITIVE
+                            BubbleStatusUi.NOT_RUNNING -> StatusTone.ATTENTION
+                            BubbleStatusUi.OFF -> StatusTone.NEUTRAL
+                        },
+                    )
+                }
             },
         )
         DashboardRow(
@@ -1006,6 +1056,7 @@ private fun SetupScreenPopulatedPreview() {
                 watcherConnected = true,
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
+                bubbleEnabled = true,
                 batteryExempt = true,
                 micPermissionGranted = true,
                 whisperModelStatus = ModelUiStatus.Ready,
@@ -1049,11 +1100,49 @@ private fun SetupScreenDownloadingPreview() {
                 watcherConnected = true,
                 overlayPermissionGranted = true,
                 bubbleServiceRunning = true,
+                bubbleEnabled = true,
                 batteryExempt = true,
                 micPermissionGranted = true,
                 whisperModelStatus = ModelUiStatus.Downloading(percent = 42),
                 parakeetModelStatus = ModelUiStatus.Absent,
                 selectedEngine = DictationEngineUi.WHISPER,
+            ),
+            onOpenAccessibilitySettings = {},
+            onOpenOverlaySettings = {},
+            onOpenBatterySettings = {},
+            onStartBubble = {},
+            onStopBubble = {},
+            onAutoStartEnabledChange = {},
+            onRequestMicPermission = {},
+            onWhisperDownloadClick = {},
+            onParakeetDownloadClick = {},
+            onSelectEngine = {},
+            onBubbleOpacityChange = {},
+            onBubbleSizeChange = {},
+            onBubbleShapeChange = {},
+            onBubbleTintChange = {},
+            onSignOut = {},
+            onRunSetupAgain = {},
+        )
+    }
+}
+
+@Suppress("UnusedPrivateMember") // Invoked by the IDE preview renderer, not from code.
+@Preview(name = "Off - Dark", showBackground = true)
+@Composable
+private fun SetupScreenOffPreview() {
+    PreviewTheme {
+        SetupScreen(
+            uiState = MainUiState(
+                watcherEnabled = true,
+                watcherConnected = true,
+                overlayPermissionGranted = true,
+                bubbleEnabled = false,
+                batteryExempt = true,
+                micPermissionGranted = true,
+                whisperModelStatus = ModelUiStatus.Ready,
+                parakeetModelStatus = ModelUiStatus.Ready,
+                selectedEngine = DictationEngineUi.PARAKEET,
             ),
             onOpenAccessibilitySettings = {},
             onOpenOverlaySettings = {},

@@ -72,16 +72,21 @@
         </service>
 
         <!--
-          Boot start (ENC-129): BOOT_COMPLETED is a protected broadcast —
-          only the system can send it — so the exported receiver cannot be
+          Boot start (ENC-129) and update re-arm (BLO-189): BOOT_COMPLETED
+          and MY_PACKAGE_REPLACED are protected broadcasts — only the
+          system can send them — so the exported receiver cannot be
           triggered by other apps. The receiver itself gates on the
           resident-presence record before starting the bubble service.
+          MY_PACKAGE_REPLACED is not delivered while the app is
+          force-stopped, so a stopped app stays stopped until the user
+          opens it again.
         -->
         <receiver
-            android:name=".service.BootStartReceiver"
+            android:name=".service.BubbleAutoStartReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

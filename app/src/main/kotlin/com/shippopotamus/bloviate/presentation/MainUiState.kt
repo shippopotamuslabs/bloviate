@@ -78,6 +78,9 @@ enum class SetupBlocker {
     MICROPHONE,
     MODEL,
     BUBBLE,
+
+    /** The bubble is wanted but not running — a tap away, not a settings errand (BLO-189). */
+    BUBBLE_NOT_RUNNING,
 }
 
 /**
@@ -102,7 +105,9 @@ sealed interface SetupStatusUi {
  * spots nothing either, ENC-129), the overlay permission (without it
  * the bubble cannot draw), the microphone, a downloaded model (either
  * engine counts — dictation works on whichever is ready), and finally
- * the bubble switch itself, which is a tap rather than a setup errand.
+ * the bubble itself, a projection of [bubbleServiceStatus]: wanted
+ * but down reads [SetupBlocker.BUBBLE_NOT_RUNNING], switched off reads
+ * [SetupBlocker.BUBBLE], running reads [SetupStatusUi.Ready] (BLO-189).
  */
 fun MainUiState.setupStatus(): SetupStatusUi =
     when {
@@ -113,8 +118,35 @@ fun MainUiState.setupStatus(): SetupStatusUi =
         whisperModelStatus !is ModelUiStatus.Ready &&
             parakeetModelStatus !is ModelUiStatus.Ready ->
             SetupStatusUi.Blocked(SetupBlocker.MODEL)
-        !bubbleServiceRunning -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE)
-        else -> SetupStatusUi.Ready
+        else ->
+            when (bubbleServiceStatus()) {
+                BubbleStatusUi.RUNNING -> SetupStatusUi.Ready
+                BubbleStatusUi.NOT_RUNNING -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE_NOT_RUNNING)
+                BubbleStatusUi.OFF -> SetupStatusUi.Blocked(SetupBlocker.BUBBLE)
+            }
+    }
+
+/**
+ * The bubble's steady states for the Setup rows (BLO-189): running,
+ * wanted but down, or switched off by the user.
+ */
+enum class BubbleStatusUi {
+    RUNNING,
+    NOT_RUNNING,
+    OFF,
+}
+
+/**
+ * The bubble row's status: [BubbleStatusUi.RUNNING] while the service
+ * runs — even while a stop is in flight — else
+ * [BubbleStatusUi.NOT_RUNNING] while the bubble is wanted, else
+ * [BubbleStatusUi.OFF].
+ */
+fun MainUiState.bubbleServiceStatus(): BubbleStatusUi =
+    when {
+        bubbleServiceRunning -> BubbleStatusUi.RUNNING
+        bubbleEnabled -> BubbleStatusUi.NOT_RUNNING
+        else -> BubbleStatusUi.OFF
     }
 
 /** Presentation-only mapping of the bubble size steps (ENC-68). */
@@ -230,6 +262,13 @@ data class MainUiState(
     val watcherConnected: Boolean = false,
     val overlayPermissionGranted: Boolean = false,
     val bubbleServiceRunning: Boolean = false,
+
+    /**
+     * Whether the user wants the bubble (BLO-189): mirrors
+     * `!ResidentPresenceState.userStopped`. The switch in Permissions
+     * writes it; the Dictation row only reports it.
+     */
+    val bubbleEnabled: Boolean = true,
 
     /** Whether battery optimization leaves Bloviate alone (ENC-129). */
     val batteryExempt: Boolean = false,
