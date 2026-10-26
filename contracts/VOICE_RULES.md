@@ -1,8 +1,8 @@
 # VOICE_RULES.md
 **Bloviate – Voice & Copy Contract v1.1**
 
-> The canonical **Shippopotamus Wombo Gospel** now lives in the gospels
-> submodule: `contracts/gospel/WOMBO-GOSPEL.md`. Read it *before*
+> The canonical **Shippopotamus Wumbo Gospel** now lives in the gospels
+> submodule: `contracts/gospel/WUMBO-GOSPEL.md`. Read it *before*
 > writing or editing any user-facing copy. This file is a pointer, not
 > a copy (GLO-13, 2026-10-25).
 >
@@ -12,7 +12,9 @@
 > embeddings in `UI_DESIGN_SPEC.md`, with the canonical source winning
 > any disagreement. The submodule replaced the embedding; there is now
 > only the canonical source. Agent routing for copy work lives in
-> `AGENTS.md` §1 and points at the gospel directly.
+> `AGENTS.md` §1 and points at the gospel directly. The gospel itself
+> was renamed Wumbo on 2026-10-25 (it was the Wombo Gospel when
+> BLO-162 embedded it).
 
 ---
 
