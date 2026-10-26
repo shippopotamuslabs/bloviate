@@ -163,7 +163,7 @@ Bloviate's text below adds the repo's own test-task commands and the
 Any agent creating new features **MUST** include a matching unit test file in the `src/test` directory of the modified module, following these standards. Run the narrowest affected test task during iteration (for example, `./gradlew :app:testDebugUnitTest --tests "*DictationViewModelTest*"`), then broaden to `./gradlew testDebugUnitTest` for merge-sized or cross-module changes.
 
 ### 5.1 Self-check (anti reward-hacking)
-After writing a test, break the production code under test (wrong return value, skipped persistence). The test **must fail**. If it still passes, the test is invalid — rewrite it before marking work complete.
+Canon: `contracts/gospel/TESTING-GOSPEL.md` §6.5.1.
 
 ### 5.2 Detekt & Linear gates
 `./gradlew detekt` must pass at `maxIssues: 0`. The no-MockK / no-`verify` rules above are agent-enforced in this repo (Enclave machine-enforces its twins with a custom Detekt rule set Bloviate does not have yet). Work follows `AGENTS.md` §3.7: one MR per Linear sub-issue with `Fixes BLO-xx` in the MR description.
