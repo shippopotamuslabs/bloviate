@@ -1,7 +1,7 @@
-# Forge Review — automated PR review via the forge-reviewer reusable workflow (v1.1.6).
+# Chomp Review — automated PR review via the chomp-reviewer reusable workflow (v1.1.6).
 # Supply-chain note: both pins below move together, always to a release tag, never
 # a branch. Only declared secrets are passed, never `secrets: inherit`.
-name: Forge Review
+name: Chomp Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -9,8 +9,8 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
-  forge-review:
-    uses: shippopotamuslabs/forge-reviewer/.github/workflows/forge-review.yml@v1.1.6
+  chomp-review:
+    uses: shippopotamuslabs/chomp-reviewer/.github/workflows/forge-review.yml@v1.1.6
     with:
       forge_ref: v1.1.6
     secrets:
