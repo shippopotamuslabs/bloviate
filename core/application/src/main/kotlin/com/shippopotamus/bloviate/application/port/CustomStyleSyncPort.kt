@@ -7,25 +7,36 @@ import com.shippopotamus.bloviate.domain.model.StyleDefinition
  * terminal outcome, never a throw: like the send-path
  * [LlmStyleOutcome.FellBack], a dead network or a missing entitlement
  * must never crash the caller — the cache simply stays as it was.
+ *
+ * A sealed type rather than an enum since BLO-149: [Screened] carries
+ * the server's plain screening sentence, which the editor shows
+ * verbatim instead of a generic line.
  */
-enum class CustomStyleSyncFailure {
+sealed interface CustomStyleSyncFailure {
     /** No signed-in Google user; the caller never reached the network. */
-    SignedOut,
+    data object SignedOut : CustomStyleSyncFailure
 
     /** Signed in, but not entitled (non-Google identity or no styles entitlement). */
-    NotEntitled,
+    data object NotEntitled : CustomStyleSyncFailure
 
     /** The definition or id the client sent was rejected by the server. */
-    Invalid,
+    data object Invalid : CustomStyleSyncFailure
 
     /** The style changed on the server since [CustomStyleRecord.revision] was read. */
-    Conflict,
+    data object Conflict : CustomStyleSyncFailure
 
     /** The account already holds the server's maximum number of custom styles. */
-    LimitReached,
+    data object LimitReached : CustomStyleSyncFailure
 
     /** Transport trouble or a malformed server payload; retryable. */
-    Unavailable,
+    data object Unavailable : CustomStyleSyncFailure
+
+    /**
+     * The server's save-time screening refused the style (BLO-149):
+     * [message] is the server's plain user-facing sentence, shown
+     * verbatim in the editor.
+     */
+    data class Screened(val message: String) : CustomStyleSyncFailure
 }
 
 /**

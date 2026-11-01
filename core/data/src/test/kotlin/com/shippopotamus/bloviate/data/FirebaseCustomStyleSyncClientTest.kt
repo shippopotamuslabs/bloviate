@@ -160,11 +160,58 @@ class FirebaseCustomStyleSyncClientTest {
         "internal, Unavailable",
         "transport-error, Unavailable",
     )
-    fun `callable codes map onto sync failures`(code: String, failure: CustomStyleSyncFailure) = runTest {
+    fun `callable codes map onto sync failures`(code: String, failureName: String) = runTest {
+        // CustomStyleSyncFailure is a sealed type since BLO-149, so the
+        // CsvSource names the expected failure and this maps it back.
+        val failure = when (failureName) {
+            "SignedOut" -> CustomStyleSyncFailure.SignedOut
+            "NotEntitled" -> CustomStyleSyncFailure.NotEntitled
+            "Invalid" -> CustomStyleSyncFailure.Invalid
+            "Conflict" -> CustomStyleSyncFailure.Conflict
+            "LimitReached" -> CustomStyleSyncFailure.LimitReached
+            else -> CustomStyleSyncFailure.Unavailable
+        }
         val gateway = FakeCustomStyleSyncGateway(failure = StyleFunctionException(code = code))
         val client = FirebaseCustomStyleSyncClient(gateway = gateway, auth = signedIn)
 
         assertEquals(CustomStyleSyncOutcome.Failed(failure), client.list())
+    }
+
+    @Test
+    fun `a save invalid-argument with a screening message becomes Screened verbatim`() = runTest {
+        // BLO-149: the server's plain screening sentence rides through
+        // instead of collapsing to the generic Invalid.
+        val sentence = "That style asks for sexual content about a real person. Pick a different voice."
+        val gateway = FakeCustomStyleSyncGateway(
+            failure = StyleFunctionException(code = "invalid-argument", message = sentence),
+        )
+        val client = FirebaseCustomStyleSyncClient(gateway = gateway, auth = signedIn)
+
+        assertEquals(
+            CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Screened(sentence)),
+            client.save(createDefinition(), expectedRevision = null),
+        )
+    }
+
+    @Test
+    fun `a save invalid-argument without a message stays Invalid`() = runTest {
+        val gateway = FakeCustomStyleSyncGateway(failure = StyleFunctionException(code = "invalid-argument"))
+        val client = FirebaseCustomStyleSyncClient(gateway = gateway, auth = signedIn)
+
+        assertEquals(
+            CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Invalid),
+            client.save(createDefinition(), expectedRevision = null),
+        )
+    }
+
+    @Test
+    fun `a list invalid-argument never becomes Screened`() = runTest {
+        val gateway = FakeCustomStyleSyncGateway(
+            failure = StyleFunctionException(code = "invalid-argument", message = "some sentence"),
+        )
+        val client = FirebaseCustomStyleSyncClient(gateway = gateway, auth = signedIn)
+
+        assertEquals(CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Invalid), client.list())
     }
 
     @Test

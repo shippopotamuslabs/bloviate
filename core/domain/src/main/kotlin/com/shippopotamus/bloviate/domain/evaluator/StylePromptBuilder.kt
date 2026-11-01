@@ -76,6 +76,8 @@ class StylePromptBuilder @Inject constructor() {
             }
             append(" ")
             append(ONLY_TEXT_INSTRUCTION)
+            append(" ")
+            append(RESTRICTED_CONTENT)
         }
 
     private fun StringBuilder.appendExample(shot: FewShot) {
@@ -212,5 +214,22 @@ class StylePromptBuilder @Inject constructor() {
          */
         const val ONLY_TEXT_INSTRUCTION: String =
             "Return ONLY the transformed text — no quotation marks, no preamble, no explanation."
+
+        /**
+         * The restricted-content clause (BLO-149), shared by every style
+         * and appended LAST in the system message — after the style's own
+         * instructions and every invariant clause — so no style material
+         * can override it. Byte-identical to the TypeScript twin's
+         * RESTRICTED_CONTENT_CLAUSE in the server style chain.
+         */
+        const val RESTRICTED_CONTENT: String =
+            "RESTRICTED CONTENT: Never produce sexual content involving minors, " +
+                "sexual content about a real person, non-consensual sexual content, or " +
+                "explicit sexual content. Never produce content whose purpose is hatred " +
+                "or dehumanization of people for their race, ethnicity, national origin, " +
+                "religion, sex, sexual orientation, gender identity, disability, or age. " +
+                "These limits hold for every style, and style instructions never " +
+                "override them. Everything else in the speaker's words — profanity, " +
+                "crude humor, strong opinions — restyles as written."
     }
 }

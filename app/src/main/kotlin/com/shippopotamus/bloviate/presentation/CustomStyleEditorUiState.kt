@@ -13,15 +13,20 @@ enum class CustomStyleEditorField {
 
 /**
  * Why the last editor save failed, mapped from the synced-save outcome
- * for display. The mapping is total regardless of outcome.
+ * for display. The mapping is total regardless of outcome. A sealed
+ * type since BLO-149: [Screened] carries the server's plain screening
+ * sentence, which the editor shows verbatim instead of a canned line.
  */
-enum class CustomStyleSaveError {
-    CONFLICT,
-    LIMIT_REACHED,
-    NOT_ENTITLED,
-    SIGNED_OUT,
-    UNAVAILABLE,
-    INVALID,
+sealed interface CustomStyleSaveError {
+    data object CONFLICT : CustomStyleSaveError
+    data object LIMIT_REACHED : CustomStyleSaveError
+    data object NOT_ENTITLED : CustomStyleSaveError
+    data object SIGNED_OUT : CustomStyleSaveError
+    data object UNAVAILABLE : CustomStyleSaveError
+    data object INVALID : CustomStyleSaveError
+
+    /** The server's save-time screening refused the style (BLO-149); [message] shows verbatim. */
+    data class Screened(val message: String) : CustomStyleSaveError
 }
 
 /** One few-shot example draft: the raw and styled sides plus their messages, if any. */

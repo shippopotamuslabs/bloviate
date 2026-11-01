@@ -262,7 +262,13 @@ fun CustomStyleEditorScreen(
             uiState.saveError?.let { error ->
                 Column(modifier = Modifier.padding(horizontal = BloviateSpacing.s4)) {
                     Text(
-                        text = stringResource(error.messageRes()),
+                        // A screened save shows the server's sentence
+                        // verbatim (BLO-149); every other failure maps
+                        // to its canned line.
+                        text = when (error) {
+                            is CustomStyleSaveError.Screened -> error.message
+                            else -> stringResource(error.messageRes())
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -432,7 +438,12 @@ private fun PairEditor(
     }
 }
 
-/** Each save failure maps to exactly one documented message; the mapping is total regardless of outcome. */
+/**
+ * Each canned save failure maps to exactly one documented message; the
+ * mapping is total regardless of outcome. [CustomStyleSaveError.Screened]
+ * has no resource — its server message renders verbatim at the call site,
+ * so it maps to the generic invalid line here only as a fallback.
+ */
 private fun CustomStyleSaveError.messageRes(): Int =
     when (this) {
         CustomStyleSaveError.CONFLICT -> R.string.style_editor_save_error_conflict
@@ -441,6 +452,7 @@ private fun CustomStyleSaveError.messageRes(): Int =
         CustomStyleSaveError.SIGNED_OUT -> R.string.style_editor_save_error_signed_out
         CustomStyleSaveError.UNAVAILABLE -> R.string.style_editor_save_error_unavailable
         CustomStyleSaveError.INVALID -> R.string.style_editor_save_error_invalid
+        is CustomStyleSaveError.Screened -> R.string.style_editor_save_error_invalid
     }
 
 /** Every preview renders the editor with a fake state — never a ViewModel. */

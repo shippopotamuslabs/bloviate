@@ -165,6 +165,8 @@ class StyleViewModel @Inject constructor(
             CustomStyleSyncFailure.Conflict -> CustomStyleDeleteError.CONFLICT
             CustomStyleSyncFailure.LimitReached -> CustomStyleDeleteError.LIMIT_REACHED
             CustomStyleSyncFailure.Unavailable -> CustomStyleDeleteError.UNAVAILABLE
+            // Deletes are never screened; the total mapping folds it into INVALID.
+            is CustomStyleSyncFailure.Screened -> CustomStyleDeleteError.INVALID
         }
 
     private companion object {
