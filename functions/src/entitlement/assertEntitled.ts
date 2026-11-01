@@ -79,6 +79,14 @@ export async function isUserEntitled(
 ): Promise<boolean> {
   const now = nowMs ?? Date.now();
   const db = (getFirestore ?? entitlementFirestoreGetter)();
+  // BLO-178 tombstone: a deleted account is never entitled, even if a
+  // delayed billing/backend write recreates its entitlement docs after
+  // deletion. The tombstone lives outside users/{uid} so recursive
+  // deletion of the user subtree cannot remove it.
+  const tombstoneSnap = await db.doc(`deletedAccounts/${uid}`).get();
+  if (tombstoneSnap.exists) {
+    return false;
+  }
   const overrideSnap = await db.doc(entitlementDocPath(uid, OVERRIDE_ENTITLEMENT_DOC_ID)).get();
   const playSnap = await db.doc(entitlementDocPath(uid, PLAY_ENTITLEMENT_DOC_ID)).get();
   return isEntitledFromDocs(

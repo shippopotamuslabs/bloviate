@@ -157,3 +157,23 @@ describe("assertUserEntitled", () => {
     await assertUserEntitled(UID, NOW);
   });
 });
+
+describe("BLO-178 tombstone", () => {
+  it("a tombstoned uid is not entitled even with active entitlement docs", async () => {
+    installDocs({
+      [`deletedAccounts/${UID}`]: { source: "in-app" },
+      [entitlementDocPath(UID, "override")]: { freeAccess: true },
+      [entitlementDocPath(UID, "play")]: { active: true },
+    });
+    assert.equal(await isUserEntitled(UID, NOW), false);
+    await assert.rejects(assertUserEntitled(UID, NOW));
+  });
+
+  it("a different uid is unaffected by another account's tombstone", async () => {
+    installDocs({
+      [`deletedAccounts/${UID}`]: { source: "in-app" },
+      [entitlementDocPath("user-2", "play")]: { active: true },
+    });
+    assert.equal(await isUserEntitled("user-2", NOW), true);
+  });
+});
