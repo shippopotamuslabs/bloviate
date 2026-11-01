@@ -13,6 +13,7 @@ jobs:
     uses: shippopotamuslabs/chomp-reviewer/.github/workflows/chomp-review.yml@v2.1.1
     with:
       chomp_ref: v2.1.1
+      chomp_agent: "on"
     secrets:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       CHOMP_APP_PRIVATE_KEY: ${{ secrets.FORGE_APP_PRIVATE_KEY }}
