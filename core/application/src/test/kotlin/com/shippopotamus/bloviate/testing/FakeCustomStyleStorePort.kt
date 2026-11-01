@@ -38,6 +38,14 @@ class FakeCustomStyleStorePort(
         mutableState.value = CustomStylesState(styles = records, isLoaded = true)
     }
 
+    var clearLocalCacheCallCount: Int = 0
+        private set
+
+    override suspend fun clearLocalCache() {
+        clearLocalCacheCallCount++
+        mutableState.value = CustomStylesState(styles = emptyList(), isLoaded = true)
+    }
+
     /** Publishes [state] directly — for arranging loaded/unloaded snapshots without edit semantics. */
     fun setState(state: CustomStylesState) {
         mutableState.value = state

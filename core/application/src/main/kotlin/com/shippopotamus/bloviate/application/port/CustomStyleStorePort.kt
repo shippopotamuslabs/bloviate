@@ -14,6 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
  * as given — validation lives in `SaveCustomStyleUseCase`, not here — and
  * replaces any record sharing the definition id. [replaceSnapshot] swaps
  * the whole cache for a freshly loaded or synced set and marks it loaded.
+ *
+ * Sign-out alone does NOT wipe the cache: the owner gate hides the
+ * previous account's records, and they reappear if that account signs
+ * back in. Account deletion DOES wipe, through [clearLocalCache]
+ * (BLO-178) — the deleted account's records must never resurface.
  */
 interface CustomStyleStorePort {
 
@@ -28,4 +33,12 @@ interface CustomStyleStorePort {
 
     /** Replaces the whole cache with [records] and marks it loaded. */
     suspend fun replaceSnapshot(records: List<CustomStyleRecord>)
+
+    /**
+     * Wipes the whole local cache (BLO-178 account deletion): the owner
+     * uid, the index, every cached record, and the last-synced stamp.
+     * The schema version stays, so the empty cache keeps reading as
+     * loaded. Unrelated preferences are untouched.
+     */
+    suspend fun clearLocalCache()
 }

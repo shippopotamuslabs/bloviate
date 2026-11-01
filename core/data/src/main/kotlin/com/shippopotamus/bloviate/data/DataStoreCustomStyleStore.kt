@@ -44,11 +44,13 @@ import javax.inject.Singleton
  * [delete] only touch a cache owned by the current uid, so one account
  * can never rewrite another's cached styles.
  *
- * There is no sign-out wipe hook: the dictionary store (the named
- * precedent) is device-scoped with no clearing either, so sign-out
- * hiding falls out of the owner gate — the previous owner's records
- * stay on disk and reappear if that account signs back in. A later
- * server-sync slice owns cross-account reconciliation via
+ * Sign-out alone does NOT wipe: sign-out hiding falls out of the
+ * owner gate — the previous owner's records stay on disk and reappear
+ * if that account signs back in. Account deletion DOES wipe, via
+ * [clearLocalCache] (BLO-178): an explicit invalidation of the
+ * account-owned cache, run after the server has deleted the account,
+ * so a deleted account's records can never resurface for anyone. A
+ * later server-sync slice owns cross-account reconciliation via
  * [CustomStyleRecord.revision].
  *
  * Corruption never crashes: an unknown schema version or an unparsable
@@ -121,6 +123,28 @@ class DataStoreCustomStyleStore @Inject constructor(
                     json.encodeToString(CustomStyleDto.from(record))
             }
             preferences[KEY_LAST_SYNCED_AT] = System.currentTimeMillis()
+        }
+    }
+
+    /**
+     * The deletion wipe (BLO-178): owner uid, index, every per-style
+     * record, and the last-synced stamp go; the schema version stays so
+     * the emptied cache keeps reading as loaded-and-empty. No auth check
+     * here — by the time this runs the account is already deleted
+     * server-side, and the wipe must not depend on a session that no
+     * longer exists. Unrelated preferences in the shared store are
+     * untouched.
+     */
+    override suspend fun clearLocalCache() {
+        dataStore.edit { preferences ->
+            preferences.remove(KEY_OWNER_UID)
+            preferences.remove(KEY_STYLE_IDS)
+            preferences.remove(KEY_LAST_SYNCED_AT)
+            preferences.asMap().keys
+                .map { key -> key.name }
+                .filter { name -> name.startsWith(RECORD_KEY_PREFIX) }
+                .forEach { name -> preferences.remove(stringPreferencesKey(name)) }
+            preferences[KEY_SCHEMA_VERSION] = SCHEMA_VERSION
         }
     }
 

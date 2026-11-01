@@ -7,16 +7,18 @@ import com.shippopotamus.bloviate.domain.model.BubbleSize
 import com.shippopotamus.bloviate.domain.model.BubbleTint
 
 /**
- * Presentation-only mapping of the launcher auth gate (ENC-197): the
- * sign-in screen shows unless [SignedIn]. Carries display strings only
- * — never the domain [AuthState] or Firebase types.
+ * Presentation-only mapping of the account state (ENC-197; gate
+ * relaxed by BLO-178): [Loading] waits, [SignedOut] and [SignedIn]
+ * both reach the app shell — signed-out users keep on-device dictation
+ * and mechanical styles, with cloud styles locked. Carries display
+ * strings only — never the domain [AuthState] or Firebase types.
  */
 sealed interface AuthUi {
 
-    /** The cached session has not been read yet; the gate waits. */
+    /** The cached session has not been read yet; the shell waits. */
     data object Loading : AuthUi
 
-    /** No Google session: the launcher shows the sign-in screen. */
+    /** No Google session: the shell shows, with the signed-out account card. */
     data object SignedOut : AuthUi
 
     /** A Google-signed-in user: the launcher shows the app shell. */
@@ -215,6 +217,62 @@ internal fun BubbleAppearance.toUi(): BubbleAppearanceUi =
         tint = tint.toUi(),
     )
 
+/** Which step of the account-deletion flow is showing (BLO-178). */
+enum class DeletionStepUi {
+    NONE,
+    CONFIRM,
+    FINAL,
+}
+
+/**
+ * Transient account-deletion surface state (BLO-178): the dialog step,
+ * the in-flight flag, the last failure's user-facing message, and the
+ * deleted confirmation note. Never persisted.
+ */
+data class AccountDeletionUi(
+    val step: DeletionStepUi = DeletionStepUi.NONE,
+    val isDeleting: Boolean = false,
+    val error: String? = null,
+    val accountDeleted: Boolean = false,
+)
+
+/** The report reasons as presentation values (BLO-148); the ViewModel maps them to the port enum. */
+enum class ReportReasonUi {
+    OFFENSIVE,
+    SEXUAL,
+    HATEFUL,
+    WRONG,
+    OTHER,
+}
+
+/**
+ * Transient output-report surface state (BLO-148): whether the reason
+ * picker is open, whether a submission is in flight, the last failure's
+ * message, the key of the result already reported (that result's button
+ * stays disabled), and the sent confirmation. Never persisted.
+ * [reportedKey] matches [LastDictationUi.reportKey].
+ */
+data class ReportUi(
+    val pickerOpen: Boolean = false,
+    val isSubmitting: Boolean = false,
+    val error: String? = null,
+    val reportedKey: String? = null,
+    val reportSent: Boolean = false,
+)
+
+/**
+ * The Setup card for this session's last styled dictation (BLO-148):
+ * presentation strings only — the style id, the styled output preview,
+ * and [reportKey], the identity the report state is keyed by.
+ * [isReported] is true once that exact result has been reported.
+ */
+data class LastDictationUi(
+    val styleId: String,
+    val styledOutput: String,
+    val reportKey: String,
+    val isReported: Boolean = false,
+)
+
 /**
  * Home/status screen state: watcher enablement + connection, bubble
  * overlay permission + service state, microphone permission, and both
@@ -243,12 +301,21 @@ data class MainUiState(
     val engineFallback: EngineFallbackUi? = null,
     val bubbleAppearance: BubbleAppearanceUi = BubbleAppearanceUi(),
 
-    /** The launcher auth gate (ENC-197): sign-in screen unless [AuthUi.SignedIn]. */
+    /** The account state (ENC-197, BLO-178): the shell shows for SignedOut and SignedIn alike. */
     val auth: AuthUi = AuthUi.Loading,
 
-    /** A sign-in attempt is in flight from the sign-in screen. */
+    /** A sign-in attempt is in flight from the Setup account card. */
     val isSigningIn: Boolean = false,
 
     /** The last sign-in failure's user-facing message, until dismissed or retried. */
     val signInError: String? = null,
+
+    /** The account-deletion flow's transient state (BLO-178). */
+    val deletion: AccountDeletionUi = AccountDeletionUi(),
+
+    /** This session's last styled dictation, for the report card (BLO-148); null when none. */
+    val lastDictation: LastDictationUi? = null,
+
+    /** The output-report flow's transient state (BLO-148). */
+    val report: ReportUi = ReportUi(),
 )

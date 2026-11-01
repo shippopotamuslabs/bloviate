@@ -35,10 +35,15 @@ class FirebaseStyleClient(
                 recordSafely(styleId = style.id, styled = false, reason = "no-auth")
                 return LlmStyleOutcome.FellBack(reason = "no-auth")
             }
-            val styledText = gateway.callStyleText(styleId = style.id, transcript = text)
+            val result = gateway.callStyleText(styleId = style.id, transcript = text)
             Log.d(TAG, "style outcome=styled")
             recordSafely(styleId = style.id, styled = true, reason = null)
-            LlmStyleOutcome.Styled(text = styledText, llmMs = clock() - startedMs, model = null, provider = null)
+            LlmStyleOutcome.Styled(
+                text = result.text,
+                llmMs = clock() - startedMs,
+                model = result.model,
+                provider = result.provider,
+            )
         } catch (exception: StyleFunctionException) {
             Log.d(TAG, "style outcome=fell-back reason=${exception.code}")
             recordSafely(styleId = style.id, styled = false, reason = exception.code, cause = exception)

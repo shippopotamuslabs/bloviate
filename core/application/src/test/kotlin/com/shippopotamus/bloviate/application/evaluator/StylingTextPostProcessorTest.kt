@@ -9,6 +9,7 @@ import com.shippopotamus.bloviate.domain.model.StyleCategory
 import com.shippopotamus.bloviate.domain.model.StyleDefinition
 import com.shippopotamus.bloviate.domain.model.StyleKind
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
+import com.shippopotamus.bloviate.testing.FakeLastStyledResultPort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeSendProgressPort
 import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
@@ -29,12 +30,14 @@ class StylingTextPostProcessorTest {
     private val fakeStyles = FakeStylePreferencePort()
     private val fakeLlm = FakeLlmStylePort()
     private val fakeCustoms = FakeCustomStyleStorePort()
+    private val fakeLastResult = FakeLastStyledResultPort()
 
     private val processor = StylingTextPostProcessor(
         local = fakeLocal,
         stylePreference = fakeStyles,
         llm = fakeLlm,
         resolver = StyleResolver(store = fakeCustoms, scope = CoroutineScope(Dispatchers.Unconfined)),
+        lastStyledResult = fakeLastResult,
     )
 
     @Test
@@ -171,6 +174,7 @@ class StylingTextPostProcessorTest {
             stylePreference = fakeStyles,
             llm = fakeLlm,
             resolver = StyleResolver(store = fakeCustoms, scope = backgroundScope),
+            lastStyledResult = fakeLastResult,
         )
 
         val result = scoped.process("raw words")
@@ -190,6 +194,7 @@ class StylingTextPostProcessorTest {
             stylePreference = fakeStyles,
             llm = fakeLlm,
             resolver = StyleResolver(store = fakeCustoms, scope = backgroundScope),
+            lastStyledResult = fakeLastResult,
         )
         backgroundScope.launch {
             fakeCustoms.replaceSnapshot(listOf(customRecord(id = "custom-mine", name = "Mine")))
@@ -211,6 +216,47 @@ class StylingTextPostProcessorTest {
         assertEquals("raw words", result.text)
         assertFalse(result.fellBack)
         assertEquals(0, fakeLlm.callCount)
+    }
+
+    @Test
+    fun `a styled outcome records the last result with provenance`() = runTest {
+        fakeStyles.setSelected("professional")
+        fakeLocal.transform = { "cleaned words" }
+        fakeLlm.outcome = LlmStyleOutcome.Styled(
+            text = "Polished words.",
+            llmMs = 900L,
+            model = "model-x",
+            provider = "provider-y",
+        )
+
+        processor.process("raw words")
+
+        val recorded = fakeLastResult.lastResult.value
+        assertEquals("professional", recorded?.styleId)
+        assertEquals("cleaned words", recorded?.sourceTranscript)
+        assertEquals("Polished words.", recorded?.styledOutput)
+        assertEquals("model-x", recorded?.model)
+        assertEquals("provider-y", recorded?.provider)
+        assertTrue((recorded?.recordedAtEpochMillis ?: 0L) > 0L)
+    }
+
+    @Test
+    fun `a fallback records nothing`() = runTest {
+        fakeStyles.setSelected("professional")
+        fakeLlm.outcome = LlmStyleOutcome.FellBack(reason = "timeout")
+
+        processor.process("raw words")
+
+        assertNull(fakeLastResult.lastResult.value)
+    }
+
+    @Test
+    fun `a mechanical style records nothing`() = runTest {
+        fakeStyles.setSelected("lowercase-casual")
+
+        processor.process("Hello There")
+
+        assertNull(fakeLastResult.lastResult.value)
     }
 
     private fun customRecord(id: String, name: String): CustomStyleRecord =

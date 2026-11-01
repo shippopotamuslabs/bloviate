@@ -13,8 +13,15 @@ import com.shippopotamus.bloviate.data.RecordingSessionManager
 import com.shippopotamus.bloviate.data.SelectedModelStore
 import com.shippopotamus.bloviate.data.SelectingTranscriptionEngine
 import com.shippopotamus.bloviate.data.WhisperModelStore
+import com.shippopotamus.bloviate.data.AccountDeletionGateway
 import com.shippopotamus.bloviate.data.CustomStyleGenerationGateway
 import com.shippopotamus.bloviate.data.CustomStyleSyncGateway
+import com.shippopotamus.bloviate.data.FirebaseAccountDeletionClient
+import com.shippopotamus.bloviate.data.FirebaseAccountDeletionGateway
+import com.shippopotamus.bloviate.data.FirebaseOutputReportClient
+import com.shippopotamus.bloviate.data.FirebaseOutputReportGateway
+import com.shippopotamus.bloviate.data.InMemoryLastStyledResultHolder
+import com.shippopotamus.bloviate.data.OutputReportGateway
 import com.shippopotamus.bloviate.data.DataStoreCustomStyleStore
 import com.shippopotamus.bloviate.data.DataStoreStylePreferenceStore
 import com.shippopotamus.bloviate.data.FirebaseCustomStyleGenerationClient
@@ -28,9 +35,12 @@ import com.shippopotamus.bloviate.application.evaluator.StyleAwareTextPostProces
 import com.shippopotamus.bloviate.application.port.ActiveModelStorePort
 import com.shippopotamus.bloviate.application.port.AuthSessionPort
 import com.shippopotamus.bloviate.application.port.AudioCapturePort
+import com.shippopotamus.bloviate.application.port.AccountDeletionPort
 import com.shippopotamus.bloviate.application.port.CustomStyleGenerationPort
 import com.shippopotamus.bloviate.application.port.CustomStyleStorePort
 import com.shippopotamus.bloviate.application.port.CustomStyleSyncPort
+import com.shippopotamus.bloviate.application.port.LastStyledResultPort
+import com.shippopotamus.bloviate.application.port.OutputReportPort
 import com.shippopotamus.bloviate.application.port.DictionaryPort
 import com.shippopotamus.bloviate.application.port.EnginePreferencePort
 import com.shippopotamus.bloviate.application.port.LlmStylePort
@@ -127,6 +137,26 @@ abstract class VoiceModule {
     /** The server side of AI style-draft generation (BLO-160 S7) behind its application port. */
     @Binds
     abstract fun bindCustomStyleGenerationPort(client: FirebaseCustomStyleGenerationClient): CustomStyleGenerationPort
+
+    /** The raw account-deletion callable surface (BLO-178) behind its narrow gateway interface. */
+    @Binds
+    abstract fun bindAccountDeletionGateway(gateway: FirebaseAccountDeletionGateway): AccountDeletionGateway
+
+    /** Server-side account deletion (BLO-178) behind its application port. */
+    @Binds
+    abstract fun bindAccountDeletionPort(client: FirebaseAccountDeletionClient): AccountDeletionPort
+
+    /** The raw output-report callable surface (BLO-148) behind its narrow gateway interface. */
+    @Binds
+    abstract fun bindOutputReportGateway(gateway: FirebaseOutputReportGateway): OutputReportGateway
+
+    /** User-initiated output reporting (BLO-148) behind its application port. */
+    @Binds
+    abstract fun bindOutputReportPort(client: FirebaseOutputReportClient): OutputReportPort
+
+    /** This session's last styled dictation (BLO-148): in-memory only, never persisted. */
+    @Binds
+    abstract fun bindLastStyledResultPort(holder: InMemoryLastStyledResultHolder): LastStyledResultPort
 
     companion object {
 
