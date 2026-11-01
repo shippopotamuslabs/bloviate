@@ -150,8 +150,10 @@ report flow is the only content-upload path.
 ## Firestore rules note
 
 This repo has no `firestore.rules` file; rules are managed in the
-Firebase console. The posture this code assumes:
-
-- `reports`: no client reads or writes (callable-only, Admin SDK).
-- `deletedAccounts`: no client access.
-- `users/{uid}/**`: unchanged from the existing console rules.
+Firebase console. The deployed rules are **deny-all for clients**
+(verified in the 2026-10-24 console security audit): every read and
+write goes through callables / the Admin SDK. That posture already
+covers the new collections — `reports` and `deletedAccounts` are
+callable-only by construction, and no rules change is needed for this
+work. If the rules are ever relaxed per-collection, keep both of these
+at no client access.
