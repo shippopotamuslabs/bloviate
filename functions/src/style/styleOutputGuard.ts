@@ -1,4 +1,11 @@
-export type StyleGuardVerdict = "pass" | "refusal" | "fidelity-loss";
+import {
+  MINOR_TERMS,
+  SEXUAL_TERMS,
+  SLUR_TERMS,
+  normalizeForScreening,
+} from "./customStyleScreening";
+
+export type StyleGuardVerdict = "pass" | "refusal" | "fidelity-loss" | "restricted";
 
 const OPENING_CHARS = 200;
 const MIN_COVERAGE = 0.1;
@@ -94,10 +101,82 @@ function isRefusal(opening: string, source: string, styled: string): boolean {
   );
 }
 
-export function classifyStyleOutput(source: string, styled: string): StyleGuardVerdict {
+/**
+ * Explicit-sexual output terms for the custom-style runtime check
+ * (BLO-149). Kept to unmistakable generation vocabulary: a hit means the
+ * model produced explicit content the speaker did not dictate.
+ */
+const EXPLICIT_OUTPUT_TERMS: readonly string[] = [
+  "erotica", "pornographic", "orgasm", "intercourse", "masturbation",
+  "masturbating", "penetration",
+];
+
+const EXPLICIT_OUTPUT_STEMS: readonly string[] = ["ejaculat", "masturbat"];
+
+function anyTerm(norm: ReturnType<typeof normalizeForScreening>, terms: readonly string[]): boolean {
+  return terms.some((term) => norm.tokenSet.has(term));
+}
+
+function hasNewExplicitTerm(source: string, styled: string): boolean {
+  const sourceNorm = normalizeForScreening(source);
+  const styledNorm = normalizeForScreening(styled);
+  for (const term of EXPLICIT_OUTPUT_TERMS) {
+    if (styledNorm.tokenSet.has(term) && !sourceNorm.tokenSet.has(term)) return true;
+  }
+  for (const stem of EXPLICIT_OUTPUT_STEMS) {
+    if (styledNorm.compact.includes(stem) && !sourceNorm.compact.includes(stem)) return true;
+  }
+  return false;
+}
+
+function hasNewSlur(source: string, styled: string): boolean {
+  // Every slur on the list is intrinsically aimed at a protected class,
+  // so a slur the model ADDED — one the speaker never dictated — is the
+  // attack. A slur the speaker dictated restyles as written.
+  const sourceNorm = normalizeForScreening(source);
+  const styledNorm = normalizeForScreening(styled);
+  return SLUR_TERMS.some(
+    (slur) => styledNorm.tokenSet.has(slur) && !sourceNorm.tokenSet.has(slur),
+  );
+}
+
+/**
+ * BLO-149 restricted-content check on generated output.
+ *
+ * - Every style: output joining a minor term with a sexual term is
+ *   restricted, whatever the source said — restyling it still produces it.
+ * - Custom styles only: explicit sexual vocabulary or a slur aimed at a
+ *   protected class that the speaker did NOT dictate is restricted. The
+ *   source-relative shape is deliberate (Sean's BLO-149 ruling): a user's
+ *   own profane or explicit dictation restyles as written; the guard
+ *   stops the style/model from ADDING restricted content.
+ */
+export function classifyRestrictedOutput(
+  source: string,
+  styled: string,
+  isCustomStyle: boolean,
+): boolean {
+  const styledNorm = normalizeForScreening(styled);
+  if (anyTerm(styledNorm, MINOR_TERMS) && anyTerm(styledNorm, SEXUAL_TERMS)) {
+    return true;
+  }
+  if (!isCustomStyle) return false;
+  if (hasNewExplicitTerm(source, styled)) return true;
+  if (hasNewSlur(source, styled)) return true;
+  return false;
+}
+
+export function classifyStyleOutput(
+  source: string,
+  styled: string,
+  opts?: { isCustomStyle?: boolean },
+): StyleGuardVerdict {
   if (styled.trim().length === 0) return "pass";
   const opening = styled.trim().toLowerCase().slice(0, OPENING_CHARS);
   if (isRefusal(opening, source, styled)) return "refusal";
+  if (classifyRestrictedOutput(source, styled, opts?.isCustomStyle ?? false)) {
+    return "restricted";
+  }
   if (isWholesaleReplacement(source, styled)) return "fidelity-loss";
   return "pass";
 }

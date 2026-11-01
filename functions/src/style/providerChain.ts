@@ -146,6 +146,8 @@ export async function runStyleChain(deps: {
   system: string;
   user: string;
   sourceText: string;
+  /** BLO-149: enables the custom-only restricted-output checks in the guard. */
+  isCustomStyle?: boolean;
   now?: () => number;
 }): Promise<{ text: string; model: string; provider?: string; attempts: AttemptRecord[] }> {
   const now = deps.now ?? Date.now;
@@ -209,11 +211,22 @@ export async function runStyleChain(deps: {
         lastReason = "empty-response";
         break;
       }
-      const verdict = classifyStyleOutput(deps.sourceText, cleaned);
+      const verdict = classifyStyleOutput(deps.sourceText, cleaned, {
+        isCustomStyle: deps.isCustomStyle ?? false,
+      });
       if (verdict === "refusal") {
         baseRecord.outcome = "refusal";
         attempts.push(baseRecord);
         lastReason = "refusal";
+        break;
+      }
+      if (verdict === "restricted") {
+        // BLO-149: restricted output is never returned; try the next
+        // link. If every link fails, the caller falls back to the
+        // user's own transcript, which is the safe replacement.
+        baseRecord.outcome = "restricted";
+        attempts.push(baseRecord);
+        lastReason = "restricted";
         break;
       }
       if (verdict === "fidelity-loss") {
