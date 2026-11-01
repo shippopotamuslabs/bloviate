@@ -14,11 +14,13 @@ import com.shippopotamus.bloviate.data.DataStoreResidentPresenceStore
 import com.shippopotamus.bloviate.application.port.BubbleAppearancePort
 import com.shippopotamus.bloviate.application.port.BubbleOverlayAccessPort
 import com.shippopotamus.bloviate.application.port.BubblePositionPort
+import com.shippopotamus.bloviate.application.port.BubbleServiceStarterPort
 import com.shippopotamus.bloviate.application.port.BubbleServiceStatePort
 import com.shippopotamus.bloviate.application.port.OnboardingPort
 import com.shippopotamus.bloviate.application.port.ResidentPresencePort
 import com.shippopotamus.bloviate.application.port.TextInsertionPort
 import com.shippopotamus.bloviate.application.port.TranscriptSinkPort
+import com.shippopotamus.bloviate.service.AndroidBubbleServiceStarter
 import com.shippopotamus.bloviate.service.FieldWatcherBridge
 import com.shippopotamus.bloviate.service.InsertionTranscriptSink
 import com.shippopotamus.bloviate.service.WatcherTextInsertion
@@ -51,6 +53,10 @@ abstract class BubbleModule {
 
     @Binds
     abstract fun bindBubbleServiceStatePort(holder: BubbleServiceStateHolder): BubbleServiceStatePort
+
+    /** Bubble-service starter (BLO-189) — foreground-service mechanics live in the adapter. */
+    @Binds
+    abstract fun bindBubbleServiceStarterPort(starter: AndroidBubbleServiceStarter): BubbleServiceStarterPort
 
     @Binds
     abstract fun bindBubbleOverlayAccessPort(access: AndroidBubbleOverlayAccess): BubbleOverlayAccessPort

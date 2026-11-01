@@ -15,7 +15,8 @@ Scope facts, checked 2026-10-25 (BLO-173):
 - Nothing had been uploaded to Play when this contract landed, so no
   versionCodes were consumed before the derived scheme below.
 
-Copy in release notes follows `contracts/VOICE_RULES.md`. Read it before
+Copy in release notes follows `contracts/gospel/WUMBO-GOSPEL.md` via
+`contracts/VOICE_RULES.md` (pointer stub). Read it before
 drafting notes, the same as any other user-facing copy.
 
 ---
@@ -114,7 +115,8 @@ Two files, one fact set:
 Where the facts come from:
 
 - The source set is the PRs merged between the last release tag
-  (`v<versionName>` on the deployed SHA, §4) and `HEAD`. Read their
+  (`v<versionName>` on the first deployed SHA for that version, §4) and
+  `HEAD`. Read their
   titles and their linked Linear IDs. For the first release there is no
   tag; the source set is the work the launch release actually contains,
   and the notes describe the app as it stands.
@@ -123,7 +125,8 @@ Where the facts come from:
   number, or a behavior the PRs do not support.
 - Nothing gets invented to fill space. A two-line whatsnew that covers
   the range beats a full 500 characters with padding in it.
-- Voice: `contracts/VOICE_RULES.md` binds store copy. State what the
+- Voice: `contracts/gospel/WUMBO-GOSPEL.md` via `contracts/VOICE_RULES.md`
+  (pointer stub) binds store copy. State what the
   thing does. Short lines, real specifics, no hype words, no pivots.
 - Check the cap before opening the prep PR:
   `wc -m distribution/whatsnew/en-US.txt` (subtract one for the trailing
@@ -164,8 +167,16 @@ Where the facts come from:
     workflow artifacts.
   - Job two downloads the bundle, hands it to the upload script, and,
     after the script verifies the release on Play, tags the deployed
-    SHA `v<versionName>` and pushes the tag. The tag is the release
-    record the notes range in §3 starts from.
+    SHA `v<versionName>` via `scripts/tag-release.sh` and pushes the
+    tag. The versionName reaches this job in a `version.txt` file the
+    assemble job writes from its `:app:printVersion` run and carries
+    in the bundle artifact — printVersion is the one canonical
+    versionName reader; nothing re-parses the Gradle build file here.
+    The tag records the **first** deploy of a versionName. A later
+    dispatch under the same versionName ships a new build and leaves
+    the tag where it is; the tag step logs both SHAs and succeeds.
+    Tags are never moved and never force-pushed under this contract.
+    The tag is the release record the notes range in §3 starts from.
 - The workflow has `contents: write` for the tag push only, in the
   deploy job. No step commits to a branch, and no step pushes to `main`.
   The checked-in files on `main` are the only inputs: if the notes or
@@ -181,8 +192,10 @@ Where the facts come from:
    launch sequence, P-BLO-9 / BLO-151.)
 3. Read the run log: the printed `versionName` and derived `versionCode`
    from the build job, then the script's upload and verification lines.
-4. Confirm the tag `v<versionName>` exists and points at the dispatched
-   SHA. That tag plus the log is the deploy receipt.
+4. Confirm the tag `v<versionName>` exists. On a first deploy it points
+   at the dispatched SHA; on a same-version redeploy it still points at
+   that version's first deployed SHA, and the tag step's log says so.
+   The tag plus the log is the deploy receipt.
 
 ---
 
@@ -213,10 +226,13 @@ Where the facts come from:
 - **The whatsnew is over 500 characters.** The script refuses before it
   opens an edit. Shorten the file in a new PR and dispatch again after
   the merge.
-- **The tag already exists.** The tag step fails rather than moving a
-  tag. A tag that points at the deployed SHA is fine and needs nothing.
-  A tag that points anywhere else means a versionName got reused; stop
-  and report. Tags never get force-pushed under this contract.
+- **The tag already exists.** Expected on a same-version redeploy: the
+  tag step leaves the tag at the version's first deployed SHA, logs
+  both SHAs, and succeeds. A tag is only ever created by the deploy that
+  first ships its versionName. If a tag exists for a versionName that
+  has never been deployed, something outside this contract put it
+  there; stop and report. Tags never get force-pushed under this
+  contract.
 - **The notes on Play are wrong after a verified deploy.** The files on
   `main` are the source of truth and the workflow reads only them, so
   the checked-in notes were wrong. Fix them in a PR for the record.

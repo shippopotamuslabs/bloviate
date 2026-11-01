@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.shippopotamus.bloviate.BuildConfig
 import com.shippopotamus.bloviate.application.port.AccountDeletionOutcome
 import com.shippopotamus.bloviate.application.port.AuthState
+import com.shippopotamus.bloviate.application.port.BubbleStartRequest
 import com.shippopotamus.bloviate.application.port.LastStyledResult
 import com.shippopotamus.bloviate.application.port.LiveSetupState
 import com.shippopotamus.bloviate.application.port.OutputReportReason
@@ -31,6 +32,8 @@ import com.shippopotamus.bloviate.application.usecase.SubmitOutputReportUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
+import com.shippopotamus.bloviate.application.usecase.StartBubbleIfPresenceAllowsUseCase
+import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.ModelState
@@ -40,6 +43,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -82,6 +87,7 @@ class MainViewModel @Inject constructor(
     private val observeSelectedStyle: ObserveSelectedStyleUseCase,
     private val selectStyle: SelectStyleUseCase,
     private val clearLastStyledResult: ClearLastStyledResultUseCase,
+    private val startBubbleIfPresenceAllows: StartBubbleIfPresenceAllowsUseCase,
 ) : ViewModel() {
 
     init {
@@ -96,6 +102,22 @@ class MainViewModel @Inject constructor(
                 if (state.authState is AuthState.Authenticated) {
                     refreshCustomStyles()
                 }
+            }
+        }
+        // Desired-state convergence (BLO-189): the trigger, not the
+        // decision — the use case re-checks its gates and is the one
+        // decision point both this foreground start and the boot
+        // receiver funnel through. distinctUntilChanged makes one
+        // attempt per entry into the due state; a refused start waits
+        // for the manual refresh in Setup instead of retrying.
+        viewModelScope.launch {
+            observeLiveSetupState().map { state ->
+                state.authState is AuthState.Authenticated &&
+                    state.onboardingProgress.finished &&
+                    BubbleServiceStartPolicy.shouldAutoStart(state.residentPresence) &&
+                    !state.bubbleServiceRunning
+            }.distinctUntilChanged().collect { due ->
+                if (due) startBubbleIfPresenceAllows(BubbleStartRequest.USER)
             }
         }
     }
@@ -525,6 +547,7 @@ class MainViewModel @Inject constructor(
             selectedEngine = mapEngine(live.selectedEngine),
             engineFallback = mapEngineFallback(live),
             bubbleAppearance = live.bubbleAppearance.toUi(),
+            bubbleEnabled = !live.residentPresence.userStopped,
             autoStartEnabled = live.residentPresence.autoStartEnabled,
             batteryExempt = permissions.batteryExempt,
             deletion = transient.deletion,

@@ -81,7 +81,7 @@ The Android app is four Gradle modules plus a composite build. Dependencies poin
 | `third_party/whisper-android` | A git submodule consumed as a Gradle composite build. It carries the whisper.cpp engine and its own nested whisper.cpp submodule, so clones need two levels of submodules |
 | `functions/` | A separate TypeScript codebase, Node 22, deployed as Firebase Functions. It holds the callable endpoints: `styleText`, `saveCustomStyle`, `listCustomStyles`, `deleteCustomStyle`, `generateCustomStyle` |
 
-House rules for the codebase live in `contracts/`: architecture, code style, data layer, transcription, unit testing, UI design, and the voice contract for user-facing copy. `AGENTS.md` at the root routes coding work to the right contract. Read those before changing behavior; they state requirements, and pull requests get checked against them.
+Shared Shippopotamus rules live in the pinned gospels at `contracts/gospel/` (architecture, code style, testing, palette, Compose, button shape, glass bars, voice). Bloviate-only contracts live beside them in `contracts/`: module map and platform services, data layer, transcription, UI adoption notes, worked test examples, and the release process. `AGENTS.md` routes coding work to the right document. Read those before changing behavior; they state requirements, and pull requests get checked against them.
 
 ## Tech stack
 
@@ -151,7 +151,7 @@ Android unit tests run on the JVM. The full suite:
 ./gradlew testDebugUnitTest
 ```
 
-Narrower runs work per module, for example `./gradlew :core:domain:testDebugUnitTest`. The suite holds 167 test files across the four modules: 56 in `:app`, 53 in `:core:domain`, 36 in `:core:data`, 22 in `:core:application`. Robolectric covers the framework-bound logic like accessibility nodes and text insertion. The testing contract prefers hand-written fakes over mocks and JUnit 5 over JUnit 4; `contracts/UNIT_TESTING.md` has the rules. This repo has no instrumented test suite and no screenshot test suite at present.
+Narrower runs work per module, for example `./gradlew :core:domain:testDebugUnitTest`. The suite holds 167 test files across the four modules: 56 in `:app`, 53 in `:core:domain`, 36 in `:core:data`, 22 in `:core:application`. Robolectric covers the framework-bound logic like accessibility nodes and text insertion. The testing contract prefers hand-written fakes over mocks and JUnit 5 over JUnit 4; `contracts/gospel/TESTING-GOSPEL.md` has the shared rules; `contracts/UNIT_TESTING.md` has Bloviate's worked examples and gates. This repo has no instrumented test suite and no screenshot test suite at present.
 
 Static analysis gates merges:
 

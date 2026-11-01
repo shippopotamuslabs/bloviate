@@ -69,7 +69,15 @@ jobs:
           key-password: ${{ secrets.KEY_PASSWORD }}
           strict: "true"
       - name: Print version for this checkout
-        run: ./gradlew :app:printVersion
+        run: |
+          PRINTED=$(./gradlew :app:printVersion --console=plain -q)
+          echo "$PRINTED"
+          VERSION_NAME=$(printf '%s' "$PRINTED" | grep -o 'versionName=[^ ]*' | head -1 | cut -d= -f2)
+          test -n "$VERSION_NAME" || (echo "Could not parse versionName from printVersion output: $PRINTED" && exit 1)
+          # The deploy job reads the version from this file (carried in
+          # the bundle artifact) instead of re-parsing the Gradle build
+          # file: printVersion is the one canonical versionName reader.
+          printf '%s\n' "$VERSION_NAME" > version.txt
       - name: Build signed release bundle and APK
         run: ./gradlew :app:bundleRelease :app:assembleRelease
       - name: Upload release bundle and APK
@@ -80,6 +88,7 @@ jobs:
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk
             .keystore-signed-flag
+            version.txt
           # .keystore-signed-flag is a dotfile: upload-artifact v4 skips
           # hidden files unless told otherwise. deploy-internal
           # hard-fails without this flag, exactly as distribute-internal
@@ -125,20 +134,14 @@ jobs:
           python3 -m venv /tmp/play-env
           /tmp/play-env/bin/pip install --quiet google-api-python-client google-auth
           /tmp/play-env/bin/python scripts/play-upload-internal.py "${AAB_FILES[0]}"
+      # The tag records the FIRST deploy of a versionName
+      # (contracts/RELEASE.md sections 4-5). The versionName arrives in
+      # version.txt from the assemble job's printVersion run — the one
+      # canonical reader — and the branching lives in
+      # scripts/tag-release.sh, not in this YAML.
       - name: Tag the deployed SHA
         run: |
-          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
-          test -n "$VERSION_NAME" || (echo "Could not read versionName from app/build.gradle.kts" && exit 1)
-          TAG="v$VERSION_NAME"
-          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
-            EXISTING=$(git rev-list -n 1 "$TAG")
-            if [ "$EXISTING" = "$GITHUB_SHA" ]; then
-              echo "Tag $TAG already points at the deployed SHA — nothing to do"
-              exit 0
-            fi
-            echo "Tag $TAG already exists at $EXISTING, not the deployed SHA $GITHUB_SHA. Tags are never moved under contracts/RELEASE.md — stop and report."
-            exit 1
-          fi
-          git tag "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
-          echo "Tagged $GITHUB_SHA as $TAG"
+          test -f version.txt || (echo "version.txt missing from the release-bundle artifact" && exit 1)
+          VERSION_NAME=$(tr -d '[:space:]' < version.txt)
+          test -n "$VERSION_NAME" || (echo "version.txt is empty" && exit 1)
+          scripts/tag-release.sh "$VERSION_NAME" "$GITHUB_SHA"

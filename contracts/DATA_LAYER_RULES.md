@@ -4,6 +4,11 @@
 
 Rules for the `data/` package: DataStore preferences, model files and manifests, personal dictionary, dictation history, WorkManager downloads, and mapping. Always enforce together with `ARCHITECTURE_RULES.md`.
 
+> Canon vocabulary (GLO-20): `data/` is this repo's legacy name for the
+> infrastructure layer — persistence is a package inside infrastructure
+> (`contracts/gospel/ARCHITECTURE-GOSPEL.md` §6). The file and package
+> names stay as they are in this repo until the restructure phase.
+
 ---
 
 ## Strict Boundaries
@@ -24,7 +29,7 @@ Rules for the `data/` package: DataStore preferences, model files and manifests,
 - **Personal dictionary:** user replacement map (spoken form → replacement), stored as a versioned file/DataStore entry in `data/`.
 - **Dictation history:** local-only, on-device, user-clearable. Never leaves the device in Phase 1.
 
-If a Room database is ever introduced, it lands in `data/` behind domain ports and Enclave's `DATA_LAYER_RULES.md` (entities, DAOs, repository pattern, schema lock) becomes binding for it — that adoption requires its own ticket.
+If a Room database is ever introduced, it lands in `data/` behind application ports and Enclave's `DATA_LAYER_RULES.md` (entities, DAOs, repository pattern, schema lock) becomes binding for it — that adoption requires its own ticket.
 
 ## 2. Schema Lock & Versioning
 
@@ -35,7 +40,7 @@ If a Room database is ever introduced, it lands in `data/` behind domain ports a
 
 ## 3. Repository Pattern, Mapping & Threading
 
-- Repositories/stores implement `domain/` port interfaces; data sources (DataStore, files, WorkManager) are injected via constructor.
+- Repositories/stores implement `application/` port interfaces (`Repository` survives only as an infrastructure implementation-class name, never as interface vocabulary — see `contracts/gospel/ARCHITECTURE-GOSPEL.md` §3.3, §4); data sources (DataStore, files, WorkManager) are injected via constructor.
 - **Mapping boundaries:** persistence ↔ domain mapping happens entirely in `data/` (repository or dedicated mapper functions). Mappers are pure functions. Domain → presentation mapping happens in ViewModels.
 - **Threading boundaries:** all blocking file IO and hashing is `suspend` + `Dispatchers.IO`. Downloads expose progress as `Flow` from WorkManager state — no callbacks (see `ARCHITECTURE_RULES.md` §0).
 

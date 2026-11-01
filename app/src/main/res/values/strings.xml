@@ -15,6 +15,7 @@
     <string name="setup_status_mic">Allow microphone</string>
     <string name="setup_status_model">Download a voice model</string>
     <string name="setup_status_bubble">Turn the bubble on</string>
+    <string name="setup_status_bubble_not_running">Start the bubble</string>
     <string name="watcher_row_label">Text-field detection</string>
     <string name="watcher_row_sub">Allows Bloviate to see text field focus</string>
     <string name="watcher_row_disconnected_sub">Connection lost · tap to fix in Settings</string>
@@ -31,6 +32,10 @@
     <string name="battery_row_sub">So Android doesn’t put Bloviate to sleep</string>
     <string name="bubble_row_label">Bubble</string>
     <string name="bubble_row_sub">Drag to move · drag down to dismiss</string>
+    <string name="bubble_row_permission_sub">Shows the bubble in text fields</string>
+    <string name="bubble_status_row_label">Bubble status</string>
+    <string name="chip_not_running">Not running</string>
+    <string name="bubble_refresh_description">Start the bubble again</string>
     <string name="autostart_row_label">Start on its own</string>
     <string name="autostart_row_sub">Comes back after a reboot or a system stop</string>
     <string name="bubble_channel_name">Bubble overlay</string>
