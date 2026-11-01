@@ -71,7 +71,7 @@ class FirebaseCustomStyleSyncClient @Inject constructor(
             Log.d(TAG, "custom-styles outcome=ok op=save")
             CustomStyleSyncOutcome.Ok(style)
         } catch (exception: StyleFunctionException) {
-            failed("save", exception.code.toSyncFailure())
+            failed("save", exception.toSaveFailure())
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (exception: Exception) {
@@ -104,8 +104,25 @@ class FirebaseCustomStyleSyncClient @Inject constructor(
         op: String,
         failure: CustomStyleSyncFailure,
     ): CustomStyleSyncOutcome.Failed {
-        Log.d(TAG, "custom-styles outcome=$failure op=$op")
+        Log.d(TAG, "custom-styles outcome=${failure.logName()} op=$op")
         return CustomStyleSyncOutcome.Failed(failure)
+    }
+
+    /**
+     * The save path's failure mapping (BLO-149): an `invalid-argument`
+     * from `saveCustomStyle` carries the server's plain screening
+     * sentence as its message, so it becomes
+     * [CustomStyleSyncFailure.Screened] with the message verbatim
+     * instead of the generic [CustomStyleSyncFailure.Invalid]. A blank
+     * or missing message keeps the generic mapping. The screening
+     * sentence itself is never logged — [logName] carries codes only.
+     */
+    private fun StyleFunctionException.toSaveFailure(): CustomStyleSyncFailure {
+        if (code == "invalid-argument") {
+            val message = message?.takeIf { it.isNotBlank() }
+            if (message != null) return CustomStyleSyncFailure.Screened(message)
+        }
+        return code.toSyncFailure()
     }
 
     private companion object {
@@ -189,6 +206,13 @@ private fun StyleDefinition.toRequestMap(includeId: Boolean): Map<String, Any?> 
         put("sample", sample)
         put("systemInstructions", systemInstructions)
         put("fewShots", fewShots.map { shot -> mapOf("raw" to shot.raw, "styled" to shot.styled) })
+    }
+
+/** The log-safe name of a sync failure: a code only, never the screening sentence. */
+private fun CustomStyleSyncFailure.logName(): String =
+    when (this) {
+        is CustomStyleSyncFailure.Screened -> "Screened"
+        else -> toString()
     }
 
 /** Callable error codes onto sync failures; anything unrecognized is a transport-grade problem. */

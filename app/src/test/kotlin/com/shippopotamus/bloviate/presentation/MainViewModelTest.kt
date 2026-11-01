@@ -1,5 +1,6 @@
 package com.shippopotamus.bloviate.presentation
 
+import app.cash.turbine.ReceiveTurbine
 import app.cash.turbine.test
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.BubbleShape
@@ -27,13 +28,27 @@ import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCas
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
+import com.shippopotamus.bloviate.application.port.AccountDeletionOutcome
+import com.shippopotamus.bloviate.application.port.LastStyledResult
+import com.shippopotamus.bloviate.application.port.OutputReportOutcome
+import com.shippopotamus.bloviate.application.port.OutputReportReason
+import com.shippopotamus.bloviate.application.usecase.ClearLastStyledResultUseCase
+import com.shippopotamus.bloviate.application.usecase.DeleteAccountUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLastStyledResultUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
 import com.shippopotamus.bloviate.application.usecase.StartBubbleIfPresenceAllowsUseCase
+import com.shippopotamus.bloviate.application.usecase.SubmitOutputReportUseCase
 import com.shippopotamus.bloviate.domain.model.OnboardingProgress
 import com.shippopotamus.bloviate.domain.model.OnboardingStep
+import com.shippopotamus.bloviate.testing.FakeAccountDeletionPort
 import com.shippopotamus.bloviate.testing.FakeAuthSession
 import com.shippopotamus.bloviate.testing.FakeBubbleServiceStarterPort
+import com.shippopotamus.bloviate.testing.FakeLastStyledResultPort
+import com.shippopotamus.bloviate.testing.FakeOutputReportPort
+import com.shippopotamus.bloviate.testing.FakeStylePreferencePort
 import com.shippopotamus.bloviate.testing.FakeBatteryExemptionPort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeCustomStyleSyncPort
@@ -85,6 +100,10 @@ class MainViewModelTest {
     private val resolverScope = TestScope(mainDispatcherExtension.testDispatcher)
     private val fakeCustoms = FakeCustomStyleStorePort()
     private val fakeSync = FakeCustomStyleSyncPort()
+    private val fakeDeletion = FakeAccountDeletionPort()
+    private val fakeReport = FakeOutputReportPort()
+    private val fakeLastResult = FakeLastStyledResultPort()
+    private val fakeStylePreference = FakeStylePreferencePort()
     private lateinit var viewModel: MainViewModel
 
     @BeforeEach
@@ -123,6 +142,21 @@ class MainViewModelTest {
             signInWithGoogle = SignInWithGoogleUseCase(auth),
             signOut = SignOutUseCase(auth),
             refreshCustomStyles = RefreshCustomStylesUseCase(sync = fakeSync, customs = fakeCustoms),
+            deleteAccount = DeleteAccountUseCase(
+                deletionPort = fakeDeletion,
+                authSession = auth,
+                customStyleStore = fakeCustoms,
+                stylePreference = fakeStylePreference,
+                lastStyledResult = fakeLastResult,
+            ),
+            submitOutputReport = SubmitOutputReportUseCase(
+                reportPort = fakeReport,
+                lastResultPort = fakeLastResult,
+            ),
+            observeLastStyledResult = ObserveLastStyledResultUseCase(fakeLastResult),
+            observeSelectedStyle = ObserveSelectedStyleUseCase(fakeStylePreference),
+            selectStyle = SelectStyleUseCase(fakeStylePreference),
+            clearLastStyledResult = ClearLastStyledResultUseCase(fakeLastResult),
             startBubbleIfPresenceAllows = StartBubbleIfPresenceAllowsUseCase(
                 onboarding = fakeOnboardingPort,
                 residentPresence = fakeResidentPresencePort,
@@ -740,6 +774,297 @@ class MainViewModelTest {
             advanceUntilIdle()
 
             assertEquals(1, fakeAuthSession.signOutCallCount)
+        }
+
+    // BLO-178: sign-out cache hygiene.
+
+    @Test
+    fun `sign-out resets a custom selection and drops the last styled result`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeStylePreference.setSelected("custom-mine")
+            fakeLastResult.record(sampleLastResult())
+
+            viewModel.onSignOutClick()
+            advanceUntilIdle()
+
+            assertEquals(1, fakeAuthSession.signOutCallCount)
+            assertEquals(
+                com.shippopotamus.bloviate.domain.model.StyleCatalog.DEFAULT.id,
+                fakeStylePreference.selectedStyleId.value,
+            )
+            assertNull(fakeLastResult.lastResult.value)
+        }
+
+    @Test
+    fun `sign-out keeps a built-in selection`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeStylePreference.setSelected("professional")
+
+            viewModel.onSignOutClick()
+            advanceUntilIdle()
+
+            assertEquals("professional", fakeStylePreference.selectedStyleId.value)
+            assertEquals(0, fakeStylePreference.selectCallCount)
+        }
+
+    // BLO-178: account deletion flow.
+
+    private fun stubSignInSuccess() {
+        fakeAuthSession.stubSignIn(
+            Result.success(UserProfile(uid = "uid-1", displayName = null, email = null, photoUrl = null)),
+        )
+    }
+
+    /**
+     * Drains uiState emissions until one matches. The stateIn initial
+     * value (computed before the fakes are seeded) and intermediate
+     * combine emissions make fixed awaitItem counts racy, so the
+     * BLO-178 / BLO-148 tests await by predicate, in action order.
+     */
+    private suspend fun ReceiveTurbine<MainUiState>.awaitState(
+        predicate: (MainUiState) -> Boolean,
+    ): MainUiState {
+        var state = awaitItem()
+        while (!predicate(state)) state = awaitItem()
+        return state
+    }
+
+    @Test
+    fun `deletion re-authenticates first, then deletes and cleans up`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            stubSignInSuccess()
+            val gate = CompletableDeferred<Unit>()
+            fakeAuthSession.signInGate = gate
+            fakeDeletion.outcome = AccountDeletionOutcome.Deleted
+
+            viewModel.uiState.test {
+                viewModel.onDeleteAccountClick()
+                awaitState { it.deletion.step == DeletionStepUi.CONFIRM }
+
+                viewModel.onDeleteAccountContinue()
+                awaitState { it.deletion.step == DeletionStepUi.FINAL }
+
+                viewModel.onDeleteAccountConfirm()
+                awaitState { it.deletion.isDeleting }
+                // The re-auth gate is still closed: the server delete
+                // must not have run yet — re-auth comes first.
+                assertEquals(0, fakeDeletion.callCount)
+
+                gate.complete(Unit)
+                val done = awaitState { !it.deletion.isDeleting }
+                assertEquals(DeletionStepUi.NONE, done.deletion.step)
+                assertTrue(done.deletion.accountDeleted)
+                assertEquals(1, fakeDeletion.callCount)
+                assertEquals(1, fakeCustoms.clearLocalCacheCallCount)
+                assertEquals(1, fakeAuthSession.signOutCallCount)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a re-auth failure stops the deletion with an error on the final step`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeAuthSession.stubSignIn(Result.failure(IOException("timeout")))
+
+            viewModel.uiState.test {
+                viewModel.onDeleteAccountClick()
+                awaitState { it.deletion.step == DeletionStepUi.CONFIRM }
+                viewModel.onDeleteAccountContinue()
+                awaitState { it.deletion.step == DeletionStepUi.FINAL }
+
+                viewModel.onDeleteAccountConfirm()
+                val state = awaitState { it.deletion.error == MSG_DELETE_SIGN_IN_FAILED }
+
+                assertEquals(DeletionStepUi.FINAL, state.deletion.step)
+                assertEquals(0, fakeDeletion.callCount)
+                assertEquals(0, fakeCustoms.clearLocalCacheCallCount)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a re-auth dismissal closes the deletion silently`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeAuthSession.stubSignIn(Result.failure(GetCredentialCancellationException()))
+
+            viewModel.uiState.test {
+                viewModel.onDeleteAccountClick()
+                awaitState { it.deletion.step == DeletionStepUi.CONFIRM }
+                viewModel.onDeleteAccountContinue()
+                awaitState { it.deletion.step == DeletionStepUi.FINAL }
+
+                viewModel.onDeleteAccountConfirm()
+                val state = awaitState {
+                    it.deletion.step == DeletionStepUi.NONE && !it.deletion.isDeleting
+                }
+
+                assertNull(state.deletion.error)
+                assertEquals(0, fakeDeletion.callCount)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a requires-recent-login outcome keeps the final step with its error`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            stubSignInSuccess()
+            fakeDeletion.outcome = AccountDeletionOutcome.RequiresRecentLogin
+
+            viewModel.uiState.test {
+                viewModel.onDeleteAccountClick()
+                awaitState { it.deletion.step == DeletionStepUi.CONFIRM }
+                viewModel.onDeleteAccountContinue()
+                awaitState { it.deletion.step == DeletionStepUi.FINAL }
+
+                viewModel.onDeleteAccountConfirm()
+                val state = awaitState { it.deletion.error == MSG_DELETE_RECENT_LOGIN }
+
+                assertEquals(DeletionStepUi.FINAL, state.deletion.step)
+                assertEquals(0, fakeCustoms.clearLocalCacheCallCount)
+                assertEquals(0, fakeAuthSession.signOutCallCount)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `an unavailable outcome keeps the final step open for retry`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            stubSignInSuccess()
+            fakeDeletion.outcome = AccountDeletionOutcome.Unavailable
+
+            viewModel.uiState.test {
+                viewModel.onDeleteAccountClick()
+                awaitState { it.deletion.step == DeletionStepUi.CONFIRM }
+                viewModel.onDeleteAccountContinue()
+                awaitState { it.deletion.step == DeletionStepUi.FINAL }
+
+                viewModel.onDeleteAccountConfirm()
+                val state = awaitState { it.deletion.error == MSG_DELETE_UNAVAILABLE }
+
+                assertEquals(DeletionStepUi.FINAL, state.deletion.step)
+                assertFalse(state.deletion.accountDeleted)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    // BLO-148: output reporting.
+
+    private fun sampleLastResult(): LastStyledResult = LastStyledResult(
+        styleId = "seneca",
+        sourceTranscript = "the dictated words",
+        styledOutput = "The styled words.",
+        model = "model-x",
+        provider = "provider-y",
+        recordedAtEpochMillis = 4242L,
+    )
+
+    @Test
+    fun `the last styled result surfaces as a last-dictation card state`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeLastResult.record(sampleLastResult())
+
+            viewModel.uiState.test {
+                val state = awaitState { it.lastDictation != null }
+                val card = state.lastDictation
+                assertEquals("seneca", card?.styleId)
+                assertEquals("The styled words.", card?.styledOutput)
+                assertEquals(false, card?.isReported)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `opening the picker sends nothing and a reason tap submits once`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeLastResult.record(sampleLastResult())
+
+            viewModel.uiState.test {
+                viewModel.onReportClick()
+                awaitState { it.report.pickerOpen }
+                assertTrue(fakeReport.requests.isEmpty())
+
+                viewModel.onReportReasonClick(ReportReasonUi.WRONG)
+                val state = awaitState { it.report.reportSent }
+
+                assertFalse(state.report.pickerOpen)
+                assertEquals(true, state.lastDictation?.isReported)
+                val request = fakeReport.requests.single()
+                assertEquals(OutputReportReason.WRONG, request.reason)
+                assertEquals("The styled words.", request.styledOutput)
+                assertEquals("the dictated words", request.sourceTranscript)
+                assertEquals("seneca", request.styleId)
+                assertTrue(request.appVersion.contains("("))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a second reason tap while submitting does not resubmit`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeLastResult.record(sampleLastResult())
+            val gate = CompletableDeferred<Unit>()
+            fakeReport.gate = gate
+
+            viewModel.uiState.test {
+                viewModel.onReportClick()
+                awaitState { it.report.pickerOpen }
+
+                viewModel.onReportReasonClick(ReportReasonUi.OFFENSIVE)
+                awaitState { it.report.isSubmitting }
+
+                viewModel.onReportReasonClick(ReportReasonUi.OFFENSIVE)
+                assertEquals(1, fakeReport.requests.size)
+
+                gate.complete(Unit)
+                awaitState { it.report.reportSent }
+                assertEquals(1, fakeReport.requests.size)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a failed report keeps the picker open and the retry reuses the same report id`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeLastResult.record(sampleLastResult())
+            fakeReport.outcome = OutputReportOutcome.Unavailable
+
+            viewModel.uiState.test {
+                viewModel.onReportClick()
+                awaitState { it.report.pickerOpen }
+
+                viewModel.onReportReasonClick(ReportReasonUi.OTHER)
+                val failed = awaitState { it.report.error == MSG_REPORT_UNAVAILABLE }
+
+                assertTrue(failed.report.pickerOpen)
+
+                fakeReport.outcome = OutputReportOutcome.Submitted(duplicate = false)
+                viewModel.onReportReasonClick(ReportReasonUi.OTHER)
+                val state = awaitState { it.report.reportSent }
+                assertEquals(2, fakeReport.requests.size)
+                assertEquals(
+                    fakeReport.requests[0].clientReportId,
+                    fakeReport.requests[1].clientReportId,
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a signed-out report outcome shows its error in the picker`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            fakeLastResult.record(sampleLastResult())
+            fakeReport.outcome = OutputReportOutcome.SignedOut
+
+            viewModel.uiState.test {
+                viewModel.onReportClick()
+                awaitState { it.report.pickerOpen }
+
+                viewModel.onReportReasonClick(ReportReasonUi.SEXUAL)
+                val state = awaitState { it.report.error == MSG_REPORT_SIGNED_OUT }
+
+                assertTrue(state.report.pickerOpen)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
 
     // BLO-189: the in-app convergence trigger — one USER attempt per

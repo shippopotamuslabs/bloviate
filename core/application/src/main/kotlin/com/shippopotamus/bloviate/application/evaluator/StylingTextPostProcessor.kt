@@ -1,6 +1,8 @@
 package com.shippopotamus.bloviate.application.evaluator
 
 import com.shippopotamus.bloviate.domain.model.StyleKind
+import com.shippopotamus.bloviate.application.port.LastStyledResult
+import com.shippopotamus.bloviate.application.port.LastStyledResultPort
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.application.port.LlmStylePort
 import com.shippopotamus.bloviate.application.port.SendProgressPort
@@ -45,6 +47,7 @@ class StylingTextPostProcessor @Inject constructor(
     private val stylePreference: StylePreferencePort,
     private val llm: LlmStylePort,
     private val resolver: StyleResolver,
+    private val lastStyledResult: LastStyledResultPort,
 ) {
 
     /**
@@ -71,14 +74,31 @@ class StylingTextPostProcessor @Inject constructor(
         }
         progress?.onStage(SendStage.POLISHING)
         return when (val outcome = llm.style(style, localText)) {
-            is LlmStyleOutcome.Styled -> StyleProcessResult(
-                text = outcome.text,
-                styleId = style.id,
-                llmMs = outcome.llmMs,
-                fellBack = false,
-                model = outcome.model,
-                provider = outcome.provider,
-            )
+            is LlmStyleOutcome.Styled -> {
+                // BLO-148: keep this session's reportable record — the
+                // styled output, the local text that was sent for
+                // styling, and the server-reported provenance. Styled
+                // outcomes only: a fallback inserted the local text,
+                // and mechanical styles never reach this branch.
+                lastStyledResult.record(
+                    LastStyledResult(
+                        styleId = style.id,
+                        sourceTranscript = localText,
+                        styledOutput = outcome.text,
+                        model = outcome.model,
+                        provider = outcome.provider,
+                        recordedAtEpochMillis = System.currentTimeMillis(),
+                    ),
+                )
+                StyleProcessResult(
+                    text = outcome.text,
+                    styleId = style.id,
+                    llmMs = outcome.llmMs,
+                    fellBack = false,
+                    model = outcome.model,
+                    provider = outcome.provider,
+                )
+            }
             is LlmStyleOutcome.FellBack -> StyleProcessResult(
                 text = localText,
                 styleId = style.id,

@@ -8,12 +8,24 @@ class StyleFunctionException(
 ) : Exception(message, cause)
 
 /**
+ * The `styleText` callable's answer (BLO-148): the styled text plus the
+ * server-reported [model] and [provider] that produced it, when the
+ * server says (additive response fields; older deployments omit them).
+ */
+data class StyledTextResult(
+    val text: String,
+    val model: String? = null,
+    val provider: String? = null,
+)
+
+/**
  * Calls the deployed `styleText` callable Function (ENC-148/ENC-151).
- * Returns the styled text; throws [StyleFunctionException] carrying the
- * callable's error code (e.g. `permission-denied`, `unavailable`).
+ * Returns the styled text and its provenance; throws
+ * [StyleFunctionException] carrying the callable's error code (e.g.
+ * `permission-denied`, `unavailable`).
  */
 interface StyleFunctionGateway {
 
     /** Styles [transcript] with [styleId] via the Function. */
-    suspend fun callStyleText(styleId: String, transcript: String): String
+    suspend fun callStyleText(styleId: String, transcript: String): StyledTextResult
 }

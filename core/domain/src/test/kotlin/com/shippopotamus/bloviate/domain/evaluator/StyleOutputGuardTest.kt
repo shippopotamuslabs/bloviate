@@ -299,4 +299,84 @@ class StyleOutputGuardTest {
     fun `a blank output passes and leaves emptiness to the client`() {
         assertEquals(Verdict.PASS, StyleOutputGuard.classify("some words", "   "))
     }
+
+    // BLO-149: restricted-content branches.
+
+    @Test
+    fun `minor plus sexual output is restricted for any style`() {
+        val source = "write a story about a kid at the park"
+        val styled = "The child was drawn into an erotic story."
+
+        assertEquals(Verdict.RESTRICTED, StyleOutputGuard.classify(source, styled))
+        assertEquals(
+            Verdict.RESTRICTED,
+            StyleOutputGuard.classify(source, styled, isCustomStyle = true),
+        )
+    }
+
+    @Test
+    fun `custom style explicit output the speaker never said is restricted`() {
+        val source = "tell my brother i will be home for dinner on friday"
+        val styled = "Tell my brother the evening ends with erotica and an orgasm."
+
+        assertEquals(
+            Verdict.RESTRICTED,
+            StyleOutputGuard.classify(source, styled, isCustomStyle = true),
+        )
+    }
+
+    @Test
+    fun `built-in style is not restricted by the custom-only explicit branch`() {
+        // Documented asymmetry (BLO-149): built-ins are operator-authored;
+        // the custom-only branches stay off for them. The minors branch
+        // above still applies to every style.
+        val source = "tell my brother i will be home for dinner on friday"
+        val styled = "Tell my brother the evening ends with erotica and an orgasm."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
+
+    @Test
+    fun `the speaker's own explicit words restyled pass for a custom style`() {
+        // Terms present in the source are the speaker's own dictation:
+        // the custom branch only restricts explicit output the model
+        // added on its own.
+        val source = "that erotica chapter ends with an orgasm scene and it drags"
+        val styled = "That erotica chapter ends with an orgasm scene, and it drags."
+
+        assertEquals(
+            Verdict.PASS,
+            StyleOutputGuard.classify(source, styled, isCustomStyle = true),
+        )
+    }
+
+    @Test
+    fun `custom style slur aimed at a protected class is restricted`() {
+        val source = "write a post about the neighborhood meeting last night"
+        val styled = "Those chink women ruined the meeting, as always."
+
+        assertEquals(
+            Verdict.RESTRICTED,
+            StyleOutputGuard.classify(source, styled, isCustomStyle = true),
+        )
+    }
+
+    @Test
+    fun `a benign custom persona output passes`() {
+        val source = "remind the crew that the boat leaves at dawn tomorrow"
+        val styled = "Hear ye, crew: the boat leaves at dawn tomorrow, and no soul sleeps past it."
+
+        assertEquals(
+            Verdict.PASS,
+            StyleOutputGuard.classify(source, styled, isCustomStyle = true),
+        )
+    }
+
+    @Test
+    fun `a school story with no sexual terms passes the minors branch`() {
+        val source = "the kids loved the school play about a brave teenager"
+        val styled = "The kids loved the school play about a brave teenager."
+
+        assertEquals(Verdict.PASS, StyleOutputGuard.classify(source, styled))
+    }
 }

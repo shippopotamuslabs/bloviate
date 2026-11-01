@@ -123,3 +123,58 @@ test("can't help but notice idiom passes", () => {
 test("blank output passes", () => {
   assert.equal(classifyStyleOutput("some words", "   "), "pass");
 });
+
+// ---- BLO-149 restricted verdict -------------------------------------------
+
+test("BLO-149: output joining a minor term with a sexual term is restricted for any style", () => {
+  const source = "tell them about the school play on friday";
+  const styled = "The erotic schoolgirl show is on Friday, do not miss it.";
+  assert.equal(classifyStyleOutput(source, styled), "restricted");
+  assert.equal(classifyStyleOutput(source, styled, { isCustomStyle: true }), "restricted");
+});
+
+test("BLO-149: custom style adding explicit terms the speaker never said is restricted", () => {
+  const source = "the meeting ran long and nothing got decided again";
+  const styled = "The meeting dragged on, an orgasm of bureaucracy, pure erotica.";
+  assert.equal(classifyStyleOutput(source, styled, { isCustomStyle: true }), "restricted");
+  // Built-in styles do not take the custom-only branch.
+  assert.equal(classifyStyleOutput(source, styled), "pass");
+});
+
+test("BLO-149: custom style adding a slur aimed at a protected class is restricted", () => {
+  const source = "my neighbors were loud again last night";
+  assert.equal(
+    classifyStyleOutput(source, "Those chink neighbors were loud again.", {
+      isCustomStyle: true,
+    }),
+    "restricted",
+  );
+});
+
+test("BLO-149 benign: the speaker's own profanity and crude humor pass for custom styles", () => {
+  const source = "damn, that fucking meeting was a shitshow from start to finish";
+  const styled = "Damn, that fucking meeting was a shitshow from start to finish.";
+  assert.equal(classifyStyleOutput(source, styled, { isCustomStyle: true }), "pass");
+});
+
+test("BLO-149 benign: explicit words the speaker dictated themselves restyle as written", () => {
+  const source = "i told him the book is erotica and the orgasm scene is chapter three";
+  const styled = "I told him the book is erotica, and the orgasm scene is chapter three.";
+  assert.equal(classifyStyleOutput(source, styled, { isCustomStyle: true }), "pass");
+});
+
+test("BLO-149 benign: a slur the speaker dictated themselves is not a new attack", () => {
+  const styled = "He called the guy a chink and walked off.";
+  assert.equal(
+    classifyStyleOutput("he called the guy a chink and walked off", styled, {
+      isCustomStyle: true,
+    }),
+    "pass",
+  );
+});
+
+test("BLO-149 benign: an ordinary custom-style rewrite passes", () => {
+  const source = "please tell sarah i will be ten minutes late to lunch";
+  const styled = "Sarah — running ten minutes late to lunch, sorry!";
+  assert.equal(classifyStyleOutput(source, styled, { isCustomStyle: true }), "pass");
+});

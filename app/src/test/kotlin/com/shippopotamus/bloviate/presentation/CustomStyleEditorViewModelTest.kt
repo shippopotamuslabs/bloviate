@@ -348,6 +348,25 @@ class CustomStyleEditorViewModelTest {
         }
 
     @Test
+    fun `a screened save shows the server sentence verbatim`() =
+        runTest(mainDispatcherExtension.testDispatcher) {
+            // BLO-149: the Screened failure's message reaches the UI
+            // state untouched, so the screen can show it as-is.
+            openCreate()
+            fillValidDraft()
+            val sentence = "That style asks for hate toward a protected group. Pick a different voice."
+            fakeSync.saveHandler = { _, _ ->
+                CustomStyleSyncOutcome.Failed(CustomStyleSyncFailure.Screened(sentence))
+            }
+            advanceUntilIdle()
+
+            viewModel.onSaveClick()
+            advanceUntilIdle()
+
+            assertEquals(CustomStyleSaveError.Screened(sentence), viewModel.uiState.value.saveError)
+        }
+
+    @Test
     fun `a dismissed save error stays dismissed until the next save`() =
         runTest(mainDispatcherExtension.testDispatcher) {
             openCreate()

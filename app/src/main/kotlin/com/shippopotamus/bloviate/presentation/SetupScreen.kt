@@ -18,17 +18,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +51,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -63,6 +69,7 @@ import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -107,6 +114,17 @@ fun SetupScreen(
     onBubbleShapeChange: (BubbleShapeUi) -> Unit,
     onBubbleTintChange: (BubbleTintUi) -> Unit,
     onSignOut: () -> Unit,
+    onSignInClick: () -> Unit,
+    onSignInErrorDismiss: () -> Unit,
+    onDeleteAccountClick: () -> Unit,
+    onDeleteAccountContinue: () -> Unit,
+    onDeleteAccountDismiss: () -> Unit,
+    onDeleteAccountConfirm: () -> Unit,
+    onAccountDeletedDismiss: () -> Unit,
+    onReportClick: () -> Unit,
+    onReportDismiss: () -> Unit,
+    onReportReasonClick: (ReportReasonUi) -> Unit,
+    onReportSentDismiss: () -> Unit,
     onRunSetupAgain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -189,12 +207,288 @@ fun SetupScreen(
             )
             AccountCard(
                 auth = uiState.auth,
+                isSigningIn = uiState.isSigningIn,
+                signInError = uiState.signInError,
+                onSignInClick = onSignInClick,
+                onSignInErrorDismiss = onSignInErrorDismiss,
                 onSignOut = onSignOut,
+                onDeleteAccountClick = onDeleteAccountClick,
             )
+            if (uiState.deletion.accountDeleted) {
+                InlineNote(
+                    text = stringResource(R.string.account_deleted_note),
+                    onDismiss = onAccountDeletedDismiss,
+                )
+            }
+            uiState.lastDictation?.let { dictation ->
+                DashboardSectionHeader(
+                    text = stringResource(R.string.setup_section_last_dictation),
+                )
+                LastDictationCard(
+                    dictation = dictation,
+                    reportSent = uiState.report.reportSent &&
+                        uiState.report.reportedKey == dictation.reportKey,
+                    onReportClick = onReportClick,
+                    onReportSentDismiss = onReportSentDismiss,
+                )
+            }
             SetupFooter()
+        }
+        AccountDeletionDialogs(
+            deletion = uiState.deletion,
+            onContinue = onDeleteAccountContinue,
+            onDismiss = onDeleteAccountDismiss,
+            onConfirm = onDeleteAccountConfirm,
+        )
+        if (uiState.report.pickerOpen) {
+            ReportPickerDialog(
+                report = uiState.report,
+                onDismiss = onReportDismiss,
+                onReasonClick = onReportReasonClick,
+            )
         }
     }
 }
+
+/** A quiet inline note with a dismiss: the deletion and report confirmations land here. */
+@Composable
+private fun InlineNote(
+    text: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        TextButton(
+            onClick = onDismiss,
+            shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+            contentPadding = ButtonDefaults.TextButtonContentPadding,
+        ) {
+            Text(text = stringResource(R.string.signin_error_dismiss))
+        }
+    }
+}
+
+/**
+ * This session's last styled dictation (BLO-148): the styled output and
+ * the report entry. The card exists only while a last result does —
+ * nothing is stored, so there is no history here. A reported result
+ * keeps its marker and loses its button.
+ */
+@Composable
+private fun LastDictationCard(
+    dictation: LastDictationUi,
+    reportSent: Boolean,
+    onReportClick: () -> Unit,
+    onReportSentDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DashboardCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.padding(BloviateSpacing.s16),
+            verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+        ) {
+            Text(
+                text = dictation.styledOutput,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = LAST_DICTATION_PREVIEW_LINES,
+                overflow = TextOverflow.Ellipsis,
+            )
+            when {
+                reportSent -> InlineNote(
+                    text = stringResource(R.string.report_sent),
+                    onDismiss = onReportSentDismiss,
+                )
+                dictation.isReported -> Text(
+                    text = stringResource(R.string.report_reported),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Button(
+                    onClick = onReportClick,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.ContentPadding,
+                ) {
+                    Text(text = stringResource(R.string.report_button))
+                }
+            }
+        }
+    }
+}
+
+private const val LAST_DICTATION_PREVIEW_LINES: Int = 4
+
+/**
+ * The two-step account-deletion flow (BLO-178). Step 1 says exactly
+ * what deletion covers and what it does not (the Google Play
+ * subscription), in the published deletion page's terms. Step 2 is the
+ * point of no return: its button carries the destructive color, and
+ * tapping it re-authenticates before the server call runs.
+ */
+@Composable
+private fun AccountDeletionDialogs(
+    deletion: AccountDeletionUi,
+    onContinue: () -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    when (deletion.step) {
+        DeletionStepUi.NONE -> Unit
+        DeletionStepUi.CONFIRM -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(text = stringResource(R.string.delete_account_title)) },
+            text = { Text(text = stringResource(R.string.delete_account_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = onContinue,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(text = stringResource(R.string.delete_account_continue))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismiss,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(text = stringResource(R.string.delete_account_cancel))
+                }
+            },
+        )
+        DeletionStepUi.FINAL -> AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(text = stringResource(R.string.delete_account_final_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8)) {
+                    Text(text = stringResource(R.string.delete_account_final_body))
+                    if (deletion.isDeleting) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text(text = stringResource(R.string.delete_account_deleting))
+                        }
+                    }
+                    deletion.error?.let { error ->
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onConfirm,
+                    enabled = !deletion.isDeleting,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) {
+                    Text(text = stringResource(R.string.delete_account_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !deletion.isDeleting,
+                    shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(text = stringResource(R.string.delete_account_cancel))
+                }
+            },
+        )
+    }
+}
+
+/**
+ * The report reason picker (BLO-148): two taps from the result — this
+ * dialog opens on the first, a reason tap submits on the second. The
+ * top line is the disclosure: what a report sends. While a submission
+ * is in flight the reasons stop answering; a failure keeps the picker
+ * open with its error line so the same tap can retry.
+ */
+@Composable
+private fun ReportPickerDialog(
+    report: ReportUi,
+    onDismiss: () -> Unit,
+    onReasonClick: (ReportReasonUi) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.report_button)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8)) {
+                Text(text = stringResource(R.string.report_disclosure))
+                report.error?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (report.isSubmitting) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(text = stringResource(R.string.report_sending))
+                    }
+                } else {
+                    ReportReasonUi.entries.forEach { reason ->
+                        Text(
+                            text = stringResource(reason.labelRes()),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(role = Role.Button) { onReasonClick(reason) }
+                                .padding(vertical = BloviateSpacing.s12),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !report.isSubmitting,
+                shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                contentPadding = ButtonDefaults.TextButtonContentPadding,
+            ) {
+                Text(text = stringResource(R.string.report_cancel))
+            }
+        },
+    )
+}
+
+private fun ReportReasonUi.labelRes(): Int =
+    when (this) {
+        ReportReasonUi.OFFENSIVE -> R.string.report_reason_offensive
+        ReportReasonUi.SEXUAL -> R.string.report_reason_sexual
+        ReportReasonUi.HATEFUL -> R.string.report_reason_hateful
+        ReportReasonUi.WRONG -> R.string.report_reason_wrong
+        ReportReasonUi.OTHER -> R.string.report_reason_other
+    }
+
 
 /** The header pill: green "Ready to dictate", or the first blocker in gate order (ENC-75). */
 @Composable
@@ -937,35 +1231,115 @@ private fun SetupGuideCard(
 }
 
 /**
- * The signed-in account (ENC-197): who the app is signed in as, with
- * the way out. Shown only while the gate holds a Google session — the
- * launcher shows the sign-in screen otherwise, so there is no
- * signed-out rendering of this card.
+ * The account card (ENC-197; signed-out state added by BLO-178).
+ * Signed in: who the app is signed in as, the way out, and the
+ * delete-account entry. Signed out: the locked-cloud note and the
+ * sign-in action, with its progress and error inline — the shell no
+ * longer gates on a session, so this card is where sign-in lives.
+ * Loading never renders here: the route waits it out.
  */
 @Composable
 private fun AccountCard(
     auth: AuthUi,
+    isSigningIn: Boolean,
+    signInError: String?,
+    onSignInClick: () -> Unit,
+    onSignInErrorDismiss: () -> Unit,
     onSignOut: () -> Unit,
+    onDeleteAccountClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val signedIn = auth as? AuthUi.SignedIn ?: return
-    DashboardCard(modifier = modifier) {
-        DashboardRow(
-            label = signedIn.displayName ?: signedIn.email
-                ?: stringResource(R.string.account_unknown),
-            icon = Icons.Filled.AccountCircle,
-            sub = signedIn.displayName?.let { signedIn.email }
-                ?: stringResource(R.string.account_google),
-            trailing = {
+    when (auth) {
+        AuthUi.Loading -> Unit
+        is AuthUi.SignedIn -> DashboardCard(modifier = modifier) {
+            DashboardRow(
+                label = auth.displayName ?: auth.email
+                    ?: stringResource(R.string.account_unknown),
+                icon = Icons.Filled.AccountCircle,
+                sub = auth.displayName?.let { auth.email }
+                    ?: stringResource(R.string.account_google),
+                trailing = {
+                    Button(
+                        onClick = onSignOut,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.ContentPadding,
+                    ) {
+                        Text(text = stringResource(R.string.account_sign_out))
+                    }
+                },
+            )
+            DashboardRow(
+                label = stringResource(R.string.account_delete_row_label),
+                icon = Icons.Filled.Delete,
+                sub = stringResource(R.string.account_delete_row_sub),
+                dividerAbove = true,
+                trailing = {
+                    Button(
+                        onClick = onDeleteAccountClick,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.ContentPadding,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) {
+                        Text(text = stringResource(R.string.account_delete_row_label))
+                    }
+                },
+            )
+        }
+        AuthUi.SignedOut -> DashboardCard(modifier = modifier) {
+            Column(
+                modifier = Modifier.padding(BloviateSpacing.s16),
+                verticalArrangement = Arrangement.spacedBy(BloviateSpacing.s8),
+            ) {
+                Text(
+                    text = stringResource(R.string.account_signed_out_label),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.account_signed_out_sub),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(BloviateSpacing.s4))
                 Button(
-                    onClick = onSignOut,
+                    onClick = onSignInClick,
                     shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
                     contentPadding = ButtonDefaults.ContentPadding,
+                    enabled = !isSigningIn,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(text = stringResource(R.string.account_sign_out))
+                    if (isSigningIn) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.AccountCircle,
+                            contentDescription = null,
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.signin_button),
+                        modifier = Modifier.padding(start = BloviateSpacing.s8),
+                    )
                 }
-            },
-        )
+                if (signInError != null) {
+                    Text(
+                        text = signInError,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(
+                        onClick = onSignInErrorDismiss,
+                        shapes = ButtonDefaults.shapes(pressedShape = ShippopotamusPressedShape),
+                        contentPadding = ButtonDefaults.TextButtonContentPadding,
+                    ) {
+                        Text(text = stringResource(R.string.signin_error_dismiss))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1040,6 +1414,17 @@ private fun SetupScreenEmptyPreview() {
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
             onSignOut = {},
+            onSignInClick = {},
+            onSignInErrorDismiss = {},
+            onDeleteAccountClick = {},
+            onDeleteAccountContinue = {},
+            onDeleteAccountDismiss = {},
+            onDeleteAccountConfirm = {},
+            onAccountDeletedDismiss = {},
+            onReportClick = {},
+            onReportDismiss = {},
+            onReportReasonClick = {},
+            onReportSentDismiss = {},
             onRunSetupAgain = {},
         )
     }
@@ -1084,6 +1469,17 @@ private fun SetupScreenPopulatedPreview() {
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
             onSignOut = {},
+            onSignInClick = {},
+            onSignInErrorDismiss = {},
+            onDeleteAccountClick = {},
+            onDeleteAccountContinue = {},
+            onDeleteAccountDismiss = {},
+            onDeleteAccountConfirm = {},
+            onAccountDeletedDismiss = {},
+            onReportClick = {},
+            onReportDismiss = {},
+            onReportReasonClick = {},
+            onReportSentDismiss = {},
             onRunSetupAgain = {},
         )
     }
@@ -1122,6 +1518,17 @@ private fun SetupScreenDownloadingPreview() {
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
             onSignOut = {},
+            onSignInClick = {},
+            onSignInErrorDismiss = {},
+            onDeleteAccountClick = {},
+            onDeleteAccountContinue = {},
+            onDeleteAccountDismiss = {},
+            onDeleteAccountConfirm = {},
+            onAccountDeletedDismiss = {},
+            onReportClick = {},
+            onReportDismiss = {},
+            onReportReasonClick = {},
+            onReportSentDismiss = {},
             onRunSetupAgain = {},
         )
     }
@@ -1159,6 +1566,17 @@ private fun SetupScreenOffPreview() {
             onBubbleShapeChange = {},
             onBubbleTintChange = {},
             onSignOut = {},
+            onSignInClick = {},
+            onSignInErrorDismiss = {},
+            onDeleteAccountClick = {},
+            onDeleteAccountContinue = {},
+            onDeleteAccountDismiss = {},
+            onDeleteAccountConfirm = {},
+            onAccountDeletedDismiss = {},
+            onReportClick = {},
+            onReportDismiss = {},
+            onReportReasonClick = {},
+            onReportSentDismiss = {},
             onRunSetupAgain = {},
         )
     }

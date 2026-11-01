@@ -19,7 +19,7 @@ class FirebaseStyleClientTest {
     private val professional = StyleCatalog.byId("professional")
 
     private class FakeStyleFunctionGateway(
-        var result: String = "Styled text.",
+        var result: StyledTextResult = StyledTextResult(text = "Styled text."),
         var failure: Exception? = null,
     ) : StyleFunctionGateway {
         var callCount: Int = 0
@@ -29,7 +29,7 @@ class FirebaseStyleClientTest {
         var lastTranscript: String? = null
             private set
 
-        override suspend fun callStyleText(styleId: String, transcript: String): String {
+        override suspend fun callStyleText(styleId: String, transcript: String): StyledTextResult {
             callCount++
             lastStyleId = styleId
             lastTranscript = transcript
@@ -111,7 +111,7 @@ class FirebaseStyleClientTest {
 
     @Test
     fun `success returns Styled with gateway text`() = runTest {
-        val gateway = FakeStyleFunctionGateway(result = "Polished words.")
+        val gateway = FakeStyleFunctionGateway(result = StyledTextResult(text = "Polished words."))
         val auth = FakeAuthSession()
         val client = FirebaseStyleClient(gateway = gateway, auth = auth, telemetry = FakeStyleTelemetryPort(), clock = { 1_000L })
 
@@ -149,7 +149,7 @@ class FirebaseStyleClientTest {
     fun `success records styled outcome exactly once`() = runTest {
         val telemetry = FakeStyleTelemetryPort()
         val client = FirebaseStyleClient(
-            gateway = FakeStyleFunctionGateway(result = "Polished words."),
+            gateway = FakeStyleFunctionGateway(result = StyledTextResult(text = "Polished words.")),
             auth = FakeAuthSession(),
             telemetry = telemetry,
             clock = { 0L },
@@ -228,6 +228,33 @@ class FirebaseStyleClientTest {
     }
 
     @Test
+    fun `server provenance rides into the Styled outcome`() = runTest {
+        // BLO-148: the callable's additive model/provider fields reach
+        // the outcome that the session's last-result record is built from.
+        val gateway = FakeStyleFunctionGateway(
+            result = StyledTextResult(text = "Polished words.", model = "model-x", provider = "provider-y"),
+        )
+        val client = FirebaseStyleClient(gateway = gateway, auth = FakeAuthSession(), telemetry = FakeStyleTelemetryPort(), clock = { 5L })
+
+        val outcome = client.style(professional, "raw words") as LlmStyleOutcome.Styled
+
+        assertEquals("Polished words.", outcome.text)
+        assertEquals("model-x", outcome.model)
+        assertEquals("provider-y", outcome.provider)
+    }
+
+    @Test
+    fun `missing provenance reads as null, not a failure`() = runTest {
+        val gateway = FakeStyleFunctionGateway(result = StyledTextResult(text = "Polished words."))
+        val client = FirebaseStyleClient(gateway = gateway, auth = FakeAuthSession(), telemetry = FakeStyleTelemetryPort(), clock = { 5L })
+
+        val outcome = client.style(professional, "raw words") as LlmStyleOutcome.Styled
+
+        assertEquals(null, outcome.model)
+        assertEquals(null, outcome.provider)
+    }
+
+    @Test
     fun `blank text records nothing`() = runTest {
         val telemetry = FakeStyleTelemetryPort()
         val client = FirebaseStyleClient(
@@ -247,7 +274,7 @@ class FirebaseStyleClientTest {
     fun `throwing telemetry never changes the styled outcome`() = runTest {
         val telemetry = FakeStyleTelemetryPort(failure = IllegalStateException("telemetry down"))
         val client = FirebaseStyleClient(
-            gateway = FakeStyleFunctionGateway(result = "Polished words."),
+            gateway = FakeStyleFunctionGateway(result = StyledTextResult(text = "Polished words.")),
             auth = FakeAuthSession(),
             telemetry = telemetry,
             clock = { 0L },

@@ -14,7 +14,7 @@ class FirebaseStyleFunctionGateway @Inject constructor() : StyleFunctionGateway 
 
     private val functions: FirebaseFunctions by lazy { FirebaseFunctions.getInstance() }
 
-    override suspend fun callStyleText(styleId: String, transcript: String): String {
+    override suspend fun callStyleText(styleId: String, transcript: String): StyledTextResult {
         val data = try {
             suspendCancellableCoroutine<Any?> { continuation ->
                 functions.getHttpsCallable(FUNCTION_NAME)
@@ -43,9 +43,16 @@ class FirebaseStyleFunctionGateway @Inject constructor() : StyleFunctionGateway 
         } catch (exception: Exception) {
             throw StyleFunctionException(code = "transport-error", message = exception.message, cause = exception)
         }
-        val styledText = (data as? Map<*, *>)?.get("styledText") as? String
+        val payload = data as? Map<*, *>
+        val styledText = payload?.get("styledText") as? String
         if (styledText.isNullOrBlank()) throw StyleFunctionException(code = "bad-response")
-        return styledText
+        // BLO-148: model/provider are additive and optional — a missing
+        // or mistyped value reads as unknown provenance, never a failure.
+        return StyledTextResult(
+            text = styledText,
+            model = payload?.get("model") as? String,
+            provider = payload?.get("provider") as? String,
+        )
     }
 
     private companion object {

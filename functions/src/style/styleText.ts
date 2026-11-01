@@ -4,6 +4,7 @@ import { assertUserEntitled } from "../entitlement/assertEntitled";
 import { createLogger } from "../observability/structuredLog";
 import { styleTextSessionId } from "../openrouterSession";
 import { fetchCustomStyleDoc, GOOGLE_PROVIDER_ID } from "./customStyleStore";
+import { screenCustomStyleFields } from "./customStyleScreening";
 import { styleById, type StyleDefinition } from "./styleCatalog";
 import { buildStylePrompt } from "./stylePromptBuilder";
 import {
@@ -66,7 +67,9 @@ export type StyleTextDeps = {
 
 export function createStyleTextHandler(
   deps: StyleTextDeps,
-): (request: { auth?: StyleTextAuth | null; data: unknown }) => Promise<{ styledText: string }> {
+): (
+  request: { auth?: StyleTextAuth | null; data: unknown },
+) => Promise<{ styledText: string; model: string; provider: string | null }> {
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) {
@@ -100,6 +103,26 @@ export function createStyleTextHandler(
       if (!custom) {
         throw new HttpsError("invalid-argument", "Unknown styleId.");
       }
+      // BLO-149: legacy custom styles were saved before save-time
+      // screening existed, so the read path screens too. A hit refuses
+      // the call with the same plain message the save path returns;
+      // the user can edit or delete the style. Log carries codes only.
+      const legacyHit = screenCustomStyleFields({
+        displayName: custom.displayName,
+        description: custom.description,
+        systemInstructions: custom.systemInstructions,
+      });
+      if (legacyHit) {
+        deps.log({
+          uidHash,
+          styleId,
+          outcome: "screened-legacy",
+          screeningCode: legacyHit.code,
+        });
+        throw new HttpsError("invalid-argument", legacyHit.message, {
+          screeningCode: legacyHit.code,
+        });
+      }
       style = custom;
     }
     if (!style) {
@@ -113,6 +136,7 @@ export function createStyleTextHandler(
         system: prompt.system,
         user: prompt.user,
         sourceText: transcript,
+        isCustomStyle: style.category === "custom",
         now: deps.now,
       });
     } catch (err) {
@@ -169,7 +193,10 @@ export function createStyleTextHandler(
         estimatedCostUsd: last.estimatedCostUsd,
       });
     }
-    return { styledText: result.text };
+    // BLO-148: model/provider ride along so the client can attach real
+    // provenance to a user-initiated report. Additive fields only; the
+    // styledText contract is unchanged.
+    return { styledText: result.text, model: result.model, provider: result.provider ?? null };
   };
 }
 

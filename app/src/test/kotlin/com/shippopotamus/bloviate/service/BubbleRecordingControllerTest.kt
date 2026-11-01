@@ -10,6 +10,7 @@ import com.shippopotamus.bloviate.application.evaluator.StylingTextPostProcessor
 import com.shippopotamus.bloviate.application.port.LlmStyleOutcome
 import com.shippopotamus.bloviate.testing.FakeCustomStyleStorePort
 import com.shippopotamus.bloviate.testing.FakeEnginePreferencePort
+import com.shippopotamus.bloviate.testing.FakeLastStyledResultPort
 import com.shippopotamus.bloviate.testing.FakeLlmStylePort
 import com.shippopotamus.bloviate.testing.FakeModelStorePort
 import com.shippopotamus.bloviate.testing.FakeParakeetModelStorePort
@@ -58,6 +59,7 @@ class BubbleRecordingControllerTest {
                 stylePreference = fakeStylePreference,
                 llm = fakeLlm,
                 resolver = StyleResolver(store = fakeCustoms, scope = scope),
+                lastStyledResult = FakeLastStyledResultPort(),
             ),
             transcriptSink = fakeSink,
             enginePreference = fakeEnginePreference,

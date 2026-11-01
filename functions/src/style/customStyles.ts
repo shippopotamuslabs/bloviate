@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { assertUserEntitled } from "../entitlement/assertEntitled";
+import { screenCustomStyleFields } from "./customStyleScreening";
 import { createLogger } from "../observability/structuredLog";
 import { hashUid } from "./styleText";
 import {
@@ -165,6 +166,26 @@ export function createSaveCustomStyleHandler(deps: CustomStylesDeps) {
         deps.log({ uidHash, op: "save", outcome: err instanceof HttpsError ? err.code : "entitlement-error" });
         throw err;
       }
+      // BLO-149: screen name/description/instructions for the restricted
+      // set before any write. The log carries the outcome code only —
+      // never the screened text.
+      const screeningHit = screenCustomStyleFields({
+        displayName: definition.displayName,
+        description: definition.description,
+        systemInstructions: definition.systemInstructions,
+      });
+      if (screeningHit) {
+        deps.log({
+          uidHash,
+          op: "save",
+          outcome: "screened",
+          screeningCode: screeningHit.code,
+          field: screeningHit.field,
+        });
+        throw new HttpsError("invalid-argument", screeningHit.message, {
+          screeningCode: screeningHit.code,
+        });
+      }
       const now = (deps.now ?? Date.now)();
       const newId = deps.newId ?? (() => `custom-${randomUUID()}`);
       if (definition.id === undefined) {
@@ -206,6 +227,13 @@ export function createSaveCustomStyleHandler(deps: CustomStylesDeps) {
     } catch (err) {
       if (err instanceof HttpsError && err.code === "permission-denied") {
         // Already logged at the entitlement site above; avoid double logging.
+        throw err;
+      }
+      if (
+        err instanceof HttpsError &&
+        typeof (err.details as { screeningCode?: unknown } | undefined)?.screeningCode === "string"
+      ) {
+        // BLO-149 screening rejection: already logged with its code above.
         throw err;
       }
       fail(deps, uidHash, "save", err);

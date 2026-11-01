@@ -2,22 +2,33 @@ package com.shippopotamus.bloviate.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.shippopotamus.bloviate.BuildConfig
+import com.shippopotamus.bloviate.application.port.AccountDeletionOutcome
 import com.shippopotamus.bloviate.application.port.AuthState
 import com.shippopotamus.bloviate.application.port.BubbleStartRequest
+import com.shippopotamus.bloviate.application.port.LastStyledResult
 import com.shippopotamus.bloviate.application.port.LiveSetupState
+import com.shippopotamus.bloviate.application.port.OutputReportReason
 import com.shippopotamus.bloviate.application.usecase.EnsureModelUseCase
 import com.shippopotamus.bloviate.application.usecase.EnsureParakeetModelUseCase
 import com.shippopotamus.bloviate.application.usecase.IsBatteryOptimizationExemptUseCase
 import com.shippopotamus.bloviate.application.usecase.IsFieldWatcherEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.IsMicPermissionGrantedUseCase
 import com.shippopotamus.bloviate.application.usecase.IsOverlayPermissionGrantedUseCase
+import com.shippopotamus.bloviate.application.usecase.ClearLastStyledResultUseCase
+import com.shippopotamus.bloviate.application.usecase.DeleteAccountUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveLastStyledResultUseCase
 import com.shippopotamus.bloviate.application.usecase.ObserveLiveSetupStateUseCase
+import com.shippopotamus.bloviate.application.usecase.ObserveSelectedStyleUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStartUseCase
 import com.shippopotamus.bloviate.application.usecase.RecordBubbleUserStopUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshCustomStylesUseCase
 import com.shippopotamus.bloviate.application.usecase.RefreshMicPermissionUseCase
 import com.shippopotamus.bloviate.application.usecase.SaveBubbleAppearanceUseCase
 import com.shippopotamus.bloviate.application.usecase.SelectEngineUseCase
+import com.shippopotamus.bloviate.application.usecase.SelectStyleUseCase
+import com.shippopotamus.bloviate.application.usecase.SubmitOutputReportOutcome
+import com.shippopotamus.bloviate.application.usecase.SubmitOutputReportUseCase
 import com.shippopotamus.bloviate.application.usecase.SetAutoStartEnabledUseCase
 import com.shippopotamus.bloviate.application.usecase.SignInWithGoogleUseCase
 import com.shippopotamus.bloviate.application.usecase.SignOutUseCase
@@ -26,6 +37,7 @@ import com.shippopotamus.bloviate.domain.evaluator.BubbleServiceStartPolicy
 import com.shippopotamus.bloviate.domain.model.BubbleAppearance
 import com.shippopotamus.bloviate.domain.model.DictationEngine
 import com.shippopotamus.bloviate.domain.model.ModelState
+import com.shippopotamus.bloviate.domain.model.StyleCatalog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +48,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -68,6 +81,12 @@ class MainViewModel @Inject constructor(
     private val signInWithGoogle: SignInWithGoogleUseCase,
     private val signOut: SignOutUseCase,
     private val refreshCustomStyles: RefreshCustomStylesUseCase,
+    private val deleteAccount: DeleteAccountUseCase,
+    private val submitOutputReport: SubmitOutputReportUseCase,
+    private val observeLastStyledResult: ObserveLastStyledResultUseCase,
+    private val observeSelectedStyle: ObserveSelectedStyleUseCase,
+    private val selectStyle: SelectStyleUseCase,
+    private val clearLastStyledResult: ClearLastStyledResultUseCase,
     private val startBubbleIfPresenceAllows: StartBubbleIfPresenceAllowsUseCase,
 ) : ViewModel() {
 
@@ -115,6 +134,35 @@ class MainViewModel @Inject constructor(
      */
     private val signInUi = MutableStateFlow(SignInUi())
 
+    /** Transient account-deletion surface state (BLO-178): dialog step, progress, error, deleted note. */
+    private val deletionUi = MutableStateFlow(AccountDeletionUi())
+
+    /** Transient output-report surface state (BLO-148): picker, progress, error, reported marker. */
+    private val reportUi = MutableStateFlow(ReportUi())
+
+    /**
+     * The idempotency id for the current picker session (BLO-148):
+     * generated when the picker opens for a result, reused by every
+     * retry of that session, and dropped after a successful submit, so
+     * a double-tap or a retry can never duplicate the report server-side.
+     */
+    private var clientReportId: String? = null
+    private var clientReportKey: String? = null
+
+    /** The transient slices as one group for the [uiState] combine. */
+    private data class TransientUi(
+        val signIn: SignInUi,
+        val deletion: AccountDeletionUi,
+        val report: ReportUi,
+    )
+
+    private val transientUi = combine(
+        signInUi,
+        deletionUi,
+        reportUi,
+        ::TransientUi,
+    )
+
     /**
      * The four permission re-reads as one local slice: settings-posture
      * reads refreshed on resume (watcher enablement and battery
@@ -140,7 +188,8 @@ class MainViewModel @Inject constructor(
     val uiState: StateFlow<MainUiState> = combine(
         observeLiveSetupState(),
         permissionReads,
-        signInUi,
+        transientUi,
+        observeLastStyledResult(),
         ::mapToUiState,
     ).stateIn(
         scope = viewModelScope,
@@ -153,7 +202,12 @@ class MainViewModel @Inject constructor(
                 micPermissionGranted = micPermissionGranted.value,
                 batteryExempt = batteryExempt.value,
             ),
-            signIn = signInUi.value,
+            transient = TransientUi(
+                signIn = signInUi.value,
+                deletion = deletionUi.value,
+                report = reportUi.value,
+            ),
+            lastResult = observeLastStyledResult().value,
         ),
     )
 
@@ -280,14 +334,179 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * Sign-out tapped in Setup (ENC-197): the auth listener flips the
-     * gate back to the sign-in screen. Fire-and-forget — the listener
-     * is the source of truth, not this call's result.
+     * Sign-out tapped in Setup (ENC-197; BLO-178): the auth listener
+     * flips the account card to its signed-out state and the owner gate
+     * locks the previous account's cloud styles. On-device dictation
+     * and mechanical styles keep working signed out.
+     *
+     * Cache hygiene: on success this session's last styled result is
+     * dropped (it must never be reported or shown under another
+     * account), and a custom-style selection is reset to the catalog
+     * default — the previous account's cache stays on disk behind the
+     * owner gate, but its selected id must not linger as the visible
+     * selection for the next account. [SignOutUseCase] itself is
+     * unchanged.
      */
     fun onSignOutClick() {
         viewModelScope.launch {
-            signOut()
+            val result = signOut()
+            if (result.isSuccess) {
+                clearLastStyledResult()
+                reportUi.update { ReportUi() }
+                clientReportId = null
+                clientReportKey = null
+                if (observeSelectedStyle().value.startsWith(CUSTOM_STYLE_ID_PREFIX)) {
+                    selectStyle(StyleCatalog.DEFAULT.id)
+                }
+            }
         }
+    }
+
+    /** "Delete account" tapped in Setup (BLO-178): opens confirmation step 1. */
+    fun onDeleteAccountClick() {
+        deletionUi.update {
+            it.copy(step = DeletionStepUi.CONFIRM, error = null, accountDeleted = false)
+        }
+    }
+
+    /** Step 1 confirmed (BLO-178): advances to the final step. Nothing is deleted yet. */
+    fun onDeleteAccountContinue() {
+        deletionUi.update { it.copy(step = DeletionStepUi.FINAL, error = null) }
+    }
+
+    /** Either deletion step dismissed (BLO-178): closes the flow; an in-flight delete keeps running. */
+    fun onDeleteAccountDismiss() {
+        if (deletionUi.value.isDeleting) return
+        deletionUi.update { it.copy(step = DeletionStepUi.NONE, error = null) }
+    }
+
+    /**
+     * Final "Delete account" tapped (BLO-178): re-authenticates first
+     * (a fresh Google sign-in freshens the token's auth time, which the
+     * server requires), then runs the deletion use case.
+     *
+     * A re-auth dismissal closes the flow silently; any other re-auth
+     * failure reports in the dialog and stops — the account was not
+     * deleted. [AccountDeletionOutcome.RequiresRecentLogin] after a
+     * fresh sign-in is rare (a slow Credential Manager round-trip can
+     * still age the token); it reports and stays on the final step for
+     * a retry. [AccountDeletionOutcome.Unavailable] does the same.
+     * [AccountDeletionOutcome.Deleted] closes the flow and leaves the
+     * deleted note on Setup; the auth listener flips the account card
+     * to signed out.
+     */
+    fun onDeleteAccountConfirm() {
+        if (deletionUi.value.isDeleting) return
+        deletionUi.update { it.copy(isDeleting = true, error = null) }
+        viewModelScope.launch {
+            val signInResult = signInWithGoogle()
+            if (signInResult.isFailure) {
+                val failure = signInResult.exceptionOrNull()
+                deletionUi.update {
+                    if (failure != null && failure.isSignInDismissal()) {
+                        it.copy(isDeleting = false, step = DeletionStepUi.NONE, error = null)
+                    } else {
+                        it.copy(isDeleting = false, error = MSG_DELETE_SIGN_IN_FAILED)
+                    }
+                }
+                return@launch
+            }
+            when (deleteAccount()) {
+                AccountDeletionOutcome.Deleted -> {
+                    deletionUi.update { AccountDeletionUi(accountDeleted = true) }
+                    reportUi.update { ReportUi() }
+                    clientReportId = null
+                    clientReportKey = null
+                }
+                AccountDeletionOutcome.RequiresRecentLogin ->
+                    deletionUi.update {
+                        it.copy(isDeleting = false, error = MSG_DELETE_RECENT_LOGIN)
+                    }
+                AccountDeletionOutcome.Unavailable ->
+                    deletionUi.update {
+                        it.copy(isDeleting = false, error = MSG_DELETE_UNAVAILABLE)
+                    }
+                AccountDeletionOutcome.SignedOut ->
+                    deletionUi.update { AccountDeletionUi() }
+            }
+        }
+    }
+
+    /** Dismisses the "Your account was deleted." note on Setup (BLO-178). */
+    fun onAccountDeletedDismiss() {
+        deletionUi.update { it.copy(accountDeleted = false) }
+    }
+
+    /**
+     * "Report this output" tapped on the Last dictation card (BLO-148):
+     * opens the reason picker and mints this picker session's
+     * idempotency id. Opening the picker sends nothing — content leaves
+     * the device only when a reason is tapped.
+     */
+    fun onReportClick() {
+        val last = observeLastStyledResult().value ?: return
+        val key = last.reportKey()
+        if (clientReportId == null || clientReportKey != key) {
+            clientReportId = UUID.randomUUID().toString()
+            clientReportKey = key
+        }
+        reportUi.update { it.copy(pickerOpen = true, error = null, reportSent = false) }
+    }
+
+    /** Picker dismissed without a reason (BLO-148): nothing was sent. */
+    fun onReportDismiss() {
+        if (reportUi.value.isSubmitting) return
+        reportUi.update { it.copy(pickerOpen = false, error = null) }
+    }
+
+    /**
+     * A reason tapped in the picker (BLO-148): submits immediately with
+     * this session's idempotency id. Further taps while a submission is
+     * in flight are ignored, so a double-tap cannot submit twice. A
+     * failure keeps the picker open with an error line and the same id,
+     * ready to retry; a success closes the picker, marks this result
+     * reported, and leaves the sent note on Setup.
+     */
+    fun onReportReasonClick(reason: ReportReasonUi) {
+        val current = reportUi.value
+        if (!current.pickerOpen || current.isSubmitting) return
+        val last = observeLastStyledResult().value ?: run {
+            reportUi.update { ReportUi() }
+            return
+        }
+        val reportId = clientReportId ?: UUID.randomUUID().toString().also { fresh ->
+            clientReportId = fresh
+            clientReportKey = last.reportKey()
+        }
+        val key = last.reportKey()
+        reportUi.update { it.copy(isSubmitting = true, error = null) }
+        viewModelScope.launch {
+            val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+            when (submitOutputReport(reason.toDomain(), appVersion, reportId)) {
+                is SubmitOutputReportOutcome.Submitted -> {
+                    reportUi.update {
+                        ReportUi(reportedKey = key, reportSent = true)
+                    }
+                    clientReportId = null
+                    clientReportKey = null
+                }
+                SubmitOutputReportOutcome.NoResult ->
+                    reportUi.update { ReportUi() }
+                SubmitOutputReportOutcome.SignedOut ->
+                    reportUi.update {
+                        it.copy(isSubmitting = false, error = MSG_REPORT_SIGNED_OUT)
+                    }
+                SubmitOutputReportOutcome.Unavailable ->
+                    reportUi.update {
+                        it.copy(isSubmitting = false, error = MSG_REPORT_UNAVAILABLE)
+                    }
+            }
+        }
+    }
+
+    /** Dismisses the "Report sent." note on Setup (BLO-148). */
+    fun onReportSentDismiss() {
+        reportUi.update { it.copy(reportSent = false) }
     }
 
     /** Re-reads the system settings; called when the screen resumes after a settings detour. */
@@ -311,7 +530,8 @@ class MainViewModel @Inject constructor(
     private fun mapToUiState(
         live: LiveSetupState,
         permissions: PermissionReads,
-        signIn: SignInUi,
+        transient: TransientUi,
+        lastResult: LastStyledResult?,
     ): MainUiState =
         MainUiState(
             watcherEnabled = permissions.watcherEnabled,
@@ -320,8 +540,8 @@ class MainViewModel @Inject constructor(
             bubbleServiceRunning = live.bubbleServiceRunning,
             micPermissionGranted = permissions.micPermissionGranted,
             auth = live.authState.toUi(),
-            isSigningIn = signIn.isSigningIn,
-            signInError = signIn.signInError,
+            isSigningIn = transient.signIn.isSigningIn,
+            signInError = transient.signIn.signInError,
             whisperModelStatus = mapModelStatus(live.whisperModelState),
             parakeetModelStatus = mapModelStatus(live.parakeetModelState),
             selectedEngine = mapEngine(live.selectedEngine),
@@ -330,6 +550,16 @@ class MainViewModel @Inject constructor(
             bubbleEnabled = !live.residentPresence.userStopped,
             autoStartEnabled = live.residentPresence.autoStartEnabled,
             batteryExempt = permissions.batteryExempt,
+            deletion = transient.deletion,
+            report = transient.report,
+            lastDictation = lastResult?.let { result ->
+                LastDictationUi(
+                    styleId = result.styleId,
+                    styledOutput = result.styledOutput,
+                    reportKey = result.reportKey(),
+                    isReported = transient.report.reportedKey == result.reportKey(),
+                )
+            },
         )
 
     private fun mapModelStatus(modelState: ModelState): ModelUiStatus =
@@ -341,12 +571,6 @@ class MainViewModel @Inject constructor(
                 )
             ModelState.Ready -> ModelUiStatus.Ready
             is ModelState.Failed -> ModelUiStatus.Failed(reason = modelState.reason)
-        }
-
-    private fun mapEngine(engine: DictationEngine): DictationEngineUi =
-        when (engine) {
-            DictationEngine.WHISPER -> DictationEngineUi.WHISPER
-            DictationEngine.PARAKEET -> DictationEngineUi.PARAKEET
         }
 
     /**
@@ -367,8 +591,37 @@ class MainViewModel @Inject constructor(
     private companion object {
         const val STATE_SHARING_TIMEOUT_MS = 5_000L
         const val PERCENT_MAX = 100
+        const val CUSTOM_STYLE_ID_PREFIX = "custom-"
     }
 }
+
+/** The identity a report is keyed by: when it was recorded plus which style produced it. */
+private fun LastStyledResult.reportKey(): String = "$recordedAtEpochMillis:$styleId"
+
+private fun ReportReasonUi.toDomain(): OutputReportReason =
+    when (this) {
+        ReportReasonUi.OFFENSIVE -> OutputReportReason.OFFENSIVE
+        ReportReasonUi.SEXUAL -> OutputReportReason.SEXUAL
+        ReportReasonUi.HATEFUL -> OutputReportReason.HATEFUL
+        ReportReasonUi.WRONG -> OutputReportReason.WRONG
+        ReportReasonUi.OTHER -> OutputReportReason.OTHER
+    }
+
+private fun mapEngine(engine: DictationEngine): DictationEngineUi =
+    when (engine) {
+        DictationEngine.WHISPER -> DictationEngineUi.WHISPER
+        DictationEngine.PARAKEET -> DictationEngineUi.PARAKEET
+    }
+
+// User-facing deletion/report copy (English), in the GoogleSignInErrorMapper pattern.
+internal const val MSG_DELETE_SIGN_IN_FAILED = "Sign-in failed. Your account was not deleted."
+internal const val MSG_DELETE_RECENT_LOGIN = "Sign-in is too old. Sign in again and retry."
+internal const val MSG_DELETE_UNAVAILABLE =
+    "Could not reach the server. Your account was not deleted. Try again."
+internal const val MSG_REPORT_SIGNED_OUT = "You are signed out. Sign in to send a report."
+internal const val MSG_REPORT_UNAVAILABLE =
+    "Could not send the report. Check your connection and try again."
+
 
 /** Transient sign-in surface state: never persisted (ENC-197). */
 private data class SignInUi(

@@ -548,6 +548,7 @@ class CustomStyleEditorViewModel @Inject constructor(
             CustomStyleSyncFailure.Conflict -> CustomStyleSaveError.CONFLICT
             CustomStyleSyncFailure.LimitReached -> CustomStyleSaveError.LIMIT_REACHED
             CustomStyleSyncFailure.Unavailable -> CustomStyleSaveError.UNAVAILABLE
+            is CustomStyleSyncFailure.Screened -> CustomStyleSaveError.Screened(message)
         }
 
     private companion object {

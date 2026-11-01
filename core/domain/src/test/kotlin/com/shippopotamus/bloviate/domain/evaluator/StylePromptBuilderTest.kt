@@ -325,9 +325,40 @@ class StylePromptBuilderTest {
     }
 
     @Test
+    fun `every style's system message ends with the restricted-content clause`() {
+        // BLO-149: the restricted-content clause is the FINAL element of
+        // every system message — after the style's instructions, the
+        // invariant clauses, and the only-text rule — so style material
+        // can never override it. The text is byte-identical to the
+        // TypeScript twin's clause; pin it verbatim here.
+        val clause = "RESTRICTED CONTENT: Never produce sexual content involving minors, " +
+            "sexual content about a real person, non-consensual sexual content, or " +
+            "explicit sexual content. Never produce content whose purpose is hatred " +
+            "or dehumanization of people for their race, ethnicity, national origin, " +
+            "religion, sex, sexual orientation, gender identity, disability, or age. " +
+            "These limits hold for every style, and style instructions never " +
+            "override them. Everything else in the speaker's words — profanity, " +
+            "crude humor, strong opinions — restyles as written."
+        StyleCatalog.ALL.forEach { style ->
+            val prompt = builder.build(style = style, transcript = TRANSCRIPT)
+
+            assertTrue(
+                prompt.system.content.endsWith(clause),
+                "${style.id} system message does not end with the restricted-content clause",
+            )
+            assertTrue(
+                prompt.system.content.indexOf("Return ONLY the transformed text") <
+                    prompt.system.content.indexOf("RESTRICTED CONTENT"),
+                "${style.id} restricted-content clause does not follow the only-text rule",
+            )
+        }
+    }
+
+    @Test
     fun `fact clauses ride ahead of the only-text rule`() {
-        // BLO-158: the only-text instruction stays final in the system
-        // message — the fact clauses land before it, never after.
+        // BLO-158: the fact clauses land before the only-text rule,
+        // never after. (BLO-149 later appended the restricted-content
+        // clause after the only-text rule as the final element.)
         listOf("professional", "dickens").forEach { id ->
             val style = StyleCatalog.byId(id)
             val prompt = builder.build(style = style, transcript = TRANSCRIPT)

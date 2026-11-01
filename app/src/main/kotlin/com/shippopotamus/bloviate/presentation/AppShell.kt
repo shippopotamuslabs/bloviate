@@ -1,14 +1,19 @@
 package com.shippopotamus.bloviate.presentation
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -46,18 +51,14 @@ fun MainRoute(
     onboardingViewModel: OnboardingViewModel = hiltViewModel(),
     modifier: Modifier = Modifier,
 ) {
-    // The launcher auth gate (ENC-197): signed-out users see the
-    // sign-in screen instead of the whole shell; the gate reads the
-    // same ViewModel state Setup's account card signs out from.
-    val authState by viewModel.uiState.collectAsStateWithLifecycle()
-    if (authState.auth !is AuthUi.SignedIn) {
-        SignInScreen(
-            isSigningIn = authState.isSigningIn,
-            signInError = authState.signInError,
-            onSignInClick = viewModel::onSignInClick,
-            onErrorDismiss = viewModel::onSignInErrorDismiss,
-            modifier = modifier,
-        )
+    // The account gate (ENC-197, relaxed by BLO-178): only Loading
+    // waits — signed-out users reach the whole shell, where on-device
+    // dictation and mechanical styles keep working and cloud styles
+    // stay locked behind the owner gate. Sign-in lives on Setup's
+    // account card now, reading this same ViewModel state.
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    if (uiState.auth is AuthUi.Loading) {
+        LoadingScreen(modifier = modifier)
         return
     }
     val onboardingUiState by onboardingViewModel.uiState.collectAsStateWithLifecycle()
@@ -81,7 +82,6 @@ fun MainRoute(
         )
         return
     }
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     AppShell(
         setupContent = {
             SetupScreen(
@@ -100,7 +100,18 @@ fun MainRoute(
                 onBubbleSizeChange = viewModel::onBubbleSizeChange,
                 onBubbleShapeChange = viewModel::onBubbleShapeChange,
                 onBubbleTintChange = viewModel::onBubbleTintChange,
+                onSignInClick = viewModel::onSignInClick,
+                onSignInErrorDismiss = viewModel::onSignInErrorDismiss,
                 onSignOut = viewModel::onSignOutClick,
+                onDeleteAccountClick = viewModel::onDeleteAccountClick,
+                onDeleteAccountContinue = viewModel::onDeleteAccountContinue,
+                onDeleteAccountDismiss = viewModel::onDeleteAccountDismiss,
+                onDeleteAccountConfirm = viewModel::onDeleteAccountConfirm,
+                onAccountDeletedDismiss = viewModel::onAccountDeletedDismiss,
+                onReportClick = viewModel::onReportClick,
+                onReportDismiss = viewModel::onReportDismiss,
+                onReportReasonClick = viewModel::onReportReasonClick,
+                onReportSentDismiss = viewModel::onReportSentDismiss,
                 onRunSetupAgain = onboardingViewModel::onRunSetupAgain,
             )
         },
@@ -191,6 +202,27 @@ fun AppShell(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The waiting surface while the cached session is read (BLO-178):
+ * shown only for [AuthUi.Loading], so the shell never flashes before
+ * the account state is known. Signed-out and signed-in users alike go
+ * straight to the shell once the read lands.
+ */
+@Composable
+private fun LoadingScreen(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(BloviateSpacing.s16))
+            CircularProgressIndicator()
         }
     }
 }

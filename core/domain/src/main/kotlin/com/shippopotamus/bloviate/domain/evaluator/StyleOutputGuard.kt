@@ -54,20 +54,70 @@ object StyleOutputGuard {
         PASS,
         REFUSAL,
         FIDELITY_LOSS,
+
+        /**
+         * Restricted content (BLO-149): the output carries a minor term
+         * with a sexual term (any style), or — for custom styles only —
+         * explicit sexual terms or a slur aimed at a protected class
+         * that the speaker's own words did not contain.
+         */
+        RESTRICTED,
     }
 
     /**
      * Classifies [styled] (the cleaned model output) against [source]
      * (the local text that was sent for styling). A blank [styled]
      * passes — emptiness is the client's own failure class.
+     *
+     * [isCustomStyle] (BLO-149) turns on the custom-only restricted
+     * branches: built-in styles are operator-authored, while a custom
+     * style's instructions are untrusted user input, so explicit or
+     * slur output the speaker never said is restricted for customs
+     * only. The minors branch applies to every style.
+     *
+     * NOTE: the live guard runs server-side in the style chain; this
+     * twin mirrors it for parity and is not wired into the send path
+     * today. The lexicons below are a small first-pass net, not proof
+     * that all harmful content is caught — they are byte-identical to
+     * the TypeScript twin's lists.
      */
-    fun classify(source: String, styled: String): Verdict {
+    fun classify(source: String, styled: String, isCustomStyle: Boolean = false): Verdict {
         if (styled.isBlank()) return Verdict.PASS
+        if (isRestricted(source = source, styled = styled, isCustomStyle = isCustomStyle)) {
+            return Verdict.RESTRICTED
+        }
         val opening = styled.trim().lowercase().take(OPENING_CHARS)
         if (isRefusal(opening = opening, source = source, styled = styled)) return Verdict.REFUSAL
         if (isWholesaleReplacement(source = source, styled = styled)) return Verdict.FIDELITY_LOSS
         return Verdict.PASS
     }
+
+    /**
+     * The restricted-content judgment (BLO-149). Terms are normalized
+     * lowercase word tokens; a term also matches a token that starts
+     * with it when the term is one of the [STEM_TERMS] stems
+     * ("masturbat" covers masturbating/masturbation).
+     */
+    private fun isRestricted(source: String, styled: String, isCustomStyle: Boolean): Boolean {
+        val styledTokens = wordSet(styled)
+        if (containsAny(styledTokens, MINOR_TERMS) && containsAny(styledTokens, SEXUAL_TERMS)) {
+            return true
+        }
+        if (!isCustomStyle) return false
+        val sourceTokens = wordSet(source)
+        val novelExplicit = EXPLICIT_TERMS.filter { term -> !containsTerm(sourceTokens, term) }
+        if (containsAny(styledTokens, novelExplicit)) return true
+        val slurNovel = !containsAny(sourceTokens, SLUR_TERMS)
+        val protectedNovel = !containsAny(sourceTokens, PROTECTED_TERMS)
+        return slurNovel && protectedNovel &&
+            containsAny(styledTokens, SLUR_TERMS) && containsAny(styledTokens, PROTECTED_TERMS)
+    }
+
+    private fun containsAny(tokens: Set<String>, terms: List<String>): Boolean =
+        terms.any { term -> containsTerm(tokens, term) }
+
+    private fun containsTerm(tokens: Set<String>, term: String): Boolean =
+        tokens.any { token -> token == term || (term in STEM_TERMS && token.startsWith(term)) }
 
     /**
      * The wholesale-replacement judgment (ENC-100), gated by
@@ -183,6 +233,41 @@ object StyleOutputGuard {
         "inappropriate content",
         "violates my",
     )
+
+    /**
+     * The BLO-149 restricted lexicons — deliberately small, shared
+     * byte-for-byte with the TypeScript twin. A first-pass net for the
+     * clearest shapes, not a complete moderation system.
+     */
+    private val MINOR_TERMS: List<String> = listOf(
+        "child", "children", "kid", "kids", "minor", "minors", "underage", "teen",
+        "teens", "teenager", "schoolgirl", "schoolboy", "preteen",
+    )
+
+    private val SEXUAL_TERMS: List<String> = listOf(
+        "sex", "sexual", "erotic", "erotica", "porn", "pornographic", "nude",
+        "naked", "aroused", "orgasm", "intercourse", "masturbat", "fetish",
+    )
+
+    /** Explicit-sexual terms for the custom-only runtime branch (BLO-149). */
+    private val EXPLICIT_TERMS: List<String> = listOf(
+        "erotica", "pornographic", "orgasm", "intercourse", "masturbating",
+        "masturbation", "ejaculat", "penetration",
+    )
+
+    /** The strongest slurs only — a blocklist has to contain the words it blocks. */
+    private val SLUR_TERMS: List<String> = listOf(
+        "nigger", "nigga", "faggot", "kike", "spic", "chink", "tranny",
+    )
+
+    private val PROTECTED_TERMS: List<String> = listOf(
+        "black", "white", "asian", "latino", "latina", "hispanic", "african",
+        "jewish", "muslim", "christian", "gay", "lesbian", "transgender",
+        "women", "men", "disabled",
+    )
+
+    /** Lexicon entries that are stems: they also match tokens starting with them. */
+    private val STEM_TERMS: Set<String> = setOf("masturbat", "ejaculat")
 
     private val STOPWORDS: Set<String> = setOf(
         "the", "a", "an", "and", "or", "but", "if", "then", "else", "of", "to", "in", "on",

@@ -48,6 +48,11 @@ import {
   type CompletionFn,
   type StructuredResponseFormat,
 } from "./providerChain";
+import {
+  SCREENING_MESSAGES,
+  screenCustomStyleFields,
+  screenStyleText,
+} from "./customStyleScreening";
 import { hashUid } from "./styleText";
 
 export const GENERATION_TEMPERATURE = 0.7;
@@ -137,6 +142,22 @@ export function createGenerateCustomStyleHandler(deps: GenerateCustomStyleDeps) 
         outcome: err instanceof HttpsError ? err.code : "entitlement-error",
       });
       throw err;
+    }
+
+    // BLO-149: screen the description BEFORE the quota reservation and
+    // any model call, so a restricted purpose costs the user no quota.
+    // Log carries the outcome code only — never the description.
+    const descriptionHit = screenStyleText(description);
+    if (descriptionHit) {
+      deps.log({
+        uidHash,
+        op: "generate",
+        outcome: "screened",
+        screeningCode: descriptionHit,
+      });
+      throw new HttpsError("invalid-argument", SCREENING_MESSAGES[descriptionHit], {
+        screeningCode: descriptionHit,
+      });
     }
 
     const { dayKey, monthKey } = generationDateKeys(now());
@@ -337,6 +358,25 @@ export function createGenerateCustomStyleHandler(deps: GenerateCustomStyleDeps) 
       }
 
       const value: GeneratedStyleDraft = checked.value;
+      // BLO-149: screen the generated draft itself before returning it —
+      // a clean description can still yield a restricted draft.
+      const draftHit = screenCustomStyleFields({
+        displayName: value.displayName,
+        description: value.description,
+        systemInstructions: value.systemInstructions,
+      });
+      if (draftHit) {
+        logAttempts();
+        deps.log({
+          uidHash,
+          op: "generate",
+          outcome: "screened-draft",
+          screeningCode: draftHit.code,
+        });
+        throw new HttpsError("failed-precondition", draftHit.message, {
+          screeningCode: draftHit.code,
+        });
+      }
       successAttempt = allAttempts[allAttempts.length - 1];
       successProvider = finalProvider;
       const draft: GeneratedStylePreview = {

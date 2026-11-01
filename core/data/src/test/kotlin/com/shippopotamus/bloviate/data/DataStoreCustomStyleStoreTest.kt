@@ -242,6 +242,33 @@ class DataStoreCustomStyleStoreTest {
         assertEquals(healed, store.state.value.styles)
     }
 
+    @Test
+    fun `clearLocalCache removes the owner, index, records, and sync stamp`() = runTest {
+        // BLO-178: the deletion wipe. An unrelated preference sharing
+        // the store must survive untouched.
+        store.replaceSnapshot(listOf(record(id = "custom-alpha"), record(id = "custom-beta")))
+        dataStore.edit { preferences ->
+            preferences[stringPreferencesKey("unrelated_key")] = "keep-me"
+        }
+
+        store.clearLocalCache()
+
+        assertEquals(CustomStylesState(styles = emptyList(), isLoaded = true), store.state.value)
+        val snapshot = dataStore.data.first()
+        assertNull(snapshot[stringPreferencesKey("custom_styles_owner_uid")])
+        assertNull(snapshot[stringPreferencesKey("custom_style_ids")])
+        assertNull(snapshot[longPreferencesKey("custom_styles_last_synced_at")])
+        assertNull(snapshot[stringPreferencesKey("custom_style:custom-alpha")])
+        assertNull(snapshot[stringPreferencesKey("custom_style:custom-beta")])
+        assertEquals(1, snapshot[intPreferencesKey("custom_styles_schema_version")])
+        assertEquals("keep-me", snapshot[stringPreferencesKey("unrelated_key")])
+
+        // The wipe survives a fresh store instance, and the deleted
+        // account's records do not resurface when it "signs back in".
+        val reread = DataStoreCustomStyleStore(dataStore, fakeAuth, storeScope)
+        assertEquals(CustomStylesState(styles = emptyList(), isLoaded = true), reread.state.value)
+    }
+
     private fun record(id: String, name: String = "Custom"): CustomStyleRecord =
         CustomStyleRecord(
             definition = StyleDefinition(
